@@ -1,0 +1,46 @@
+body { overflow: auto; }
+.app { padding: 14px 18px 24px; }
+.header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.header h1 { display: inline-flex; align-items: center; gap: 8px; font-size: 1.35em; margin: 0; }
+.header .repo { font-weight: 600; opacity: 0.8; }
+.header .summary { opacity: 0.75; }
+.header .spacer { flex: 1; }
+.help { opacity: 0.65; font-size: 0.9em; margin: 6px 0 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px 12px 16px;
+  border: 1px solid var(--vscode-panel-border);
+  border-left: 4px solid var(--state-color, var(--vscode-panel-border));
+  border-radius: 6px;
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  outline: none;
+  min-width: 0;
+}
+.card:hover { border-color: var(--vscode-focusBorder); border-left-color: var(--state-color, var(--vscode-focusBorder)); }
+.card:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 1px; }
+.card.state-clean { --state-color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b); }
+.card.state-dirty { --state-color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d); }
+.card.state-conflict { --state-color: var(--vscode-gitDecoration-conflictingResourceForeground, #e4676b); }
+.card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.card-head .name { font-weight: 700; font-size: 1.1em; overflow: hidden; text-overflow: ellipsis; }
+.flag { font-size: 0.8em; padding: 0 7px; border-radius: 9px; line-height: 17px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+.flag-current { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.flag-warn { background: transparent; color: var(--vscode-editorWarning-foreground, #cca700); border: 1px solid currentColor; }
+.line { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.line > .icon { opacity: 0.7; }
+.line.path span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mono { font-family: var(--vscode-editor-font-family); font-size: 0.92em; opacity: 0.85; }
+.chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.chips .chip { margin-left: 0; }
+.ahead { color: var(--vscode-charts-blue, #3794ff); font-weight: 600; }
+.behind { color: var(--vscode-charts-orange, #d18616); font-weight: 600; }
+.commit { display: flex; gap: 10px; align-items: center; margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); min-width: 0; }
+.commit-text { min-width: 0; }
+.commit .subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.btn.danger:hover { color: var(--vscode-errorForeground); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+body.vscode-high-contrast .card { border-color: var(--vscode-contrastBorder); }

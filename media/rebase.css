@@ -1,0 +1,52 @@
+body { overflow: auto; }
+.app { padding: 12px 16px 24px; max-width: 1100px; }
+h1 { font-size: 1.3em; margin: 0 0 4px; }
+.sub { opacity: 0.8; margin-bottom: 10px; }
+.toolbar { display: flex; gap: 8px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+.toolbar .spacer { flex: 1; }
+.summary { opacity: 0.85; }
+.help { opacity: 0.75; font-size: 0.92em; margin: 6px 0 12px; }
+kbd {
+  font-family: var(--vscode-editor-font-family);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+.list { border: 1px solid var(--vscode-panel-border); border-radius: 3px; }
+.entry {
+  display: grid;
+  grid-template-columns: 18px 96px 70px minmax(150px, 1fr) 140px 120px;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  outline: none;
+}
+.entry:last-child { border-bottom: none; }
+.entry.focused { background: var(--vscode-list-inactiveSelectionBackground); }
+.entry:focus { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+/* A visible outline too: selection backgrounds can be missing in high-contrast themes. */
+.entry:focus-visible { outline: 1px solid var(--vscode-list-focusOutline, var(--vscode-focusBorder)); outline-offset: -1px; }
+.entry.dragging { opacity: 0.4; }
+.entry.drop-before { box-shadow: inset 0 2px 0 var(--vscode-focusBorder); }
+.entry.drop-after { box-shadow: inset 0 -2px 0 var(--vscode-focusBorder); }
+.entry.folded .subject { padding-left: 18px; }
+.entry.folded .subject::before { content: '↳ '; opacity: 0.6; }
+.entry.a-drop .subject, .entry.a-drop .sha { text-decoration: line-through; opacity: 0.55; }
+.entry.other { grid-template-columns: 18px 1fr; font-family: var(--vscode-editor-font-family); opacity: 0.8; }
+.handle { cursor: grab; opacity: 0.6; user-select: none; text-align: center; }
+.sha { font-family: var(--vscode-editor-font-family); color: var(--vscode-textLink-foreground); cursor: pointer; }
+.sha:hover { text-decoration: underline; }
+.subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.author, .date { opacity: 0.8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+select.action.a-pick { color: var(--vscode-foreground); }
+select.action.a-reword { color: var(--vscode-charts-blue, #3794ff); }
+select.action.a-edit { color: var(--vscode-charts-yellow, #cca700); }
+select.action.a-squash, select.action.a-fixup { color: var(--vscode-charts-purple, #b180d7); }
+select.action.a-drop { color: var(--vscode-charts-red, #f14c4c); }
+.message-editor { grid-column: 3 / -1; display: flex; flex-direction: column; gap: 4px; padding: 4px 0 6px; }
+.message-editor label { opacity: 0.8; font-size: 0.92em; }
+.message-editor textarea { width: 100%; min-height: 70px; resize: vertical; font-family: var(--vscode-editor-font-family); }
+.warning { color: var(--vscode-editorWarning-foreground); margin: 8px 0; }
+
+.pushed { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 8px; font-size: 0.85em; border: 1px solid var(--vscode-charts-orange, #d18616); color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-charts-orange, #d18616) 22%, transparent); }

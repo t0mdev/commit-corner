@@ -1,0 +1,5174 @@
+{
+  "name": "commit-corner",
+  "displayName": "Commit Corner",
+  "description": "A visual Git client for VS Code: commit graph with staging, worktree and pull request review (GitHub.com), multi-commit diffs, line staging, blame, interactive rebase, stashes and worktrees. No runtime dependencies, no telemetry; network access is git itself plus, optionally, GitHub sign-in and the GitHub API for pull request details.",
+  "version": "1.0.0",
+  "publisher": "t0mdev",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.140.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "keywords": [
+    "git",
+    "graph",
+    "blame",
+    "diff",
+    "rebase",
+    "pull request",
+    "history",
+    "worktree",
+    "ai agent",
+    "code review",
+    "commit graph",
+    "staging",
+    "commit message"
+  ],
+  "icon": "media/logo.png",
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onWebviewPanel:commitCorner.graph",
+    "onFileSystem:commitcorner",
+    "onWebviewPanel:commitCorner.activity",
+    "onWebviewPanel:commitCorner.worktreesOverview"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Commit Corner runs git, which can execute hooks and configured programs from the repository."
+    },
+    "virtualWorkspaces": false
+  },
+  "scripts": {
+    "test": "npm run test:unit && npm run test:vscode",
+    "test:unit": "node --test test/*.test.js",
+    "test:vscode": "vscode-test",
+    "test:vscode:min": "vscode-test --label minimum",
+    "test:ui": "vscode-test --label ui",
+    "check": "node scripts/check.js",
+    "audit": "npm audit --audit-level=moderate",
+    "package": "vsce package --no-gitHubIssueLinking",
+    "vscode:prepublish": "npm run check"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "commitCorner.actions",
+        "title": "Actions…",
+        "category": "Commit Corner",
+        "icon": "$(list-flat)"
+      },
+      {
+        "command": "commitCorner.refresh",
+        "title": "Refresh",
+        "category": "Commit Corner",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "commitCorner.openResource",
+        "title": "Open Changes",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.openFile",
+        "title": "Open File",
+        "category": "Commit Corner",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "commitCorner.openHeadFile",
+        "title": "Open File (HEAD)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.openChanges",
+        "title": "Open Changes",
+        "category": "Commit Corner",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "commitCorner.stage",
+        "title": "Stage Changes",
+        "category": "Commit Corner",
+        "icon": "$(add)"
+      },
+      {
+        "command": "commitCorner.unstage",
+        "title": "Unstage Changes",
+        "category": "Commit Corner",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "commitCorner.stageAll",
+        "title": "Stage All Changes",
+        "category": "Commit Corner",
+        "icon": "$(add)"
+      },
+      {
+        "command": "commitCorner.unstageAll",
+        "title": "Unstage All Changes",
+        "category": "Commit Corner",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "commitCorner.discard",
+        "title": "Discard Changes",
+        "category": "Commit Corner",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "commitCorner.discardAll",
+        "title": "Discard All Unstaged Changes",
+        "category": "Commit Corner",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "commitCorner.cleanAll",
+        "title": "Delete All Untracked Files",
+        "category": "Commit Corner",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "commitCorner.ignore",
+        "title": "Add to .gitignore…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.acceptOurs",
+        "title": "Accept Current (Ours)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.acceptTheirs",
+        "title": "Accept Incoming (Theirs)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.openMergeEditor",
+        "title": "Resolve in Merge Editor",
+        "category": "Commit Corner",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "commitCorner.openConflictDiff",
+        "title": "Compare Ours ↔ Theirs",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.commit",
+        "title": "Commit",
+        "category": "Commit Corner",
+        "icon": "$(check)"
+      },
+      {
+        "command": "commitCorner.commitAmend",
+        "title": "Commit (Amend)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.commitSignoff",
+        "title": "Commit (Signed Off)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.commitNoVerify",
+        "title": "Commit (Skip Hooks)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.commitAll",
+        "title": "Commit All Tracked Changes",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.commitEmpty",
+        "title": "Commit (Allow Empty)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.commitAndPush",
+        "title": "Commit & Push",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.commitAndSync",
+        "title": "Commit & Sync",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.undoLastCommit",
+        "title": "Undo Last Commit",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.recentMessage",
+        "title": "Reuse a Recent Commit Message…",
+        "category": "Commit Corner",
+        "icon": "$(history)"
+      },
+      {
+        "command": "commitCorner.continueOperation",
+        "title": "Continue Merge / Rebase / Cherry-pick",
+        "category": "Commit Corner",
+        "icon": "$(debug-continue)"
+      },
+      {
+        "command": "commitCorner.abortOperation",
+        "title": "Abort Merge / Rebase / Cherry-pick",
+        "category": "Commit Corner",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "commitCorner.skipOperation",
+        "title": "Skip Current Commit (Rebase / Cherry-pick)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.operationMenu",
+        "title": "Merge / Rebase in Progress…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.stageSelectedRanges",
+        "title": "Stage Selected Lines",
+        "category": "Commit Corner",
+        "icon": "$(add)"
+      },
+      {
+        "command": "commitCorner.stageChange",
+        "title": "Stage Change",
+        "category": "Commit Corner",
+        "icon": "$(add)"
+      },
+      {
+        "command": "commitCorner.unstageSelectedRanges",
+        "title": "Unstage Selected Lines",
+        "category": "Commit Corner",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "commitCorner.unstageChange",
+        "title": "Unstage Change",
+        "category": "Commit Corner",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "commitCorner.revertSelectedRanges",
+        "title": "Discard Selected Lines",
+        "category": "Commit Corner",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "commitCorner.revertChange",
+        "title": "Discard Change",
+        "category": "Commit Corner",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "commitCorner.checkout",
+        "title": "Checkout…",
+        "category": "Commit Corner",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "commitCorner.checkoutDetached",
+        "title": "Checkout (Detached HEAD)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.createBranch",
+        "title": "Create Branch…",
+        "category": "Commit Corner",
+        "icon": "$(plus)"
+      },
+      {
+        "command": "commitCorner.createBranchFrom",
+        "title": "Create Branch From…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.deleteBranch",
+        "title": "Delete Branch…",
+        "category": "Commit Corner",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "commitCorner.deleteRemoteBranch",
+        "title": "Delete Remote Branch…",
+        "category": "Commit Corner",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "commitCorner.renameBranch",
+        "title": "Rename Branch…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.merge",
+        "title": "Merge into Current Branch…",
+        "category": "Commit Corner",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "commitCorner.rebase",
+        "title": "Rebase Current Branch onto…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.setUpstream",
+        "title": "Set Upstream Branch…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.reset",
+        "title": "Reset Current Branch to…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.cherryPick",
+        "title": "Cherry-pick",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.cherryPickNoCommit",
+        "title": "Cherry-pick (Without Committing)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.revert",
+        "title": "Revert Commit",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.createTag",
+        "title": "Create Tag…",
+        "category": "Commit Corner",
+        "icon": "$(tag)"
+      },
+      {
+        "command": "commitCorner.deleteTag",
+        "title": "Delete Tag…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.pushTag",
+        "title": "Push Tag…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.deleteRemoteTag",
+        "title": "Delete Tag on Remote…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.fetch",
+        "title": "Fetch",
+        "category": "Commit Corner",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "commitCorner.pull",
+        "title": "Pull",
+        "category": "Commit Corner",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "commitCorner.pullRebase",
+        "title": "Pull (Rebase)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.push",
+        "title": "Push",
+        "category": "Commit Corner",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "commitCorner.pushForce",
+        "title": "Push (Force with Lease)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.sync",
+        "title": "Sync (Pull & Push)",
+        "category": "Commit Corner",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "commitCorner.addRemote",
+        "title": "Add Remote…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.removeRemote",
+        "title": "Remove Remote…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.renameRemote",
+        "title": "Rename Remote…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.setRemoteUrl",
+        "title": "Change Remote URL…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.showCommit",
+        "title": "Show Commit Changes",
+        "category": "Commit Corner",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "commitCorner.showCommitParent2",
+        "title": "Show Changes Against Second Parent (Merge)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.showCommits",
+        "title": "Show Combined Changes",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.showCommitRange",
+        "title": "Show Range Changes",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.openCommitFile",
+        "title": "Open Changes",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.openFileAtCommit",
+        "title": "Open File at This Revision",
+        "category": "Commit Corner",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "commitCorner.compareFileWithWorkingTree",
+        "title": "Compare with Working File",
+        "category": "Commit Corner",
+        "icon": "$(compare-changes)"
+      },
+      {
+        "command": "commitCorner.restoreFileFromCommit",
+        "title": "Restore File from This Revision…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.compareWithRef",
+        "title": "Compare File with Branch, Tag or Commit…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.compareWithPrevious",
+        "title": "Compare File with Previous Revision",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.openFileAtRevision",
+        "title": "Open File at Revision…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.copySha",
+        "title": "Copy Commit SHA",
+        "category": "Commit Corner",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "commitCorner.copyMessage",
+        "title": "Copy Commit Message",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.openCommitOnGitHub",
+        "title": "Open Commit on GitHub",
+        "category": "Commit Corner",
+        "icon": "$(github)"
+      },
+      {
+        "command": "commitCorner.openFileOnGitHub",
+        "title": "Open File on GitHub",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.copyPermalink",
+        "title": "Copy GitHub Permalink",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.reflog",
+        "title": "Show Reflog…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.stash",
+        "title": "Stash…",
+        "category": "Commit Corner",
+        "icon": "$(archive)"
+      },
+      {
+        "command": "commitCorner.stashIncludeUntracked",
+        "title": "Stash (Include Untracked)…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.stashKeepIndex",
+        "title": "Stash (Keep Staged Changes)…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.stashStaged",
+        "title": "Stash Staged Changes Only…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.stashFiles",
+        "title": "Stash Selected Files…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.stashApply",
+        "title": "Apply Stash…",
+        "category": "Commit Corner",
+        "icon": "$(check)"
+      },
+      {
+        "command": "commitCorner.stashPop",
+        "title": "Pop Stash…",
+        "category": "Commit Corner",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "commitCorner.stashDrop",
+        "title": "Drop Stash…",
+        "category": "Commit Corner",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "commitCorner.stashBranch",
+        "title": "Create Branch from Stash…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.stashShow",
+        "title": "Show Stash Changes…",
+        "category": "Commit Corner",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "commitCorner.worktreeAdd",
+        "title": "Add Worktree…",
+        "category": "Commit Corner",
+        "icon": "$(add)"
+      },
+      {
+        "command": "commitCorner.worktreeOpen",
+        "title": "Open Worktree in New Window",
+        "category": "Commit Corner",
+        "icon": "$(window)"
+      },
+      {
+        "command": "commitCorner.worktreeOpenHere",
+        "title": "Open Worktree in This Window",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.worktreeAddToWorkspace",
+        "title": "Add Worktree to Workspace",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.worktreeRemove",
+        "title": "Remove Worktree…",
+        "category": "Commit Corner",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "commitCorner.worktreeLock",
+        "title": "Lock Worktree…",
+        "category": "Commit Corner",
+        "icon": "$(lock)"
+      },
+      {
+        "command": "commitCorner.worktreeUnlock",
+        "title": "Unlock Worktree",
+        "category": "Commit Corner",
+        "icon": "$(unlock)"
+      },
+      {
+        "command": "commitCorner.worktreePrune",
+        "title": "Prune Stale Worktrees",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.prRefresh",
+        "title": "Refresh Pull Requests",
+        "category": "Commit Corner",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "commitCorner.prShowMore",
+        "title": "Show More Pull Requests",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.prFetchAll",
+        "title": "Fetch All Pull Requests…",
+        "category": "Commit Corner",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "commitCorner.prOpen",
+        "title": "Open Pull Request Changes…",
+        "category": "Commit Corner",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "commitCorner.prChangeBase",
+        "title": "Change Pull Request Base…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.prCheckout",
+        "title": "Checkout Pull Request…",
+        "category": "Commit Corner",
+        "icon": "$(check)"
+      },
+      {
+        "command": "commitCorner.prCompare",
+        "title": "Open Pull Request in Compare View…",
+        "category": "Commit Corner",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "commitCorner.prShowInGraph",
+        "title": "Show Pull Request in Graph…",
+        "category": "Commit Corner",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "commitCorner.prOpenOnGitHub",
+        "title": "Open Pull Request on GitHub",
+        "category": "Commit Corner",
+        "icon": "$(github)"
+      },
+      {
+        "command": "commitCorner.prCopyNumber",
+        "title": "Copy Pull Request Number",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.compareRefs",
+        "title": "Compare Branches, Tags or Commits…",
+        "category": "Commit Corner",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "commitCorner.compareWithCurrent",
+        "title": "Compare with Current Branch",
+        "category": "Commit Corner",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "commitCorner.compareWithWorkingTree",
+        "title": "Compare with Working Tree…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.compareSelectForCompare",
+        "title": "Select for Compare",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.compareWithSelected",
+        "title": "Compare with Selected",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.compareSwap",
+        "title": "Swap Comparison Sides",
+        "category": "Commit Corner",
+        "icon": "$(arrow-swap)"
+      },
+      {
+        "command": "commitCorner.compareUseTwoDot",
+        "title": "Show Full Difference (Two-Dot)",
+        "category": "Commit Corner",
+        "icon": "$(diff-single)"
+      },
+      {
+        "command": "commitCorner.compareUseThreeDot",
+        "title": "Show Changes Since Divergence (Three-Dot)",
+        "category": "Commit Corner",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "commitCorner.compareClear",
+        "title": "Clear Comparison",
+        "category": "Commit Corner",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "commitCorner.compareOpenAll",
+        "title": "Open All Compared Changes",
+        "category": "Commit Corner",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "commitCorner.compareRefresh",
+        "title": "Refresh Comparison",
+        "category": "Commit Corner",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "commitCorner.fileHistory",
+        "title": "Show File History",
+        "category": "Commit Corner",
+        "icon": "$(history)"
+      },
+      {
+        "command": "commitCorner.lineHistory",
+        "title": "Show Line History",
+        "category": "Commit Corner",
+        "icon": "$(history)"
+      },
+      {
+        "command": "commitCorner.fileHistoryPin",
+        "title": "Pin File History (Stop Following Editor)",
+        "category": "Commit Corner",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "commitCorner.fileHistoryUnpin",
+        "title": "Unpin File History",
+        "category": "Commit Corner",
+        "icon": "$(pinned)"
+      },
+      {
+        "command": "commitCorner.fileHistoryRefresh",
+        "title": "Refresh File History",
+        "category": "Commit Corner",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "commitCorner.fileHistoryAllBranches",
+        "title": "File History: Show All Branches",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.fileHistoryCurrentBranch",
+        "title": "File History: Show Current Branch Only",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.fileHistoryMore",
+        "title": "Load More History",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.showGraph",
+        "title": "Open Graph in Editor",
+        "category": "Commit Corner",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "commitCorner.graph.showCommit",
+        "title": "Show Changes",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.showRange",
+        "title": "Show Range Changes (oldest^..newest)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.checkout",
+        "title": "Checkout (Detached)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.createBranch",
+        "title": "Create Branch Here…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.createTag",
+        "title": "Create Tag Here…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.cherryPick",
+        "title": "Cherry-pick",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.revert",
+        "title": "Revert…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.reset",
+        "title": "Reset Current Branch to Here…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.merge",
+        "title": "Merge into Current Branch…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.rebase",
+        "title": "Rebase Current Branch onto This…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.rebaseInteractive",
+        "title": "Interactive Rebase from Here…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.copySha",
+        "title": "Copy SHA",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.copyMessage",
+        "title": "Copy Message",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.openOnGitHub",
+        "title": "Open on GitHub",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.compareWithWorkingTree",
+        "title": "Compare with Working Tree",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.compareWithCurrent",
+        "title": "Compare with Current Branch",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.selectForCompare",
+        "title": "Select for Compare",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.compareWithSelected",
+        "title": "Compare with Selected",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.refCheckout",
+        "title": "Checkout",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.refDelete",
+        "title": "Delete…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.createPatch",
+        "title": "Create Patch…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.bisectStart",
+        "title": "Bisect: This Is Good, HEAD Is Bad",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.bisectGood",
+        "title": "Bisect: Mark Good",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.bisectBad",
+        "title": "Bisect: Mark Bad",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.squash",
+        "title": "Squash into Parent",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.squashSelected",
+        "title": "Squash Selected Commits…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.fixupStagedInto",
+        "title": "Fold Staged Changes into This Commit…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.fixup",
+        "title": "Fixup into Parent",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.reword",
+        "title": "Reword…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.drop",
+        "title": "Drop…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.openSelection",
+        "title": "Show Changes",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.deleteRef",
+        "title": "Delete Ref",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.refresh",
+        "title": "Refresh Graph",
+        "category": "Commit Corner",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "commitCorner.pushTo",
+        "title": "Push to…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.init",
+        "title": "Initialize Repository",
+        "category": "Commit Corner",
+        "icon": "$(repo-create)"
+      },
+      {
+        "command": "commitCorner.clone",
+        "title": "Clone Repository…",
+        "category": "Commit Corner",
+        "icon": "$(repo-clone)"
+      },
+      {
+        "command": "commitCorner.updateSubmodules",
+        "title": "Update Submodules",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.bisectStart",
+        "title": "Bisect: Start…",
+        "category": "Commit Corner",
+        "icon": "$(search)"
+      },
+      {
+        "command": "commitCorner.bisectGood",
+        "title": "Bisect: Mark Good",
+        "category": "Commit Corner",
+        "icon": "$(pass)"
+      },
+      {
+        "command": "commitCorner.bisectBad",
+        "title": "Bisect: Mark Bad",
+        "category": "Commit Corner",
+        "icon": "$(error)"
+      },
+      {
+        "command": "commitCorner.bisectSkip",
+        "title": "Bisect: Skip",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.bisectReset",
+        "title": "Bisect: End",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.createPatch",
+        "title": "Create Patch…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.applyPatch",
+        "title": "Apply Patch…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.squashIntoParent",
+        "title": "Squash into Parent",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.fixupIntoParent",
+        "title": "Fixup into Parent (Discard Message)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.rewordCommit",
+        "title": "Reword…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.dropCommit",
+        "title": "Drop Commit…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.prPruneRefs",
+        "title": "Remove Fetched Pull Request Refs",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.blamePrevious",
+        "title": "Blame Before This Change",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.diffPrevious",
+        "title": "Show Previous Revision",
+        "category": "Commit Corner",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "commitCorner.diffNext",
+        "title": "Show Next Revision",
+        "category": "Commit Corner",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "commitCorner.openAllChanges",
+        "title": "Open All Changes",
+        "category": "Commit Corner",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "commitCorner.compareRevisions",
+        "title": "Compare Selected Revisions",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.combinedRevisions",
+        "title": "Show Combined Change of Selected Revisions",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.commitSelected",
+        "title": "Commit Selected Files…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.squashSelected",
+        "title": "Squash Selected Commits…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.fixupStagedInto",
+        "title": "Fixup: Fold Staged Changes into This Commit…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.prShowOpenOnly",
+        "title": "Show Only Open Pull Requests",
+        "category": "Commit Corner",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "commitCorner.prShowAll",
+        "title": "Show All Pull Requests",
+        "category": "Commit Corner",
+        "icon": "$(filter-filled)"
+      },
+      {
+        "command": "commitCorner.folderHistory",
+        "title": "Show Folder History",
+        "category": "Commit Corner",
+        "icon": "$(history)"
+      },
+      {
+        "command": "commitCorner.rebaseInteractive",
+        "title": "Interactive Rebase…",
+        "category": "Commit Corner",
+        "icon": "$(list-ordered)"
+      },
+      {
+        "command": "commitCorner.toggleFileBlame",
+        "title": "Toggle File Blame",
+        "category": "Commit Corner",
+        "icon": "$(person)"
+      },
+      {
+        "command": "commitCorner.toggleLineBlame",
+        "title": "Toggle Current Line Blame",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.showOutput",
+        "title": "Show Git Output",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.openRepository",
+        "title": "Open Repository…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.switchRepository",
+        "title": "Switch Repository…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.cancelGit",
+        "title": "Cancel Running Git Command",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.showLineCommit",
+        "title": "Show Commit of Current Line",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.view.deleteItem",
+        "title": "Delete Focused Item",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.view.renameItem",
+        "title": "Rename Focused Item",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.showWorktrees",
+        "title": "Show Worktrees Overview",
+        "category": "Commit Corner",
+        "icon": "$(dashboard)"
+      },
+      {
+        "category": "Commit Corner",
+        "command": "commitCorner.createPullRequest",
+        "title": "Create Pull Request…",
+        "icon": "$(git-pull-request-create)"
+      },
+      {
+        "category": "Commit Corner",
+        "command": "commitCorner.githubSignIn",
+        "title": "Sign In to GitHub (HTTPS Credentials)",
+        "icon": "$(github)"
+      },
+      {
+        "category": "Commit Corner",
+        "command": "commitCorner.graph.createPullRequest",
+        "title": "Create Pull Request…"
+      },
+      {
+        "category": "Commit Corner",
+        "command": "commitCorner.graphView.openInEditor",
+        "title": "Open Graph in Editor",
+        "icon": "$(link-external)"
+      },
+      {
+        "category": "Commit Corner",
+        "command": "commitCorner.graphView.filter",
+        "title": "Choose Branches…",
+        "icon": "$(filter)"
+      },
+      {
+        "category": "Commit Corner",
+        "command": "commitCorner.graphView.search",
+        "title": "Search Commits",
+        "icon": "$(search)"
+      },
+      {
+        "category": "Commit Corner",
+        "command": "commitCorner.graphView.refresh",
+        "title": "Refresh Graph",
+        "icon": "$(refresh)"
+      },
+      {
+        "category": "Commit Corner",
+        "command": "commitCorner.showActivity",
+        "title": "Show Repository Activity",
+        "icon": "$(pulse)"
+      },
+      {
+        "category": "Commit Corner",
+        "command": "commitCorner.graphView.showAll",
+        "title": "Show All Branches",
+        "icon": "$(clear-all)"
+      },
+      {
+        "category": "Commit Corner",
+        "command": "commitCorner.graphView.sinceLastLook",
+        "title": "Show Changes Since You Last Looked",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "commitCorner.undoRewrite",
+        "title": "Undo Last History Rewrite",
+        "category": "Commit Corner",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "commitCorner.worktreeOpenChanges",
+        "title": "Open Uncommitted Changes",
+        "category": "Commit Corner",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "commitCorner.copySelection",
+        "title": "Copy (SHA, Name or Path of the Selection)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graphView.focusList",
+        "title": "Focus the Sidebar Graph",
+        "category": "Commit Corner",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "commitCorner.worktreeChangesVsBase",
+        "title": "Open Changes vs Base (Committed + Uncommitted)",
+        "category": "Commit Corner",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "commitCorner.openPullRequestOnGitHub",
+        "title": "Open Pull Request on GitHub",
+        "category": "Commit Corner",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "commitCorner.sidebar.graphView",
+        "title": "Sidebar: Show Graph",
+        "category": "Commit Corner",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "commitCorner.sidebar.branches",
+        "title": "Sidebar: Show Repository",
+        "category": "Commit Corner",
+        "icon": "$(repo)"
+      },
+      {
+        "command": "commitCorner.sidebar.pullRequests",
+        "title": "Sidebar: Show Pull Requests",
+        "category": "Commit Corner",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "commitCorner.sidebar.compare",
+        "title": "Sidebar: Show Compare",
+        "category": "Commit Corner",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "commitCorner.sidebar.fileHistory",
+        "title": "Sidebar: Show File History",
+        "category": "Commit Corner",
+        "icon": "$(history)"
+      },
+      {
+        "command": "commitCorner.sidebar.worktrees",
+        "title": "Sidebar: Show Worktrees",
+        "category": "Commit Corner",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "commitCorner.sidebar.showAllViews",
+        "title": "Sidebar: Show All Views (Stacked)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.sidebar.oneViewAtATime",
+        "title": "Sidebar: One View at a Time",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.worktreeChanges",
+        "title": "Uncommitted Changes in That Worktree",
+        "category": "Commit Corner",
+        "icon": "$(diff-multiple)"
+      },
+      {
+        "command": "commitCorner.replaceBuiltInGit",
+        "title": "Use Commit Corner Only (Turn Off Built-in Git)…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.generateCommitMessage",
+        "title": "Generate Commit Message",
+        "category": "Commit Corner",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "commitCorner.worktreeSummarize",
+        "title": "Summarize Changes vs Base",
+        "category": "Commit Corner",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "commitCorner.prSummarize",
+        "title": "Summarize Pull Request",
+        "category": "Commit Corner",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "commitCorner.graph.summarize",
+        "title": "Summarize Changes",
+        "category": "Commit Corner",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "commitCorner.viewedMarkAll",
+        "title": "Mark All as Viewed",
+        "category": "Commit Corner",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "commitCorner.viewedClear",
+        "title": "Clear Viewed Marks",
+        "category": "Commit Corner",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "commitCorner.toggleViewed",
+        "title": "Toggle Viewed",
+        "category": "Commit Corner",
+        "icon": "$(check)"
+      },
+      {
+        "command": "commitCorner.view.toggleViewedKey",
+        "title": "Toggle Viewed (Selected File)",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.sidebar.to.graphView",
+        "title": "Graph",
+        "category": "Commit Corner",
+        "icon": "$(git-merge)"
+      },
+      {
+        "command": "commitCorner.sidebar.to.branches",
+        "title": "Repository",
+        "category": "Commit Corner",
+        "icon": "$(repo)"
+      },
+      {
+        "command": "commitCorner.sidebar.to.pullRequests",
+        "title": "Pull Requests",
+        "category": "Commit Corner",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "commitCorner.sidebar.to.compare",
+        "title": "Compare",
+        "category": "Commit Corner",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "commitCorner.sidebar.to.fileHistory",
+        "title": "File History",
+        "category": "Commit Corner",
+        "icon": "$(history)"
+      },
+      {
+        "command": "commitCorner.sidebar.to.worktrees",
+        "title": "Worktrees",
+        "category": "Commit Corner",
+        "icon": "$(list-tree)"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "commitCorner.scm.commit",
+        "label": "Commit"
+      },
+      {
+        "id": "commitCorner.scm.sync",
+        "label": "Pull, Push"
+      },
+      {
+        "id": "commitCorner.scm.branch",
+        "label": "Branch"
+      },
+      {
+        "id": "commitCorner.scm.stash",
+        "label": "Stash"
+      },
+      {
+        "id": "commitCorner.editor",
+        "label": "Commit Corner"
+      },
+      {
+        "id": "commitCorner.explorer",
+        "label": "Commit Corner"
+      },
+      {
+        "id": "commitCorner.sidebar.switch",
+        "label": "Switch View",
+        "icon": "$(layers)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "commitCorner.refresh",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.openResource",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.openFile",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.openHeadFile",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.openChanges",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.stage",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.unstage",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.stageAll",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.unstageAll",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.discard",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.discardAll",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.cleanAll",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.ignore",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.acceptOurs",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.acceptTheirs",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.openMergeEditor",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.openConflictDiff",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.commit",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.commitAmend",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.commitSignoff",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.commitNoVerify",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.commitAll",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.commitEmpty",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.commitAndPush",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.commitAndSync",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.undoLastCommit",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.recentMessage",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.continueOperation",
+          "when": "commitCorner.hasRepository && commitCorner.operationInProgress"
+        },
+        {
+          "command": "commitCorner.abortOperation",
+          "when": "commitCorner.hasRepository && commitCorner.operationInProgress"
+        },
+        {
+          "command": "commitCorner.skipOperation",
+          "when": "commitCorner.hasRepository && commitCorner.operationInProgress"
+        },
+        {
+          "command": "commitCorner.operationMenu",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.stageSelectedRanges",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.stageChange",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.unstageSelectedRanges",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.unstageChange",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.revertSelectedRanges",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.revertChange",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.checkout",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.checkoutDetached",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.createBranch",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.createBranchFrom",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.deleteBranch",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.deleteRemoteBranch",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.renameBranch",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.merge",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.rebase",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.setUpstream",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.reset",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.cherryPick",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.revert",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.createTag",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.deleteTag",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.pushTag",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.deleteRemoteTag",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.fetch",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.pull",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.pullRebase",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.push",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.pushForce",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.sync",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.addRemote",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.removeRemote",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.renameRemote",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.setRemoteUrl",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.showCommit",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.showCommits",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.showCommitRange",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.openCommitFile",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.openFileAtCommit",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.compareFileWithWorkingTree",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.restoreFileFromCommit",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.compareWithRef",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.compareWithPrevious",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.openFileAtRevision",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.copySha",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.copyMessage",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.openCommitOnGitHub",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.openFileOnGitHub",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.copyPermalink",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.reflog",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.stash",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.stashIncludeUntracked",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.stashKeepIndex",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.stashStaged",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.stashFiles",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.stashApply",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.stashPop",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.stashDrop",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.stashBranch",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.stashShow",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.worktreeAdd",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.worktreeOpen",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.worktreeOpenHere",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.worktreeAddToWorkspace",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.worktreeRemove",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.worktreeLock",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.worktreeUnlock",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.worktreePrune",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.prRefresh",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.prShowMore",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.prFetchAll",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.prOpen",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.prChangeBase",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.prCheckout",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.prCompare",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.prShowInGraph",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.prOpenOnGitHub",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.prCopyNumber",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.compareRefs",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.compareWithCurrent",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.compareWithWorkingTree",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.compareSelectForCompare",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.compareWithSelected",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.compareSwap",
+          "when": "commitCorner.compareActive"
+        },
+        {
+          "command": "commitCorner.compareUseTwoDot",
+          "when": "commitCorner.compareActive"
+        },
+        {
+          "command": "commitCorner.compareUseThreeDot",
+          "when": "commitCorner.compareActive"
+        },
+        {
+          "command": "commitCorner.compareClear",
+          "when": "commitCorner.compareActive"
+        },
+        {
+          "command": "commitCorner.compareOpenAll",
+          "when": "commitCorner.compareActive"
+        },
+        {
+          "command": "commitCorner.compareRefresh",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.fileHistory",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.lineHistory",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.fileHistoryPin",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.fileHistoryUnpin",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.fileHistoryRefresh",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.fileHistoryMore",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.showGraph",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.graph.showCommit",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.showRange",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.checkout",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.createBranch",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.createTag",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.cherryPick",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.revert",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.reset",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.merge",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.rebase",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.rebaseInteractive",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.copySha",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.copyMessage",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.openOnGitHub",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.compareWithWorkingTree",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.compareWithCurrent",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.selectForCompare",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.compareWithSelected",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.refCheckout",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.refDelete",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.createPatch",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.bisectStart",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.bisectGood",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.bisectBad",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.squash",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.squashSelected",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.fixupStagedInto",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.fixup",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.reword",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.drop",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.openSelection",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.deleteRef",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.refresh",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.pushTo",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.updateSubmodules",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.bisectStart",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.bisectGood",
+          "when": "commitCorner.hasRepository && commitCorner.bisecting"
+        },
+        {
+          "command": "commitCorner.bisectBad",
+          "when": "commitCorner.hasRepository && commitCorner.bisecting"
+        },
+        {
+          "command": "commitCorner.bisectSkip",
+          "when": "commitCorner.hasRepository && commitCorner.bisecting"
+        },
+        {
+          "command": "commitCorner.bisectReset",
+          "when": "commitCorner.hasRepository && commitCorner.bisecting"
+        },
+        {
+          "command": "commitCorner.createPatch",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.applyPatch",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.squashIntoParent",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.fixupIntoParent",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.rewordCommit",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.dropCommit",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.prPruneRefs",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.blamePrevious",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.diffPrevious",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.diffNext",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.openAllChanges",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.compareRevisions",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.commitSelected",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.squashSelected",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.fixupStagedInto",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.prShowOpenOnly",
+          "when": "commitCorner.hasRepository && !commitCorner.prOpenOnly"
+        },
+        {
+          "command": "commitCorner.prShowAll",
+          "when": "commitCorner.hasRepository && commitCorner.prOpenOnly"
+        },
+        {
+          "command": "commitCorner.folderHistory",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.rebaseInteractive",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.toggleFileBlame",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.toggleLineBlame",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.switchRepository",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.combinedRevisions",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.actions",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.cancelGit",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.cherryPickNoCommit",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.showCommitParent2",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.fileHistoryAllBranches",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.fileHistoryCurrentBranch",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.showLineCommit",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.view.deleteItem",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.view.renameItem",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.showWorktrees",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.createPullRequest",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.githubSignIn",
+          "when": "true"
+        },
+        {
+          "command": "commitCorner.graph.createPullRequest",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graphView.openInEditor",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graphView.filter",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.graphView.search",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.graphView.refresh",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.showActivity",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.graphView.showAll",
+          "when": "commitCorner.graphViewFiltered"
+        },
+        {
+          "command": "commitCorner.graphView.sinceLastLook",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.undoRewrite",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.worktreeOpenChanges",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.worktreeChangesVsBase",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.copySelection",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.openPullRequestOnGitHub",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.worktreeChanges",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.replaceBuiltInGit",
+          "when": "!commitCorner.builtInGitOff"
+        },
+        {
+          "command": "commitCorner.generateCommitMessage",
+          "when": "config.commitCorner.ai.enabled"
+        },
+        {
+          "command": "commitCorner.prSummarize",
+          "when": "config.commitCorner.ai.enabled"
+        },
+        {
+          "command": "commitCorner.worktreeSummarize",
+          "when": "commitCorner.hasRepository && config.commitCorner.ai.enabled"
+        },
+        {
+          "command": "commitCorner.graph.summarize",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.viewedMarkAll",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.viewedClear",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.toggleViewed",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.view.toggleViewedKey",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graphView.focusList",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.sidebar.to.graphView",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.sidebar.to.branches",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.sidebar.to.pullRequests",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.sidebar.to.compare",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.sidebar.to.fileHistory",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.sidebar.to.worktrees",
+          "when": "false"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "commitCorner.commit",
+          "when": "scmProvider == commitCorner",
+          "group": "navigation@1"
+        },
+        {
+          "command": "commitCorner.refresh",
+          "when": "scmProvider == commitCorner",
+          "group": "navigation@2"
+        },
+        {
+          "command": "commitCorner.showGraph",
+          "when": "scmProvider == commitCorner",
+          "group": "navigation@3"
+        },
+        {
+          "submenu": "commitCorner.scm.commit",
+          "when": "scmProvider == commitCorner",
+          "group": "1_header@1"
+        },
+        {
+          "submenu": "commitCorner.scm.sync",
+          "when": "scmProvider == commitCorner",
+          "group": "1_header@2"
+        },
+        {
+          "submenu": "commitCorner.scm.branch",
+          "when": "scmProvider == commitCorner",
+          "group": "1_header@3"
+        },
+        {
+          "submenu": "commitCorner.scm.stash",
+          "when": "scmProvider == commitCorner",
+          "group": "1_header@4"
+        },
+        {
+          "command": "commitCorner.fetch",
+          "when": "scmProvider == commitCorner",
+          "group": "2_sync@1"
+        },
+        {
+          "command": "commitCorner.pull",
+          "when": "scmProvider == commitCorner",
+          "group": "2_sync@2"
+        },
+        {
+          "command": "commitCorner.push",
+          "when": "scmProvider == commitCorner",
+          "group": "2_sync@3"
+        },
+        {
+          "command": "commitCorner.compareRefs",
+          "when": "scmProvider == commitCorner",
+          "group": "3_more@1"
+        },
+        {
+          "command": "commitCorner.rebaseInteractive",
+          "when": "scmProvider == commitCorner",
+          "group": "3_more@2"
+        },
+        {
+          "command": "commitCorner.reflog",
+          "when": "scmProvider == commitCorner",
+          "group": "3_more@3"
+        },
+        {
+          "command": "commitCorner.createPatch",
+          "when": "scmProvider == commitCorner",
+          "group": "4_patch@1"
+        },
+        {
+          "command": "commitCorner.applyPatch",
+          "when": "scmProvider == commitCorner",
+          "group": "4_patch@2"
+        },
+        {
+          "command": "commitCorner.bisectStart",
+          "when": "scmProvider == commitCorner && !commitCorner.bisecting",
+          "group": "4_patch@3"
+        },
+        {
+          "command": "commitCorner.updateSubmodules",
+          "when": "scmProvider == commitCorner",
+          "group": "4_patch@4"
+        },
+        {
+          "command": "commitCorner.showOutput",
+          "when": "scmProvider == commitCorner",
+          "group": "5_log@1"
+        },
+        {
+          "command": "commitCorner.generateCommitMessage",
+          "when": "scmProvider == commitCorner && config.commitCorner.ai.enabled",
+          "group": "navigation@0"
+        }
+      ],
+      "commitCorner.scm.commit": [
+        {
+          "command": "commitCorner.commit",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.commitAndPush",
+          "group": "1@1a"
+        },
+        {
+          "command": "commitCorner.commitAndSync",
+          "group": "1@1b"
+        },
+        {
+          "command": "commitCorner.commitAmend",
+          "group": "1@2"
+        },
+        {
+          "command": "commitCorner.commitSignoff",
+          "group": "1@3"
+        },
+        {
+          "command": "commitCorner.commitNoVerify",
+          "group": "1@4"
+        },
+        {
+          "command": "commitCorner.commitAll",
+          "group": "1@5"
+        },
+        {
+          "command": "commitCorner.commitEmpty",
+          "group": "1@6"
+        },
+        {
+          "command": "commitCorner.undoLastCommit",
+          "group": "2@1"
+        },
+        {
+          "command": "commitCorner.recentMessage",
+          "group": "2@2"
+        },
+        {
+          "command": "commitCorner.continueOperation",
+          "group": "3@1"
+        },
+        {
+          "command": "commitCorner.skipOperation",
+          "group": "3@2"
+        },
+        {
+          "command": "commitCorner.abortOperation",
+          "group": "3@3"
+        }
+      ],
+      "commitCorner.scm.sync": [
+        {
+          "command": "commitCorner.sync",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.pull",
+          "group": "1@2"
+        },
+        {
+          "command": "commitCorner.pullRebase",
+          "group": "1@3"
+        },
+        {
+          "command": "commitCorner.push",
+          "group": "1@4"
+        },
+        {
+          "command": "commitCorner.pushForce",
+          "group": "1@5"
+        },
+        {
+          "command": "commitCorner.pushTo",
+          "group": "1@6"
+        },
+        {
+          "command": "commitCorner.fetch",
+          "group": "1@7"
+        },
+        {
+          "command": "commitCorner.addRemote",
+          "group": "2@1"
+        },
+        {
+          "command": "commitCorner.renameRemote",
+          "group": "2@2"
+        },
+        {
+          "command": "commitCorner.setRemoteUrl",
+          "group": "2@3"
+        },
+        {
+          "command": "commitCorner.removeRemote",
+          "group": "2@4"
+        }
+      ],
+      "commitCorner.scm.branch": [
+        {
+          "command": "commitCorner.checkout",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.createBranch",
+          "group": "1@2"
+        },
+        {
+          "command": "commitCorner.createBranchFrom",
+          "group": "1@3"
+        },
+        {
+          "command": "commitCorner.renameBranch",
+          "group": "1@4"
+        },
+        {
+          "command": "commitCorner.deleteBranch",
+          "group": "1@5"
+        },
+        {
+          "command": "commitCorner.merge",
+          "group": "2@1"
+        },
+        {
+          "command": "commitCorner.rebase",
+          "group": "2@2"
+        },
+        {
+          "command": "commitCorner.rebaseInteractive",
+          "group": "2@3"
+        },
+        {
+          "command": "commitCorner.setUpstream",
+          "group": "2@4"
+        },
+        {
+          "command": "commitCorner.reset",
+          "group": "2@5"
+        },
+        {
+          "command": "commitCorner.createTag",
+          "group": "3@1"
+        },
+        {
+          "command": "commitCorner.deleteTag",
+          "group": "3@2"
+        },
+        {
+          "command": "commitCorner.pushTag",
+          "group": "3@3"
+        }
+      ],
+      "commitCorner.scm.stash": [
+        {
+          "command": "commitCorner.stash",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.stashIncludeUntracked",
+          "group": "1@2"
+        },
+        {
+          "command": "commitCorner.stashKeepIndex",
+          "group": "1@3"
+        },
+        {
+          "command": "commitCorner.stashStaged",
+          "group": "1@4"
+        },
+        {
+          "command": "commitCorner.stashApply",
+          "group": "2@1"
+        },
+        {
+          "command": "commitCorner.stashPop",
+          "group": "2@2"
+        },
+        {
+          "command": "commitCorner.stashDrop",
+          "group": "2@3"
+        },
+        {
+          "command": "commitCorner.stashShow",
+          "group": "2@4"
+        }
+      ],
+      "scm/resourceGroup/context": [
+        {
+          "command": "commitCorner.stageAll",
+          "when": "scmProvider == commitCorner && scmResourceGroup == merge",
+          "group": "inline"
+        },
+        {
+          "command": "commitCorner.unstageAll",
+          "when": "scmProvider == commitCorner && scmResourceGroup == staged",
+          "group": "inline"
+        },
+        {
+          "command": "commitCorner.discardAll",
+          "when": "scmProvider == commitCorner && scmResourceGroup == unstaged",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.stageAll",
+          "when": "scmProvider == commitCorner && scmResourceGroup == unstaged",
+          "group": "inline@2"
+        },
+        {
+          "command": "commitCorner.cleanAll",
+          "when": "scmProvider == commitCorner && scmResourceGroup == untracked",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.stageAll",
+          "when": "scmProvider == commitCorner && scmResourceGroup == untracked",
+          "group": "inline@2"
+        },
+        {
+          "command": "commitCorner.stash",
+          "when": "scmProvider == commitCorner && scmResourceGroup == unstaged",
+          "group": "1_stash"
+        },
+        {
+          "command": "commitCorner.openAllChanges",
+          "when": "scmProvider == commitCorner && scmResourceGroup == staged",
+          "group": "inline@0"
+        },
+        {
+          "command": "commitCorner.openAllChanges",
+          "when": "scmProvider == commitCorner && scmResourceGroup == unstaged",
+          "group": "inline@0"
+        },
+        {
+          "command": "commitCorner.openAllChanges",
+          "when": "scmProvider == commitCorner && scmResourceGroup == untracked",
+          "group": "inline@0"
+        },
+        {
+          "command": "commitCorner.openAllChanges",
+          "when": "scmProvider == commitCorner",
+          "group": "1_open@1"
+        },
+        {
+          "command": "commitCorner.stageAll",
+          "when": "scmProvider == commitCorner && scmResourceGroup == unstaged || scmProvider == commitCorner && scmResourceGroup == untracked || scmProvider == commitCorner && scmResourceGroup == merge",
+          "group": "2_stage@1"
+        },
+        {
+          "command": "commitCorner.unstageAll",
+          "when": "scmProvider == commitCorner && scmResourceGroup == staged",
+          "group": "2_stage@2"
+        },
+        {
+          "command": "commitCorner.discardAll",
+          "when": "scmProvider == commitCorner && scmResourceGroup == unstaged",
+          "group": "3_discard@1"
+        },
+        {
+          "command": "commitCorner.cleanAll",
+          "when": "scmProvider == commitCorner && scmResourceGroup == untracked",
+          "group": "3_discard@2"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "commitCorner.openFile",
+          "when": "scmProvider == commitCorner && scmResourceGroup == staged",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.unstage",
+          "when": "scmProvider == commitCorner && scmResourceGroup == staged",
+          "group": "inline@2"
+        },
+        {
+          "command": "commitCorner.openFile",
+          "when": "scmProvider == commitCorner && scmResourceGroup == unstaged",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.discard",
+          "when": "scmProvider == commitCorner && scmResourceGroup == unstaged",
+          "group": "inline@2"
+        },
+        {
+          "command": "commitCorner.stage",
+          "when": "scmProvider == commitCorner && scmResourceGroup == unstaged",
+          "group": "inline@3"
+        },
+        {
+          "command": "commitCorner.openFile",
+          "when": "scmProvider == commitCorner && scmResourceGroup == untracked",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.discard",
+          "when": "scmProvider == commitCorner && scmResourceGroup == untracked",
+          "group": "inline@2"
+        },
+        {
+          "command": "commitCorner.stage",
+          "when": "scmProvider == commitCorner && scmResourceGroup == untracked",
+          "group": "inline@3"
+        },
+        {
+          "command": "commitCorner.openMergeEditor",
+          "when": "scmProvider == commitCorner && scmResourceGroup == merge",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.stage",
+          "when": "scmProvider == commitCorner && scmResourceGroup == merge",
+          "group": "inline@2"
+        },
+        {
+          "command": "commitCorner.openFile",
+          "when": "scmProvider == commitCorner",
+          "group": "1_open@1"
+        },
+        {
+          "command": "commitCorner.openChanges",
+          "when": "scmProvider == commitCorner && scmResourceGroup != untracked && scmResourceGroup != merge",
+          "group": "1_open@2"
+        },
+        {
+          "command": "commitCorner.openHeadFile",
+          "when": "scmProvider == commitCorner && scmResourceGroup != untracked",
+          "group": "1_open@3"
+        },
+        {
+          "command": "commitCorner.stage",
+          "when": "scmProvider == commitCorner && scmResourceGroup != staged",
+          "group": "2_stage@1"
+        },
+        {
+          "command": "commitCorner.unstage",
+          "when": "scmProvider == commitCorner && scmResourceGroup == staged",
+          "group": "2_stage@2"
+        },
+        {
+          "command": "commitCorner.acceptOurs",
+          "when": "scmProvider == commitCorner && scmResourceGroup == merge",
+          "group": "3_resolve@1"
+        },
+        {
+          "command": "commitCorner.acceptTheirs",
+          "when": "scmProvider == commitCorner && scmResourceGroup == merge",
+          "group": "3_resolve@2"
+        },
+        {
+          "command": "commitCorner.openConflictDiff",
+          "when": "scmProvider == commitCorner && scmResourceGroup == merge",
+          "group": "3_resolve@3"
+        },
+        {
+          "command": "commitCorner.openMergeEditor",
+          "when": "scmProvider == commitCorner && scmResourceGroup == merge",
+          "group": "3_resolve@4"
+        },
+        {
+          "command": "commitCorner.discard",
+          "when": "scmProvider == commitCorner && scmResourceGroup =~ /^(unstaged|untracked)$/",
+          "group": "4_discard@1"
+        },
+        {
+          "command": "commitCorner.commitSelected",
+          "when": "scmProvider == commitCorner && scmResourceGroup =~ /^(staged|unstaged|untracked)$/",
+          "group": "2_stage@3"
+        },
+        {
+          "command": "commitCorner.stashFiles",
+          "when": "scmProvider == commitCorner && scmResourceGroup != merge",
+          "group": "5_more@1"
+        },
+        {
+          "command": "commitCorner.ignore",
+          "when": "scmProvider == commitCorner && scmResourceGroup == untracked",
+          "group": "5_more@2"
+        },
+        {
+          "command": "commitCorner.fileHistory",
+          "when": "scmProvider == commitCorner && scmResourceGroup != untracked",
+          "group": "5_more@3"
+        },
+        {
+          "command": "commitCorner.compareWithRef",
+          "when": "scmProvider == commitCorner && scmResourceGroup != untracked",
+          "group": "5_more@4"
+        }
+      ],
+      "scm/change/title": [
+        {
+          "command": "commitCorner.stageChange",
+          "when": "originalResourceScheme == commitcorner",
+          "group": "navigation@1"
+        },
+        {
+          "command": "commitCorner.revertChange",
+          "when": "originalResourceScheme == commitcorner",
+          "group": "navigation@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "submenu": "commitCorner.editor",
+          "when": "commitCorner.hasRepository && (resourceScheme == file || resourceScheme == commitcorner)",
+          "group": "9_commitCorner"
+        }
+      ],
+      "commitCorner.editor": [
+        {
+          "command": "commitCorner.stageSelectedRanges",
+          "when": "resourceScheme == file",
+          "group": "1_stage@1"
+        },
+        {
+          "command": "commitCorner.unstageSelectedRanges",
+          "group": "1_stage@2"
+        },
+        {
+          "command": "commitCorner.revertSelectedRanges",
+          "when": "resourceScheme == file",
+          "group": "1_stage@3"
+        },
+        {
+          "command": "commitCorner.fileHistory",
+          "group": "2_history@1"
+        },
+        {
+          "command": "commitCorner.lineHistory",
+          "group": "2_history@2"
+        },
+        {
+          "command": "commitCorner.toggleFileBlame",
+          "when": "resourceScheme == file",
+          "group": "2_history@3"
+        },
+        {
+          "command": "commitCorner.compareWithRef",
+          "group": "3_compare@1"
+        },
+        {
+          "command": "commitCorner.compareWithPrevious",
+          "group": "3_compare@2"
+        },
+        {
+          "command": "commitCorner.openFileAtRevision",
+          "group": "3_compare@3"
+        },
+        {
+          "command": "commitCorner.copyPermalink",
+          "group": "4_github@1"
+        },
+        {
+          "command": "commitCorner.openFileOnGitHub",
+          "group": "4_github@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "commitCorner.diffPrevious",
+          "when": "commitCorner.hasRepository && (resourceScheme == commitcorner || isInDiffEditor && resourceScheme == file)",
+          "group": "navigation@-92"
+        },
+        {
+          "command": "commitCorner.diffNext",
+          "when": "commitCorner.hasRepository && resourceScheme == commitcorner",
+          "group": "navigation@-91"
+        },
+        {
+          "command": "commitCorner.unstageSelectedRanges",
+          "when": "commitCorner.activeEditorIsIndex && isInDiffEditor",
+          "group": "navigation@-90"
+        },
+        {
+          "command": "commitCorner.openChanges",
+          "when": "commitCorner.builtInGitOff && commitCorner.activeFileChanged && resourceScheme == file && !isInDiffEditor",
+          "group": "navigation@-95"
+        },
+        {
+          "command": "commitCorner.stage",
+          "when": "commitCorner.builtInGitOff && commitCorner.activeFileChanged && resourceScheme == file && isInDiffEditor",
+          "group": "navigation@-94"
+        },
+        {
+          "command": "commitCorner.toggleFileBlame",
+          "when": "commitCorner.fileBlameActive && resourceScheme == file",
+          "group": "navigation@-89"
+        },
+        {
+          "command": "commitCorner.graph.refresh",
+          "when": "activeWebviewPanelId == commitCorner.graph",
+          "group": "navigation"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "commitCorner.fileHistory",
+          "when": "commitCorner.hasRepository && resourceScheme == file",
+          "group": "2_commitCorner@1"
+        },
+        {
+          "command": "commitCorner.compareWithRef",
+          "when": "commitCorner.hasRepository && resourceScheme == file",
+          "group": "2_commitCorner@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "submenu": "commitCorner.explorer",
+          "when": "commitCorner.hasRepository && !explorerResourceIsFolder",
+          "group": "7_commitCorner"
+        },
+        {
+          "command": "commitCorner.folderHistory",
+          "when": "commitCorner.hasRepository && explorerResourceIsFolder",
+          "group": "7_commitCorner@1"
+        }
+      ],
+      "commitCorner.explorer": [
+        {
+          "command": "commitCorner.fileHistory",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.compareWithRef",
+          "group": "1@2"
+        },
+        {
+          "command": "commitCorner.compareWithPrevious",
+          "group": "1@3"
+        },
+        {
+          "command": "commitCorner.openFileAtRevision",
+          "group": "1@4"
+        },
+        {
+          "command": "commitCorner.copyPermalink",
+          "group": "2@1"
+        },
+        {
+          "command": "commitCorner.openFileOnGitHub",
+          "group": "2@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "commitCorner.createBranch",
+          "when": "view == commitCorner.branches",
+          "group": "navigation@1"
+        },
+        {
+          "command": "commitCorner.fetch",
+          "when": "view == commitCorner.branches",
+          "group": "navigation@2"
+        },
+        {
+          "command": "commitCorner.showGraph",
+          "when": "view == commitCorner.branches",
+          "group": "navigation@3"
+        },
+        {
+          "command": "commitCorner.switchRepository",
+          "when": "view == commitCorner.branches && commitCorner.multipleRepositories",
+          "group": "navigation@4"
+        },
+        {
+          "command": "commitCorner.compareRefs",
+          "when": "view == commitCorner.branches",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.addRemote",
+          "when": "view == commitCorner.branches",
+          "group": "1@2"
+        },
+        {
+          "command": "commitCorner.reflog",
+          "when": "view == commitCorner.branches",
+          "group": "1@3"
+        },
+        {
+          "command": "commitCorner.prOpen",
+          "when": "view == commitCorner.pullRequests",
+          "group": "navigation@1"
+        },
+        {
+          "command": "commitCorner.prRefresh",
+          "when": "view == commitCorner.pullRequests",
+          "group": "navigation@2"
+        },
+        {
+          "command": "commitCorner.prShowAll",
+          "when": "view == commitCorner.pullRequests && commitCorner.prOpenOnly",
+          "group": "0_filter@1"
+        },
+        {
+          "command": "commitCorner.prShowOpenOnly",
+          "when": "view == commitCorner.pullRequests && !commitCorner.prOpenOnly",
+          "group": "0_filter@1"
+        },
+        {
+          "command": "commitCorner.prFetchAll",
+          "when": "view == commitCorner.pullRequests",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.prPruneRefs",
+          "when": "view == commitCorner.pullRequests",
+          "group": "1@2"
+        },
+        {
+          "command": "commitCorner.prShowOpenOnly",
+          "when": "view == commitCorner.pullRequests && !commitCorner.prOpenOnly",
+          "group": "navigation@0"
+        },
+        {
+          "command": "commitCorner.prShowAll",
+          "when": "view == commitCorner.pullRequests && commitCorner.prOpenOnly",
+          "group": "navigation@0"
+        },
+        {
+          "command": "commitCorner.compareRefs",
+          "when": "view == commitCorner.compare",
+          "group": "navigation@1"
+        },
+        {
+          "command": "commitCorner.compareSwap",
+          "when": "view == commitCorner.compare && commitCorner.compareActive",
+          "group": "navigation@2"
+        },
+        {
+          "command": "commitCorner.compareOpenAll",
+          "when": "view == commitCorner.compare && commitCorner.compareActive",
+          "group": "navigation@3"
+        },
+        {
+          "command": "commitCorner.compareUseTwoDot",
+          "when": "view == commitCorner.compare && commitCorner.compareMode == threeDot",
+          "group": "navigation@4"
+        },
+        {
+          "command": "commitCorner.compareUseThreeDot",
+          "when": "view == commitCorner.compare && commitCorner.compareMode == twoDot",
+          "group": "navigation@4"
+        },
+        {
+          "command": "commitCorner.compareClear",
+          "when": "view == commitCorner.compare && commitCorner.compareActive",
+          "group": "navigation@5"
+        },
+        {
+          "command": "commitCorner.fileHistoryPin",
+          "when": "view == commitCorner.fileHistory && !commitCorner.fileHistoryPinned",
+          "group": "navigation@1"
+        },
+        {
+          "command": "commitCorner.fileHistoryUnpin",
+          "when": "view == commitCorner.fileHistory && commitCorner.fileHistoryPinned",
+          "group": "navigation@1"
+        },
+        {
+          "command": "commitCorner.fileHistoryRefresh",
+          "when": "view == commitCorner.fileHistory",
+          "group": "navigation@2"
+        },
+        {
+          "command": "commitCorner.fileHistoryAllBranches",
+          "when": "view == commitCorner.fileHistory && !commitCorner.fileHistoryAll",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.fileHistoryCurrentBranch",
+          "when": "view == commitCorner.fileHistory && commitCorner.fileHistoryAll",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.createPullRequest",
+          "when": "view == commitCorner.pullRequests",
+          "group": "navigation@1"
+        },
+        {
+          "command": "commitCorner.graphView.search",
+          "when": "view == commitCorner.graphView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "commitCorner.graphView.filter",
+          "when": "view == commitCorner.graphView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "commitCorner.graphView.showAll",
+          "when": "view == commitCorner.graphView && commitCorner.graphViewFiltered",
+          "group": "navigation@3"
+        },
+        {
+          "command": "commitCorner.graphView.sinceLastLook",
+          "when": "view == commitCorner.graphView",
+          "group": "1_graph@1"
+        },
+        {
+          "command": "commitCorner.graphView.openInEditor",
+          "when": "view == commitCorner.graphView",
+          "group": "1_graph@2"
+        },
+        {
+          "command": "commitCorner.showActivity",
+          "when": "view == commitCorner.graphView",
+          "group": "1_more@1"
+        },
+        {
+          "command": "commitCorner.graphView.refresh",
+          "when": "view == commitCorner.graphView",
+          "group": "1_more@2"
+        },
+        {
+          "command": "commitCorner.worktreeAdd",
+          "when": "view == commitCorner.worktrees",
+          "group": "navigation@1"
+        },
+        {
+          "command": "commitCorner.worktreePrune",
+          "when": "view == commitCorner.worktrees",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.showWorktrees",
+          "when": "view == commitCorner.worktrees",
+          "group": "navigation@0"
+        },
+        {
+          "command": "commitCorner.sidebar.showAllViews",
+          "when": "view == commitCorner.graphView && config.commitCorner.sidebar.oneViewAtATime",
+          "group": "9_layout@1"
+        },
+        {
+          "command": "commitCorner.sidebar.oneViewAtATime",
+          "when": "view == commitCorner.graphView && !config.commitCorner.sidebar.oneViewAtATime",
+          "group": "9_layout@1"
+        },
+        {
+          "submenu": "commitCorner.sidebar.switch",
+          "when": "view =~ /^commitCorner\\.(graphView|branches|pullRequests|compare|fileHistory|worktrees)$/ && config.commitCorner.sidebar.oneViewAtATime",
+          "group": "navigation@90"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "commitCorner.checkout",
+          "when": "viewItem =~ /^branch(:tracking)?$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.compareWithCurrent",
+          "when": "viewItem =~ /^(branch(:tracking)?|remoteBranch|tag)$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "commitCorner.checkout",
+          "when": "viewItem =~ /^(remoteBranch|tag)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.push",
+          "when": "viewItem =~ /^branch:current$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.pull",
+          "when": "viewItem =~ /^branch:current$/",
+          "group": "inline@0"
+        },
+        {
+          "command": "commitCorner.checkout",
+          "when": "viewItem =~ /^(branch(:tracking)?|remoteBranch|tag)$/",
+          "group": "1_checkout@1"
+        },
+        {
+          "command": "commitCorner.createBranch",
+          "when": "viewItem =~ /^(branch.*|remoteBranch|tag)$/",
+          "group": "1_checkout@2"
+        },
+        {
+          "command": "commitCorner.merge",
+          "when": "viewItem =~ /^(branch(:tracking)?|remoteBranch|tag)$/",
+          "group": "2_integrate@1"
+        },
+        {
+          "command": "commitCorner.rebase",
+          "when": "viewItem =~ /^(branch(:tracking)?|remoteBranch|tag)$/",
+          "group": "2_integrate@2"
+        },
+        {
+          "command": "commitCorner.compareWithCurrent",
+          "when": "viewItem =~ /^(branch(:tracking)?|remoteBranch|tag)$/",
+          "group": "3_compare@1"
+        },
+        {
+          "command": "commitCorner.compareWithWorkingTree",
+          "when": "viewItem =~ /^(branch.*|remoteBranch|tag)$/",
+          "group": "3_compare@2"
+        },
+        {
+          "command": "commitCorner.compareSelectForCompare",
+          "when": "viewItem =~ /^(branch.*|remoteBranch|tag|commit.*)$/ && !listMultiSelection",
+          "group": "3_compare@3"
+        },
+        {
+          "command": "commitCorner.compareWithSelected",
+          "when": "viewItem =~ /^(branch.*|remoteBranch|tag|commit.*)$/ && commitCorner.hasPendingCompare && !listMultiSelection",
+          "group": "3_compare@4"
+        },
+        {
+          "command": "commitCorner.push",
+          "when": "viewItem =~ /^branch(:current|:tracking)?$/",
+          "group": "4_remote@1"
+        },
+        {
+          "command": "commitCorner.setUpstream",
+          "when": "viewItem =~ /^branch.*$/",
+          "group": "4_remote@2"
+        },
+        {
+          "command": "commitCorner.renameBranch",
+          "when": "viewItem =~ /^branch.*$/",
+          "group": "5_manage@1"
+        },
+        {
+          "command": "commitCorner.createTag",
+          "when": "viewItem =~ /^(branch.*|remoteBranch)$/",
+          "group": "5_manage@2"
+        },
+        {
+          "command": "commitCorner.deleteBranch",
+          "when": "viewItem =~ /^branch(:tracking)?$/",
+          "group": "5_manage@3"
+        },
+        {
+          "command": "commitCorner.deleteRemoteBranch",
+          "when": "viewItem =~ /^remoteBranch$/",
+          "group": "5_manage@3"
+        },
+        {
+          "command": "commitCorner.pushTag",
+          "when": "viewItem =~ /^tag$/",
+          "group": "4_remote@1"
+        },
+        {
+          "command": "commitCorner.deleteTag",
+          "when": "viewItem =~ /^tag$/",
+          "group": "5_manage@3"
+        },
+        {
+          "command": "commitCorner.deleteRemoteTag",
+          "when": "viewItem =~ /^tag$/",
+          "group": "5_manage@4"
+        },
+        {
+          "command": "commitCorner.fetch",
+          "when": "viewItem =~ /^remote$/",
+          "group": "inline"
+        },
+        {
+          "command": "commitCorner.fetch",
+          "when": "viewItem =~ /^remote$/",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.renameRemote",
+          "when": "viewItem =~ /^remote$/",
+          "group": "1@2"
+        },
+        {
+          "command": "commitCorner.setRemoteUrl",
+          "when": "viewItem =~ /^remote$/",
+          "group": "1@3"
+        },
+        {
+          "command": "commitCorner.removeRemote",
+          "when": "viewItem =~ /^remote$/",
+          "group": "1@4"
+        },
+        {
+          "command": "commitCorner.showCommits",
+          "when": "viewItem =~ /^commit/ && listMultiSelection",
+          "group": "0_multi@1"
+        },
+        {
+          "command": "commitCorner.compareRevisions",
+          "when": "viewItem == commit:file && listMultiSelection",
+          "group": "0_multi@2"
+        },
+        {
+          "command": "commitCorner.combinedRevisions",
+          "when": "viewItem == commit:file && listMultiSelection",
+          "group": "0_multi@2b"
+        },
+        {
+          "command": "commitCorner.squashSelected",
+          "when": "viewItem =~ /^commit/ && listMultiSelection",
+          "group": "0_multi@3"
+        },
+        {
+          "command": "commitCorner.showCommit",
+          "when": "viewItem =~ /^commit$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.openFileAtCommit",
+          "when": "viewItem =~ /^commit:file$/ && !listMultiSelection",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.compareFileWithWorkingTree",
+          "when": "viewItem =~ /^commit:file$/ && !listMultiSelection",
+          "group": "inline@2"
+        },
+        {
+          "command": "commitCorner.showCommit",
+          "when": "viewItem =~ /^commit/",
+          "group": "1_show@1"
+        },
+        {
+          "command": "commitCorner.openFileAtCommit",
+          "when": "viewItem =~ /^commit:file$/ && !listMultiSelection",
+          "group": "1_show@2"
+        },
+        {
+          "command": "commitCorner.compareFileWithWorkingTree",
+          "when": "viewItem =~ /^commit:file$/ && !listMultiSelection",
+          "group": "1_show@3"
+        },
+        {
+          "command": "commitCorner.checkoutDetached",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "2_commit@1"
+        },
+        {
+          "command": "commitCorner.createBranch",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "2_commit@2"
+        },
+        {
+          "command": "commitCorner.createTag",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "2_commit@3"
+        },
+        {
+          "command": "commitCorner.cherryPick",
+          "when": "viewItem =~ /^commit/",
+          "group": "2_commit@4"
+        },
+        {
+          "command": "commitCorner.revert",
+          "when": "viewItem =~ /^commit/",
+          "group": "2_commit@5"
+        },
+        {
+          "command": "commitCorner.reset",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "2_commit@6"
+        },
+        {
+          "command": "commitCorner.rebaseInteractive",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "2_commit@7"
+        },
+        {
+          "command": "commitCorner.compareWithWorkingTree",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "3_compare@2"
+        },
+        {
+          "command": "commitCorner.restoreFileFromCommit",
+          "when": "viewItem =~ /^commit:file$/ && !listMultiSelection",
+          "group": "4_file@1"
+        },
+        {
+          "command": "commitCorner.fixupStagedInto",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "2_rewrite@0"
+        },
+        {
+          "command": "commitCorner.squashIntoParent",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "2_rewrite@1"
+        },
+        {
+          "command": "commitCorner.fixupIntoParent",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "2_rewrite@2"
+        },
+        {
+          "command": "commitCorner.rewordCommit",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "2_rewrite@3"
+        },
+        {
+          "command": "commitCorner.dropCommit",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "2_rewrite@4"
+        },
+        {
+          "command": "commitCorner.createPatch",
+          "when": "viewItem =~ /^commit/",
+          "group": "8_patch@1"
+        },
+        {
+          "command": "commitCorner.bisectStart",
+          "when": "viewItem =~ /^commit/ && !commitCorner.bisecting && !listMultiSelection",
+          "group": "8_patch@2"
+        },
+        {
+          "command": "commitCorner.copySha",
+          "when": "viewItem =~ /^commit/",
+          "group": "9_copy@1"
+        },
+        {
+          "command": "commitCorner.copyMessage",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "9_copy@2"
+        },
+        {
+          "command": "commitCorner.openCommitOnGitHub",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "9_copy@3"
+        },
+        {
+          "command": "commitCorner.openFileAtCommit",
+          "when": "viewItem =~ /^file$/ && !listMultiSelection",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.compareFileWithWorkingTree",
+          "when": "viewItem =~ /^file$/ && !listMultiSelection",
+          "group": "inline@2"
+        },
+        {
+          "command": "commitCorner.openFileAtCommit",
+          "when": "viewItem =~ /^file$/ && !listMultiSelection",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.compareFileWithWorkingTree",
+          "when": "viewItem =~ /^file$/ && !listMultiSelection",
+          "group": "1@2"
+        },
+        {
+          "command": "commitCorner.restoreFileFromCommit",
+          "when": "viewItem =~ /^file$/ && !listMultiSelection",
+          "group": "2@1"
+        },
+        {
+          "command": "commitCorner.stashApply",
+          "when": "viewItem =~ /^stash$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.stashPop",
+          "when": "viewItem =~ /^stash$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "commitCorner.stashDrop",
+          "when": "viewItem =~ /^stash$/",
+          "group": "inline@3"
+        },
+        {
+          "command": "commitCorner.stashShow",
+          "when": "viewItem =~ /^stash$/",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.stashApply",
+          "when": "viewItem =~ /^stash$/",
+          "group": "2@1"
+        },
+        {
+          "command": "commitCorner.stashPop",
+          "when": "viewItem =~ /^stash$/",
+          "group": "2@2"
+        },
+        {
+          "command": "commitCorner.stashBranch",
+          "when": "viewItem =~ /^stash$/",
+          "group": "2@3"
+        },
+        {
+          "command": "commitCorner.stashDrop",
+          "when": "viewItem =~ /^stash$/",
+          "group": "3@1"
+        },
+        {
+          "command": "commitCorner.worktreeOpen",
+          "when": "viewItem =~ /^worktree(?!.*:current)/",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.worktreeOpen",
+          "when": "viewItem =~ /^worktree/",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.worktreeOpenHere",
+          "when": "viewItem =~ /^worktree(?!.*:current)/",
+          "group": "1@2"
+        },
+        {
+          "command": "commitCorner.worktreeAddToWorkspace",
+          "when": "viewItem =~ /^worktree/",
+          "group": "1@3"
+        },
+        {
+          "command": "commitCorner.worktreeLock",
+          "when": "viewItem =~ /^worktree(?!.*:locked)/",
+          "group": "2@1"
+        },
+        {
+          "command": "commitCorner.worktreeUnlock",
+          "when": "viewItem =~ /^worktree.*:locked/",
+          "group": "2@2"
+        },
+        {
+          "command": "commitCorner.worktreeRemove",
+          "when": "viewItem =~ /^worktree(?!:main)(?!.*:current)/",
+          "group": "3@1"
+        },
+        {
+          "command": "commitCorner.prOpen",
+          "when": "viewItem =~ /^pullRequest$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.prCheckout",
+          "when": "viewItem =~ /^pullRequest$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "commitCorner.prOpen",
+          "when": "viewItem =~ /^pullRequest$/",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.prCompare",
+          "when": "viewItem =~ /^pullRequest$/",
+          "group": "1@2"
+        },
+        {
+          "command": "commitCorner.prShowInGraph",
+          "when": "viewItem =~ /^pullRequest$/",
+          "group": "1@3"
+        },
+        {
+          "command": "commitCorner.prCheckout",
+          "when": "viewItem =~ /^pullRequest$/",
+          "group": "2@1"
+        },
+        {
+          "command": "commitCorner.prChangeBase",
+          "when": "viewItem =~ /^pullRequest$/",
+          "group": "2@2"
+        },
+        {
+          "command": "commitCorner.prOpenOnGitHub",
+          "when": "viewItem =~ /^pullRequest$/",
+          "group": "3@1"
+        },
+        {
+          "command": "commitCorner.prCopyNumber",
+          "when": "viewItem =~ /^pullRequest$/",
+          "group": "3@2"
+        },
+        {
+          "command": "commitCorner.compareOpenAll",
+          "when": "viewItem =~ /^compareFiles$/",
+          "group": "inline"
+        },
+        {
+          "command": "commitCorner.cherryPickNoCommit",
+          "when": "viewItem =~ /^commit/",
+          "group": "2_commit@4b"
+        },
+        {
+          "command": "commitCorner.showCommitParent2",
+          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "group": "1_show@1b"
+        },
+        {
+          "command": "commitCorner.createPullRequest",
+          "when": "view == commitCorner.branches && viewItem =~ /^branch/",
+          "group": "4_remote@3"
+        },
+        {
+          "command": "commitCorner.stash",
+          "when": "view == commitCorner.branches && viewItem == group:stashes",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.stash",
+          "when": "view == commitCorner.branches && viewItem == group:stashes",
+          "group": "1_group@1"
+        },
+        {
+          "command": "commitCorner.stashIncludeUntracked",
+          "when": "view == commitCorner.branches && viewItem == group:stashes",
+          "group": "1@1"
+        },
+        {
+          "command": "commitCorner.stashKeepIndex",
+          "when": "view == commitCorner.branches && viewItem == group:stashes",
+          "group": "1@2"
+        },
+        {
+          "command": "commitCorner.stashStaged",
+          "when": "view == commitCorner.branches && viewItem == group:stashes",
+          "group": "1@3"
+        },
+        {
+          "command": "commitCorner.worktreeOpenChanges",
+          "when": "viewItem =~ /^worktree/",
+          "group": "inline@0"
+        },
+        {
+          "command": "commitCorner.worktreeOpenChanges",
+          "when": "viewItem =~ /^worktree/",
+          "group": "0_changes@1"
+        },
+        {
+          "command": "commitCorner.worktreeChangesVsBase",
+          "when": "viewItem =~ /^worktree(?!:main)/",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.worktreeChangesVsBase",
+          "when": "viewItem =~ /^worktree(?!:main)/",
+          "group": "0_changes@2"
+        },
+        {
+          "command": "commitCorner.prSummarize",
+          "when": "viewItem == viewedGroup:pr && config.commitCorner.ai.enabled",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.worktreeSummarize",
+          "when": "viewItem == viewedGroup:worktree && config.commitCorner.ai.enabled",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.worktreeChangesVsBase",
+          "when": "viewItem == viewedGroup:worktree",
+          "group": "inline@2"
+        },
+        {
+          "command": "commitCorner.viewedMarkAll",
+          "when": "viewItem =~ /^viewedGroup/",
+          "group": "1_viewed@1"
+        },
+        {
+          "command": "commitCorner.viewedClear",
+          "when": "viewItem =~ /^viewedGroup/",
+          "group": "1_viewed@2"
+        },
+        {
+          "command": "commitCorner.prSummarize",
+          "when": "viewItem == viewedGroup:pr && config.commitCorner.ai.enabled",
+          "group": "0_review@1"
+        },
+        {
+          "command": "commitCorner.worktreeSummarize",
+          "when": "viewItem == viewedGroup:worktree && config.commitCorner.ai.enabled",
+          "group": "0_review@1"
+        },
+        {
+          "command": "commitCorner.worktreeChangesVsBase",
+          "when": "viewItem == viewedGroup:worktree",
+          "group": "0_review@2"
+        },
+        {
+          "command": "commitCorner.prSummarize",
+          "when": "viewItem =~ /^pullRequest$/ && config.commitCorner.ai.enabled",
+          "group": "1@4"
+        },
+        {
+          "command": "commitCorner.worktreeSummarize",
+          "when": "viewItem =~ /^worktree(?!:main)/ && config.commitCorner.ai.enabled",
+          "group": "0_changes@3"
+        },
+        {
+          "command": "commitCorner.toggleViewed",
+          "when": "view == commitCorner.worktrees && viewItem == changedFile:worktree",
+          "group": "0_review@0"
+        },
+        {
+          "command": "commitCorner.toggleViewed",
+          "when": "view == commitCorner.pullRequests && viewItem =~ /^file/ && !listMultiSelection",
+          "group": "0_review@0"
+        }
+      ],
+      "webview/context": [
+        {
+          "command": "commitCorner.graph.worktreeChanges",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && wip",
+          "group": "1_show@0"
+        },
+        {
+          "command": "commitCorner.graph.showCommit",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit'",
+          "group": "1_show@1"
+        },
+        {
+          "command": "commitCorner.graph.showRange",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && multi",
+          "group": "1_show@2"
+        },
+        {
+          "command": "commitCorner.graph.checkout",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
+          "group": "2_checkout@1"
+        },
+        {
+          "command": "commitCorner.graph.createBranch",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
+          "group": "2_checkout@2"
+        },
+        {
+          "command": "commitCorner.graph.createTag",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
+          "group": "2_checkout@3"
+        },
+        {
+          "command": "commitCorner.graph.cherryPick",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit'",
+          "group": "3_apply@1"
+        },
+        {
+          "command": "commitCorner.graph.revert",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit'",
+          "group": "3_apply@2"
+        },
+        {
+          "command": "commitCorner.graph.merge",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
+          "group": "4_branch@1"
+        },
+        {
+          "command": "commitCorner.graph.rebase",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
+          "group": "4_branch@2"
+        },
+        {
+          "command": "commitCorner.graph.rebaseInteractive",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
+          "group": "4_branch@3"
+        },
+        {
+          "command": "commitCorner.graph.reset",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
+          "group": "4_branch@4"
+        },
+        {
+          "command": "commitCorner.graph.compareWithWorkingTree",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
+          "group": "5_compare@1"
+        },
+        {
+          "command": "commitCorner.graph.compareWithCurrent",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
+          "group": "5_compare@2"
+        },
+        {
+          "command": "commitCorner.graph.selectForCompare",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
+          "group": "5_compare@3"
+        },
+        {
+          "command": "commitCorner.graph.compareWithSelected",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi && commitCorner.hasPendingCompare",
+          "group": "5_compare@4"
+        },
+        {
+          "command": "commitCorner.graph.squashSelected",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && multi && allOnHead",
+          "group": "4_rewrite@0"
+        },
+        {
+          "command": "commitCorner.graph.fixupStagedInto",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi && onHead",
+          "group": "4_rewrite@0"
+        },
+        {
+          "command": "commitCorner.graph.squash",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi && onHead",
+          "group": "4_rewrite@1"
+        },
+        {
+          "command": "commitCorner.graph.fixup",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi && onHead",
+          "group": "4_rewrite@2"
+        },
+        {
+          "command": "commitCorner.graph.reword",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi && onHead",
+          "group": "4_rewrite@3"
+        },
+        {
+          "command": "commitCorner.graph.drop",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi && onHead",
+          "group": "4_rewrite@4"
+        },
+        {
+          "command": "commitCorner.graph.createPatch",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit'",
+          "group": "8_more@1"
+        },
+        {
+          "command": "commitCorner.graph.bisectStart",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi && !commitCorner.bisecting",
+          "group": "8_more@2"
+        },
+        {
+          "command": "commitCorner.graph.bisectGood",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi && commitCorner.bisecting",
+          "group": "8_more@2"
+        },
+        {
+          "command": "commitCorner.graph.bisectBad",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi && commitCorner.bisecting",
+          "group": "8_more@3"
+        },
+        {
+          "command": "commitCorner.graph.copySha",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit'",
+          "group": "9_copy@1"
+        },
+        {
+          "command": "commitCorner.graph.copyMessage",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
+          "group": "9_copy@2"
+        },
+        {
+          "command": "commitCorner.graph.openOnGitHub",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
+          "group": "9_copy@3"
+        },
+        {
+          "command": "commitCorner.graph.refCheckout",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'ref' && !isCurrent",
+          "group": "1_ref@1"
+        },
+        {
+          "command": "commitCorner.graph.merge",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'ref' && !isCurrent",
+          "group": "1_ref@2"
+        },
+        {
+          "command": "commitCorner.graph.rebase",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'ref' && !isCurrent",
+          "group": "1_ref@3"
+        },
+        {
+          "command": "commitCorner.graph.compareWithCurrent",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'ref' && !isCurrent",
+          "group": "2_ref@1"
+        },
+        {
+          "command": "commitCorner.graph.selectForCompare",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'ref'",
+          "group": "2_ref@2"
+        },
+        {
+          "command": "commitCorner.graph.compareWithSelected",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'ref' && commitCorner.hasPendingCompare",
+          "group": "2_ref@3"
+        },
+        {
+          "command": "commitCorner.graph.createBranch",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'ref'",
+          "group": "3_ref@1"
+        },
+        {
+          "command": "commitCorner.graph.refDelete",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'ref' && !isCurrent",
+          "group": "3_ref@2"
+        },
+        {
+          "command": "commitCorner.graph.copySha",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'ref'",
+          "group": "9_copy@1"
+        },
+        {
+          "command": "commitCorner.graph.createPullRequest",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'ref' && refType == 'branch'",
+          "group": "3_ref@3"
+        },
+        {
+          "command": "commitCorner.graph.summarize",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && config.commitCorner.ai.enabled",
+          "group": "1_show@3"
+        }
+      ],
+      "commitCorner.sidebar.switch": [
+        {
+          "command": "commitCorner.sidebar.to.graphView",
+          "when": "view != commitCorner.graphView",
+          "group": "1_views@0"
+        },
+        {
+          "command": "commitCorner.sidebar.to.branches",
+          "when": "view != commitCorner.branches",
+          "group": "1_views@1"
+        },
+        {
+          "command": "commitCorner.sidebar.to.pullRequests",
+          "when": "view != commitCorner.pullRequests",
+          "group": "1_views@2"
+        },
+        {
+          "command": "commitCorner.sidebar.to.compare",
+          "when": "view != commitCorner.compare",
+          "group": "1_views@3"
+        },
+        {
+          "command": "commitCorner.sidebar.to.fileHistory",
+          "when": "view != commitCorner.fileHistory",
+          "group": "1_views@4"
+        },
+        {
+          "command": "commitCorner.sidebar.to.worktrees",
+          "when": "view != commitCorner.worktrees",
+          "group": "1_views@5"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "commitCorner",
+          "title": "Commit Corner",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "commitCorner": [
+        {
+          "type": "webview",
+          "id": "commitCorner.graphView",
+          "name": "Graph",
+          "icon": "$(git-merge)",
+          "contextualTitle": "Commit Corner",
+          "initialSize": 600
+        },
+        {
+          "id": "commitCorner.branches",
+          "name": "Repository",
+          "icon": "$(repo)",
+          "contextualTitle": "Commit Corner",
+          "initialSize": 160
+        },
+        {
+          "id": "commitCorner.pullRequests",
+          "name": "Pull Requests",
+          "icon": "$(git-pull-request)",
+          "contextualTitle": "Commit Corner",
+          "initialSize": 100
+        },
+        {
+          "id": "commitCorner.compare",
+          "name": "Compare",
+          "icon": "$(git-compare)",
+          "contextualTitle": "Commit Corner",
+          "initialSize": 120,
+          "visibility": "collapsed"
+        },
+        {
+          "id": "commitCorner.fileHistory",
+          "name": "File History",
+          "icon": "$(history)",
+          "contextualTitle": "Commit Corner",
+          "initialSize": 160,
+          "visibility": "collapsed"
+        },
+        {
+          "id": "commitCorner.worktrees",
+          "name": "Worktrees",
+          "icon": "$(list-tree)",
+          "contextualTitle": "Commit Corner",
+          "initialSize": 150,
+          "visibility": "collapsed"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "commitCorner.branches",
+        "contents": "No git repository found in this workspace.\n[Initialize Repository](command:commitCorner.init)\n[Clone Repository…](command:commitCorner.clone)\n[Open Repository…](command:commitCorner.openRepository)",
+        "when": "!commitCorner.hasRepository"
+      },
+      {
+        "view": "commitCorner.pullRequests",
+        "contents": "No git repository found in this workspace.\n[Initialize Repository](command:commitCorner.init)\n[Clone Repository…](command:commitCorner.clone)\n[Open Repository…](command:commitCorner.openRepository)",
+        "when": "!commitCorner.hasRepository"
+      },
+      {
+        "view": "commitCorner.compare",
+        "contents": "No git repository found in this workspace.\n[Initialize Repository](command:commitCorner.init)\n[Clone Repository…](command:commitCorner.clone)\n[Open Repository…](command:commitCorner.openRepository)",
+        "when": "!commitCorner.hasRepository"
+      },
+      {
+        "view": "commitCorner.fileHistory",
+        "contents": "No git repository found in this workspace.\n[Initialize Repository](command:commitCorner.init)\n[Clone Repository…](command:commitCorner.clone)\n[Open Repository…](command:commitCorner.openRepository)",
+        "when": "!commitCorner.hasRepository"
+      },
+      {
+        "view": "commitCorner.worktrees",
+        "contents": "No git repository found in this workspace.\n[Initialize Repository](command:commitCorner.init)\n[Clone Repository…](command:commitCorner.clone)\n[Open Repository…](command:commitCorner.openRepository)",
+        "when": "!commitCorner.hasRepository"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "commitCorner.rebaseTodo",
+        "displayName": "Commit Corner: Interactive Rebase",
+        "selector": [
+          {
+            "filenamePattern": "git-rebase-todo"
+          }
+        ],
+        "priority": "default"
+      }
+    ],
+    "resourceLabelFormatters": [
+      {
+        "scheme": "commitcorner",
+        "formatting": {
+          "label": "${path} (${query.rev})",
+          "separator": "/",
+          "workspaceSuffix": "Commit Corner",
+          "stripPathStartingSeparator": true
+        }
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "commitCorner.copySelection",
+        "args": "commitCorner.branches",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "focusedView == commitCorner.branches && !inputFocus"
+      },
+      {
+        "command": "commitCorner.copySelection",
+        "args": "commitCorner.pullRequests",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "focusedView == commitCorner.pullRequests && !inputFocus"
+      },
+      {
+        "command": "commitCorner.copySelection",
+        "args": "commitCorner.compare",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "focusedView == commitCorner.compare && !inputFocus"
+      },
+      {
+        "command": "commitCorner.copySelection",
+        "args": "commitCorner.fileHistory",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "focusedView == commitCorner.fileHistory && !inputFocus"
+      },
+      {
+        "command": "commitCorner.showGraph",
+        "key": "ctrl+alt+g ctrl+alt+g",
+        "mac": "cmd+alt+g cmd+alt+g",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.showGraph",
+        "key": "ctrl+alt+g g",
+        "mac": "cmd+alt+g g",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.fileHistory",
+        "key": "ctrl+alt+g ctrl+alt+h",
+        "mac": "cmd+alt+g cmd+alt+h",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.fileHistory",
+        "key": "ctrl+alt+g h",
+        "mac": "cmd+alt+g h",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.lineHistory",
+        "key": "ctrl+alt+g ctrl+alt+l",
+        "mac": "cmd+alt+g cmd+alt+l",
+        "when": "editorTextFocus && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.lineHistory",
+        "key": "ctrl+alt+g l",
+        "mac": "cmd+alt+g l",
+        "when": "editorTextFocus && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.toggleFileBlame",
+        "key": "ctrl+alt+g ctrl+alt+b",
+        "mac": "cmd+alt+g cmd+alt+b",
+        "when": "editorTextFocus && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.toggleFileBlame",
+        "key": "ctrl+alt+g b",
+        "mac": "cmd+alt+g b",
+        "when": "editorTextFocus && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.stageSelectedRanges",
+        "key": "ctrl+alt+g ctrl+alt+s",
+        "mac": "cmd+alt+g cmd+alt+s",
+        "when": "editorTextFocus && resourceScheme == file && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.stageSelectedRanges",
+        "key": "ctrl+alt+g s",
+        "mac": "cmd+alt+g s",
+        "when": "editorTextFocus && resourceScheme == file && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.unstageSelectedRanges",
+        "key": "ctrl+alt+g ctrl+alt+u",
+        "mac": "cmd+alt+g cmd+alt+u",
+        "when": "editorTextFocus && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.unstageSelectedRanges",
+        "key": "ctrl+alt+g u",
+        "mac": "cmd+alt+g u",
+        "when": "editorTextFocus && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.revertSelectedRanges",
+        "key": "ctrl+alt+g ctrl+alt+r",
+        "mac": "cmd+alt+g cmd+alt+r",
+        "when": "editorTextFocus && resourceScheme == file && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.revertSelectedRanges",
+        "key": "ctrl+alt+g r",
+        "mac": "cmd+alt+g r",
+        "when": "editorTextFocus && resourceScheme == file && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.compareRefs",
+        "key": "ctrl+alt+g ctrl+alt+c",
+        "mac": "cmd+alt+g cmd+alt+c",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.compareRefs",
+        "key": "ctrl+alt+g c",
+        "mac": "cmd+alt+g c",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.checkout",
+        "key": "ctrl+alt+g ctrl+alt+o",
+        "mac": "cmd+alt+g cmd+alt+o",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.checkout",
+        "key": "ctrl+alt+g o",
+        "mac": "cmd+alt+g o",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.prOpen",
+        "key": "ctrl+alt+g ctrl+alt+p",
+        "mac": "cmd+alt+g cmd+alt+p",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.prOpen",
+        "key": "ctrl+alt+g p",
+        "mac": "cmd+alt+g p",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.actions",
+        "key": "ctrl+alt+g ctrl+alt+space",
+        "mac": "cmd+alt+g cmd+alt+space",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.actions",
+        "key": "ctrl+alt+g space",
+        "mac": "cmd+alt+g space",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.stage",
+        "key": "ctrl+alt+g ctrl+alt+a",
+        "mac": "cmd+alt+g cmd+alt+a",
+        "when": "commitCorner.hasRepository && resourceScheme == file && !listFocus"
+      },
+      {
+        "command": "commitCorner.stage",
+        "key": "ctrl+alt+g a",
+        "mac": "cmd+alt+g a",
+        "when": "commitCorner.hasRepository && resourceScheme == file && !listFocus"
+      },
+      {
+        "command": "commitCorner.undoRewrite",
+        "key": "ctrl+alt+g ctrl+alt+shift+u",
+        "mac": "cmd+alt+g cmd+alt+shift+u",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.undoRewrite",
+        "key": "ctrl+alt+g shift+u",
+        "mac": "cmd+alt+g shift+u",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.unstage",
+        "key": "ctrl+alt+g ctrl+alt+shift+a",
+        "mac": "cmd+alt+g cmd+alt+shift+a",
+        "when": "commitCorner.hasRepository && !listFocus"
+      },
+      {
+        "command": "commitCorner.unstage",
+        "key": "ctrl+alt+g shift+a",
+        "mac": "cmd+alt+g shift+a",
+        "when": "commitCorner.hasRepository && !listFocus"
+      },
+      {
+        "command": "commitCorner.openChanges",
+        "key": "ctrl+alt+g ctrl+alt+d",
+        "mac": "cmd+alt+g cmd+alt+d",
+        "when": "commitCorner.hasRepository && resourceScheme == file && !listFocus"
+      },
+      {
+        "command": "commitCorner.openChanges",
+        "key": "ctrl+alt+g d",
+        "mac": "cmd+alt+g d",
+        "when": "commitCorner.hasRepository && resourceScheme == file && !listFocus"
+      },
+      {
+        "command": "commitCorner.diffPrevious",
+        "key": "ctrl+alt+g ctrl+alt+left",
+        "mac": "cmd+alt+g cmd+alt+left",
+        "when": "commitCorner.hasRepository && (resourceScheme == commitcorner || isInDiffEditor)"
+      },
+      {
+        "command": "commitCorner.diffPrevious",
+        "key": "ctrl+alt+g left",
+        "mac": "cmd+alt+g left",
+        "when": "commitCorner.hasRepository && (resourceScheme == commitcorner || isInDiffEditor)"
+      },
+      {
+        "command": "commitCorner.diffNext",
+        "key": "ctrl+alt+g ctrl+alt+right",
+        "mac": "cmd+alt+g cmd+alt+right",
+        "when": "commitCorner.hasRepository && resourceScheme == commitcorner"
+      },
+      {
+        "command": "commitCorner.diffNext",
+        "key": "ctrl+alt+g right",
+        "mac": "cmd+alt+g right",
+        "when": "commitCorner.hasRepository && resourceScheme == commitcorner"
+      },
+      {
+        "command": "commitCorner.commit",
+        "key": "ctrl+alt+g ctrl+alt+enter",
+        "mac": "cmd+alt+g cmd+alt+enter",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.commit",
+        "key": "ctrl+alt+g enter",
+        "mac": "cmd+alt+g enter",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.fetch",
+        "key": "ctrl+alt+g ctrl+alt+f",
+        "mac": "cmd+alt+g cmd+alt+f",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.fetch",
+        "key": "ctrl+alt+g f",
+        "mac": "cmd+alt+g f",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.sync",
+        "key": "ctrl+alt+g ctrl+alt+y",
+        "mac": "cmd+alt+g cmd+alt+y",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.sync",
+        "key": "ctrl+alt+g y",
+        "mac": "cmd+alt+g y",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.stageChange",
+        "key": "ctrl+alt+g ctrl+alt+shift+s",
+        "mac": "cmd+alt+g cmd+alt+shift+s",
+        "when": "editorTextFocus && resourceScheme == file && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.stageChange",
+        "key": "ctrl+alt+g shift+s",
+        "mac": "cmd+alt+g shift+s",
+        "when": "editorTextFocus && resourceScheme == file && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.revertChange",
+        "key": "ctrl+alt+g ctrl+alt+shift+r",
+        "mac": "cmd+alt+g cmd+alt+shift+r",
+        "when": "editorTextFocus && resourceScheme == file && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.revertChange",
+        "key": "ctrl+alt+g shift+r",
+        "mac": "cmd+alt+g shift+r",
+        "when": "editorTextFocus && resourceScheme == file && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.showLineCommit",
+        "key": "ctrl+alt+g ctrl+alt+i",
+        "mac": "cmd+alt+g cmd+alt+i",
+        "when": "editorTextFocus && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.showLineCommit",
+        "key": "ctrl+alt+g i",
+        "mac": "cmd+alt+g i",
+        "when": "editorTextFocus && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.blamePrevious",
+        "key": "ctrl+alt+g ctrl+alt+shift+b",
+        "mac": "cmd+alt+g cmd+alt+shift+b",
+        "when": "editorTextFocus && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.blamePrevious",
+        "key": "ctrl+alt+g shift+b",
+        "mac": "cmd+alt+g shift+b",
+        "when": "editorTextFocus && commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.push",
+        "key": "ctrl+alt+g ctrl+alt+shift+p",
+        "mac": "cmd+alt+g cmd+alt+shift+p",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.push",
+        "key": "ctrl+alt+g shift+p",
+        "mac": "cmd+alt+g shift+p",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.pull",
+        "key": "ctrl+alt+g ctrl+alt+shift+f",
+        "mac": "cmd+alt+g cmd+alt+shift+f",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.pull",
+        "key": "ctrl+alt+g shift+f",
+        "mac": "cmd+alt+g shift+f",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.bisectGood",
+        "key": "ctrl+alt+g ctrl+alt+shift+g",
+        "mac": "cmd+alt+g cmd+alt+shift+g",
+        "when": "commitCorner.hasRepository && commitCorner.bisecting"
+      },
+      {
+        "command": "commitCorner.bisectGood",
+        "key": "ctrl+alt+g shift+g",
+        "mac": "cmd+alt+g shift+g",
+        "when": "commitCorner.hasRepository && commitCorner.bisecting"
+      },
+      {
+        "command": "commitCorner.bisectBad",
+        "key": "ctrl+alt+g ctrl+alt+shift+x",
+        "mac": "cmd+alt+g cmd+alt+shift+x",
+        "when": "commitCorner.hasRepository && commitCorner.bisecting"
+      },
+      {
+        "command": "commitCorner.bisectBad",
+        "key": "ctrl+alt+g shift+x",
+        "mac": "cmd+alt+g shift+x",
+        "when": "commitCorner.hasRepository && commitCorner.bisecting"
+      },
+      {
+        "command": "commitCorner.bisectSkip",
+        "key": "ctrl+alt+g ctrl+alt+shift+k",
+        "mac": "cmd+alt+g cmd+alt+shift+k",
+        "when": "commitCorner.hasRepository && commitCorner.bisecting"
+      },
+      {
+        "command": "commitCorner.bisectSkip",
+        "key": "ctrl+alt+g shift+k",
+        "mac": "cmd+alt+g shift+k",
+        "when": "commitCorner.hasRepository && commitCorner.bisecting"
+      },
+      {
+        "command": "commitCorner.view.deleteItem",
+        "key": "delete",
+        "mac": "cmd+backspace",
+        "when": "focusedView == commitCorner.branches && !inputFocus",
+        "args": "branches"
+      },
+      {
+        "command": "commitCorner.view.renameItem",
+        "key": "f2",
+        "mac": "f2",
+        "when": "focusedView == commitCorner.branches && !inputFocus",
+        "args": "branches"
+      },
+      {
+        "command": "commitCorner.showWorktrees",
+        "key": "ctrl+alt+g ctrl+alt+w",
+        "mac": "cmd+alt+g cmd+alt+w",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.showWorktrees",
+        "key": "ctrl+alt+g w",
+        "mac": "cmd+alt+g w",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.graphView.focusList",
+        "key": "ctrl+alt+g ctrl+alt+v",
+        "mac": "cmd+alt+g cmd+alt+v"
+      },
+      {
+        "command": "commitCorner.graphView.focusList",
+        "key": "ctrl+alt+g v",
+        "mac": "cmd+alt+g v"
+      },
+      {
+        "command": "commitCorner.showActivity",
+        "key": "ctrl+alt+g ctrl+alt+t",
+        "mac": "cmd+alt+g cmd+alt+t",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.showActivity",
+        "key": "ctrl+alt+g t",
+        "mac": "cmd+alt+g t",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.stash",
+        "key": "ctrl+alt+g ctrl+alt+z",
+        "mac": "cmd+alt+g cmd+alt+z",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.stash",
+        "key": "ctrl+alt+g z",
+        "mac": "cmd+alt+g z",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.stashPop",
+        "key": "ctrl+alt+g ctrl+alt+shift+z",
+        "mac": "cmd+alt+g cmd+alt+shift+z",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.stashPop",
+        "key": "ctrl+alt+g shift+z",
+        "mac": "cmd+alt+g shift+z",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.createPullRequest",
+        "key": "ctrl+alt+g ctrl+alt+n",
+        "mac": "cmd+alt+g cmd+alt+n",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.createPullRequest",
+        "key": "ctrl+alt+g n",
+        "mac": "cmd+alt+g n",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.graphView.sinceLastLook",
+        "key": "ctrl+alt+g ctrl+alt+shift+v",
+        "mac": "cmd+alt+g cmd+alt+shift+v",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.graphView.sinceLastLook",
+        "key": "ctrl+alt+g shift+v",
+        "mac": "cmd+alt+g shift+v",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.view.deleteItem",
+        "key": "delete",
+        "mac": "cmd+backspace",
+        "when": "focusedView == commitCorner.worktrees && !inputFocus",
+        "args": "worktrees"
+      },
+      {
+        "command": "commitCorner.view.toggleViewedKey",
+        "key": "space",
+        "when": "focusedView == commitCorner.worktrees && !inputFocus",
+        "args": "worktrees"
+      },
+      {
+        "command": "commitCorner.view.toggleViewedKey",
+        "key": "space",
+        "when": "focusedView == commitCorner.pullRequests && !inputFocus",
+        "args": "pullRequests"
+      }
+    ],
+    "configuration": [
+      {
+        "id": "commitCorner.general",
+        "title": "Commit Corner: General",
+        "order": 0,
+        "properties": {
+          "commitCorner.gitPath": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "Path to the git executable. Empty uses `git` from `PATH`.",
+            "scope": "machine",
+            "order": 0
+          },
+          "commitCorner.repositoryScanDepth": {
+            "type": "number",
+            "default": 1,
+            "markdownDescription": "How many folder levels below each workspace folder to look for nested repositories (0 = only the workspace folders).",
+            "minimum": 0,
+            "maximum": 5,
+            "order": 1
+          },
+          "commitCorner.repositoryScanIgnoredFolders": {
+            "type": "array",
+            "default": [
+              "node_modules",
+              ".git",
+              "dist",
+              "out",
+              "build",
+              ".venv"
+            ],
+            "markdownDescription": "Folder names skipped when looking for nested repositories.",
+            "items": {
+              "type": "string"
+            },
+            "order": 2
+          },
+          "commitCorner.detectRepositoriesOfOpenFiles": {
+            "scope": "machine",
+            "type": "string",
+            "enum": [
+              "prompt",
+              "always",
+              "never"
+            ],
+            "enumDescriptions": [
+              "Ask before opening a repository outside the workspace (remembered per repository).",
+              "Open it without asking.",
+              "Never open it."
+            ],
+            "default": "prompt",
+            "order": 3,
+            "markdownDescription": "Whether to open the git repository of a file you open from **outside** the workspace folders. Opening runs git there, which can run programs that the repository's own configuration names, so it asks first by default."
+          },
+          "commitCorner.openRepositoryInParentFolders": {
+            "scope": "machine",
+            "type": "string",
+            "default": "prompt",
+            "markdownDescription": "What to do with a repository found in a folder *above* a workspace folder (e.g. a dotfiles repo in your home directory).",
+            "enum": [
+              "prompt",
+              "always",
+              "never"
+            ],
+            "order": 4
+          },
+          "commitCorner.refreshWhenUnfocused": {
+            "type": "string",
+            "enum": [
+              "throttled",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Keep views up to date while VS Code is in the background, at most every few seconds (watching an agent or a terminal at work).",
+              "Refresh only when the window gets focus again."
+            ],
+            "default": "throttled",
+            "markdownDescription": "How views refresh while the VS Code window is not focused.",
+            "order": 5
+          },
+          "commitCorner.statusLimit": {
+            "type": "number",
+            "default": 10000,
+            "markdownDescription": "Show at most this many changed files in Source Control (0 = no limit). Very large numbers usually mean a build folder is missing from .gitignore.",
+            "minimum": 0,
+            "order": 6
+          },
+          "commitCorner.dateFormat": {
+            "type": "string",
+            "default": "relative",
+            "markdownDescription": "How dates and ages are shown in the graph (editor and sidebar) and the commit and branch rows of the tree views. `relative` shows ages (`7h`, `3d`); hover cards and tooltips always add the full date.",
+            "enum": [
+              "relative",
+              "date",
+              "datetime"
+            ],
+            "order": 7
+          },
+          "commitCorner.ai.enabled": {
+            "type": "boolean",
+            "default": true,
+            "scope": "application",
+            "markdownDescription": "Generated commit messages (✨ in the graph's commit box and in Source Control) and summaries of changes (worktrees, pull requests, commits), written by a language model through VS Code's Language Model API — the provider you installed and signed in to, such as GitHub Copilot. Nothing is sent unless you ask; VS Code asks once before Commit Corner may use a model. What is sent: the diff you asked about (including the content of new, untracked files), file names, and — for commits — their messages, authors and dates; for a commit message also the branch name and the last 10 commit subjects. Files that may hold secrets (`.env`, keys, credentials…) are sent by name only and known token formats are removed (best effort). A user setting only: a workspace cannot turn it on."
+          },
+          "commitCorner.ai.modelFamily": {
+            "type": "string",
+            "default": "",
+            "scope": "application",
+            "markdownDescription": "The language model family to use (for example `gpt-4o` or `claude-sonnet-4`); empty: the default model of GitHub Copilot, else any available model. A user setting only."
+          },
+          "commitCorner.writeCommitGraph": {
+            "type": "boolean",
+            "default": true,
+            "scope": "machine-overridable",
+            "markdownDescription": "When a repository with 5,000 or more commits has no commit-graph file (git's index of the history, which `git gc` also writes), write it once in the background, 30 seconds after the repository opens. The graph and history views load much faster with it."
+          },
+          "commitCorner.ai.includeUntracked": {
+            "type": "boolean",
+            "default": true,
+            "scope": "application",
+            "markdownDescription": "Send the content of new, untracked files with the changes (a generated commit message when nothing is staged, a worktree summary). Off: new files are left out of what is sent (neither content nor names). A user setting only (a workspace cannot turn it on); `untrackedFiles: \"no\"` in your user settings also turns it off."
+          }
+        }
+      },
+      {
+        "id": "commitCorner.source-control",
+        "title": "Commit Corner: Source Control",
+        "order": 1,
+        "properties": {
+          "commitCorner.untrackedFiles": {
+            "type": "string",
+            "default": "all",
+            "markdownDescription": "How untracked files are listed: every file (`all`), only top-level untracked folders (`normal`), or not at all (`no`).",
+            "enum": [
+              "all",
+              "normal",
+              "no"
+            ],
+            "order": 0
+          },
+          "commitCorner.quickDiff": {
+            "type": "string",
+            "default": "auto",
+            "markdownDescription": "Gutter change markers against the index. `auto` enables them only when the built-in Git extension is disabled, to avoid duplicate markers.",
+            "enum": [
+              "auto",
+              "always",
+              "never"
+            ],
+            "order": 1
+          },
+          "commitCorner.countBadge": {
+            "type": "string",
+            "default": "auto",
+            "markdownDescription": "Number badge on the Source Control icon. `auto` shows it only when the built-in Git extension is disabled.",
+            "enum": [
+              "auto",
+              "always",
+              "never"
+            ],
+            "order": 2
+          },
+          "commitCorner.statusBar": {
+            "type": "string",
+            "default": "auto",
+            "markdownDescription": "Branch and sync items in the status bar. `auto` shows them only when the built-in Git extension is disabled. The merge/rebase-in-progress indicator is always shown.",
+            "enum": [
+              "auto",
+              "always",
+              "never"
+            ],
+            "order": 3
+          },
+          "commitCorner.explorerDecorations": {
+            "type": "string",
+            "default": "auto",
+            "markdownDescription": "Change badges and colours in the Explorer and editor tabs. `auto` enables them only when the built-in Git extension is disabled.",
+            "enum": [
+              "auto",
+              "always",
+              "never"
+            ],
+            "order": 4
+          },
+          "commitCorner.smartCommit": {
+            "type": "string",
+            "default": "ask",
+            "markdownDescription": "What to do when committing with nothing staged.",
+            "enum": [
+              "ask",
+              "always",
+              "never"
+            ],
+            "enumDescriptions": [
+              "Ask whether to stage everything first",
+              "Stage all changes (including untracked) and commit",
+              "Refuse; stage changes first"
+            ],
+            "order": 5
+          },
+          "commitCorner.protectedBranches": {
+            "type": "array",
+            "default": [],
+            "markdownDescription": "Branch names (wildcards allowed, e.g. `release/*`) that ask for confirmation before you commit to them directly.",
+            "items": {
+              "type": "string"
+            },
+            "order": 6
+          },
+          "commitCorner.openConflictsIn": {
+            "type": "string",
+            "default": "file",
+            "markdownDescription": "Where clicking a conflicted file opens it.",
+            "enum": [
+              "file",
+              "mergeEditor"
+            ],
+            "order": 7
+          }
+        }
+      },
+      {
+        "id": "commitCorner.branches-and-remotes",
+        "title": "Commit Corner: Branches and Remotes",
+        "order": 2,
+        "properties": {
+          "commitCorner.checkoutNewBranch": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Check out branches right after creating them.",
+            "order": 0
+          },
+          "commitCorner.fetchAllRemotes": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Fetch from all remotes (`git fetch --all`) instead of only the default one.",
+            "order": 1
+          },
+          "commitCorner.pullRebase": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Pull with `--rebase` by default. When off, git's own `pull.rebase` setting applies.",
+            "order": 2
+          },
+          "commitCorner.pushFollowTags": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Push annotated tags that point at pushed commits (`--follow-tags`).",
+            "order": 3
+          },
+          "commitCorner.syncAlwaysPull": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Sync always pulls before pushing, even when the last fetch showed nothing new.",
+            "order": 4
+          },
+          "commitCorner.autoFetchMinutes": {
+            "scope": "machine",
+            "type": "number",
+            "default": 0,
+            "markdownDescription": "Fetch all repositories every N minutes while the window is focused. 0 disables auto-fetch.",
+            "minimum": 0,
+            "order": 5
+          },
+          "commitCorner.networkTimeoutSeconds": {
+            "type": "number",
+            "default": 0,
+            "markdownDescription": "Cancel fetch, pull and push after this many seconds (0 = no limit; you can always cancel from the notification). Auto-fetch uses 120 seconds when this is 0.",
+            "minimum": 0,
+            "order": 6
+          },
+          "commitCorner.askpass": {
+            "scope": "machine",
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Ask for credentials (HTTPS username/password or token, SSH key passphrase, host key confirmation) in VS Code dialogs. Requires a window reload to change.",
+            "order": 7
+          },
+          "commitCorner.githubAuthentication": {
+            "scope": "machine",
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "When git asks for the credentials of an HTTPS **github.com** remote, use the GitHub account signed in to VS Code (Accounts menu; asked once). The same, already granted session is also used for pull request details from the GitHub API (`commitCorner.pullRequests.githubApi`). Background fetches and the API use it only when already signed in.",
+            "order": 8
+          },
+          "commitCorner.githubHostAliases": {
+            "scope": "machine",
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "order": 20,
+            "markdownDescription": "SSH host aliases that stand for github.com (from `~/.ssh/config`, e.g. `github-work` in `git@github-work:org/repo.git`), so web links, permalinks and pull request details work for such remotes too."
+          }
+        }
+      },
+      {
+        "id": "commitCorner.graph",
+        "title": "Commit Corner: Graph",
+        "order": 3,
+        "properties": {
+          "commitCorner.graph.pageSize": {
+            "type": "number",
+            "default": 1000,
+            "markdownDescription": "Commits loaded per page in the graph.",
+            "minimum": 100,
+            "order": 0
+          },
+          "commitCorner.graph.showAuthor": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show the author column in the graph.",
+            "order": 1
+          },
+          "commitCorner.graph.showDate": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show the date column in the graph.",
+            "order": 2
+          },
+          "commitCorner.graph.showSha": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show the commit column in the graph.",
+            "order": 3
+          },
+          "commitCorner.graph.showChanges": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show the Changes column in the graph: lines added and deleted per commit, loaded for the rows on screen.",
+            "order": 4
+          },
+          "commitCorner.graph.order": {
+            "type": "string",
+            "enum": [
+              "topological",
+              "date"
+            ],
+            "enumDescriptions": [
+              "Branches stay together (each line of history in one piece).",
+              "Newest commit first, with Today / Yesterday / This week / This month / Older separators, like the sidebar."
+            ],
+            "default": "topological",
+            "order": 1,
+            "markdownDescription": "Order of the graph in the editor tab. The sidebar Graph always lists by date."
+          }
+        }
+      },
+      {
+        "id": "commitCorner.views",
+        "title": "Commit Corner: Views",
+        "order": 4,
+        "properties": {
+          "commitCorner.fileLayout": {
+            "type": "string",
+            "default": "tree",
+            "markdownDescription": "Show changed files as a folder tree or as a flat list in views.",
+            "enum": [
+              "tree",
+              "list"
+            ],
+            "order": 0
+          },
+          "commitCorner.showAuthorInLists": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show the author next to commits in tree views.",
+            "order": 1
+          },
+          "commitCorner.avatars": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show initials avatars (coloured per author, generated locally; nothing is downloaded) next to commits in the tree views.",
+            "order": 2
+          },
+          "commitCorner.treeStats": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show lines added and deleted next to commits in the tree views. They load in the background after the list is shown.",
+            "order": 3
+          },
+          "commitCorner.branchSort": {
+            "type": "string",
+            "default": "date",
+            "markdownDescription": "Sort branches by most recent commit or by name.",
+            "enum": [
+              "date",
+              "name"
+            ],
+            "order": 4
+          },
+          "commitCorner.branchCommitsLimit": {
+            "type": "number",
+            "default": 50,
+            "markdownDescription": "How many commits to list under an expanded branch.",
+            "minimum": 1,
+            "order": 5
+          },
+          "commitCorner.fileHistoryLimit": {
+            "type": "number",
+            "default": 200,
+            "markdownDescription": "Commits loaded per page in File History.",
+            "minimum": 10,
+            "order": 6
+          },
+          "commitCorner.timeSeparators": {
+            "type": "boolean",
+            "default": true,
+            "order": 9,
+            "markdownDescription": "Split commit lists in the tree views (File History, branches, Outgoing/Incoming, Compare, pull requests) into Today, Yesterday, This week, This month and Older, like the sidebar Graph."
+          },
+          "commitCorner.sidebar.oneViewAtATime": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show one Commit Corner view at a time in the sidebar (the Graph by default); switch with the icons in each view's title bar or the Actions hub (`Ctrl+Alt+G Space`). VS Code cannot collapse a view for an extension, so the others are hidden, not collapsed. Off: all six views stack."
+          }
+        }
+      },
+      {
+        "id": "commitCorner.pull-requests",
+        "title": "Commit Corner: Pull Requests",
+        "order": 5,
+        "properties": {
+          "commitCorner.pullRequests.listOnOpen": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "List pull requests (one `git ls-remote`) automatically when the view is shown.",
+            "order": 0
+          },
+          "commitCorner.pullRequests.pageSize": {
+            "type": "number",
+            "default": 50,
+            "markdownDescription": "Pull requests shown before \"Show more\".",
+            "minimum": 5,
+            "order": 1
+          },
+          "commitCorner.pullRequests.githubApi": {
+            "scope": "machine",
+            "type": "string",
+            "enum": [
+              "auto",
+              "off"
+            ],
+            "enumDescriptions": [
+              "Titles, authors, state, reviews and checks from the GitHub REST API (api.github.com), with your VS Code GitHub sign-in when there is one; public repositories also work signed out.",
+              "Git only: pull requests are listed by number with `git ls-remote`."
+            ],
+            "default": "auto",
+            "order": 0,
+            "markdownDescription": "Where the Pull Requests view gets pull request details from. Diffs always come from git (`refs/pull/*`)."
+          }
+        }
+      },
+      {
+        "id": "commitCorner.blame",
+        "title": "Commit Corner: Blame",
+        "order": 6,
+        "properties": {
+          "commitCorner.blame.currentLine": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show author, date and message at the end of the current line.",
+            "order": 0
+          },
+          "commitCorner.blame.statusBar": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show the blame of the current line in the status bar.",
+            "order": 1
+          },
+          "commitCorner.blame.maxLength": {
+            "type": "number",
+            "default": 90,
+            "markdownDescription": "Maximum length of the current-line blame text.",
+            "minimum": 20,
+            "order": 2
+          },
+          "commitCorner.blame.maxLines": {
+            "type": "number",
+            "default": 20000,
+            "markdownDescription": "Do not blame files longer than this.",
+            "minimum": 100,
+            "order": 3
+          },
+          "commitCorner.blame.ignoreWhitespace": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Ignore whitespace-only changes when blaming (`git blame -w`).",
+            "order": 4
+          },
+          "commitCorner.blame.detectMovedLines": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Follow lines moved or copied from other files (`git blame -C`). More accurate, noticeably slower on large histories.",
+            "order": 5
+          },
+          "commitCorner.blame.delayAfterEdit": {
+            "type": "number",
+            "default": 1000,
+            "markdownDescription": "Milliseconds to wait after typing before blaming the unsaved text again.",
+            "minimum": 100,
+            "order": 6
+          }
+        }
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "commitCorner.start",
+        "title": "Get started with Commit Corner",
+        "description": "The graph and its staging area, one Git UI, and reviewing what an AI agent did in its worktree.",
+        "steps": [
+          {
+            "id": "graph",
+            "title": "Open the graph",
+            "description": "The sidebar graph shows what is going on and lets you stage and commit right there.\n[Open the Graph](command:commitCorner.sidebar.graphView)",
+            "media": {
+              "markdown": "media/walkthrough/graph.md"
+            },
+            "completionEvents": [
+              "onCommand:commitCorner.sidebar.graphView",
+              "onView:commitCorner.graphView"
+            ]
+          },
+          {
+            "id": "gitUi",
+            "title": "Use one Git UI",
+            "description": "Turn the built-in Git off so Source Control shows each repository once.\n[Use Commit Corner Only…](command:commitCorner.replaceBuiltInGit)",
+            "media": {
+              "markdown": "media/walkthrough/git-ui.md"
+            },
+            "when": "!commitCorner.builtInGitOff",
+            "completionEvents": [
+              "onCommand:commitCorner.replaceBuiltInGit"
+            ]
+          },
+          {
+            "id": "review",
+            "title": "Review an agent's worktree",
+            "description": "Changes vs main, file by file, with Viewed checkboxes and a summary.\n[Show Worktrees](command:commitCorner.sidebar.worktrees)",
+            "media": {
+              "markdown": "media/walkthrough/review.md"
+            },
+            "completionEvents": [
+              "onCommand:commitCorner.sidebar.worktrees",
+              "onCommand:commitCorner.worktreeChangesVsBase"
+            ]
+          },
+          {
+            "id": "keyboard",
+            "title": "Everything by keyboard",
+            "description": "One chord opens every action.\n[Open the Actions Hub](command:commitCorner.actions)",
+            "media": {
+              "markdown": "media/walkthrough/keyboard.md"
+            },
+            "completionEvents": [
+              "onCommand:commitCorner.actions"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "devDependencies": {
+    "@vscode/test-cli": "0.0.15",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0"
+  },
+  "overrides": {
+    "serialize-javascript": "7.1.2",
+    "diff": "8.0.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/t0mdev/commit-corner.git"
+  },
+  "homepage": "https://github.com/t0mdev/commit-corner#readme",
+  "bugs": {
+    "url": "https://github.com/t0mdev/commit-corner/issues"
+  },
+  "galleryBanner": {
+    "color": "#1e1e2e",
+    "theme": "dark"
+  }
+}

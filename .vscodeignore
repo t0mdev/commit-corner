@@ -1,0 +1,10 @@
+# Only what the extension needs at runtime goes into the .vsix.
+**
+!package.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+!src/**
+!media/**
+!scripts/sequence-editor.js
+!scripts/askpass-main.js

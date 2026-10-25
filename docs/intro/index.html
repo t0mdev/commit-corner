@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Commit Corner Intro</title>
+  <!-- Open this file in a browser (reveal.js comes from the CDN). Arrow keys or Space go on,
+       Esc shows all slides, F goes full screen, S opens the speaker notes. -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reset.css" integrity="sha384-AJKv9Ui5SfA0VsFksFI9GuA1ztX9Ca3CLP6HGfX4YY/tYSVodC+PUszaQZFIlkuy" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css" integrity="sha384-YgvgKeZJykuztG+iQPoZHNZENTFZvOcOJ/uRzmJTje6GHYN9zAw+y5rx/L8MQKA/" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/black.css" integrity="sha384-rGf1FAL+Buyw4LpDboONln7P/UqlyCftbnLG8bC6nNAaW3LcuHtUg5t5KYY3U+L8" crossorigin="anonymous">
+  <style>
+    :root {
+      --r-background-color: #17181b;
+      --r-main-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --r-heading-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --r-main-font-size: 30px;
+      --r-heading-text-transform: none;
+      --r-heading-font-weight: 650;
+      --r-link-color: #6cb6ff;
+      --accent: #6cb6ff;
+      --muted: #9aa0a6;
+      --card: #202226;
+      --line: #33363b;
+      --green: #7ee787;
+      --orange: #f0b45a;
+    }
+    body { background: var(--r-background-color); }
+    .reveal h1 { font-size: 2.1em; }
+    .reveal h2 { font-size: 1.35em; margin-bottom: 0.15em; }
+    .reveal .lead { color: var(--muted); font-size: 0.75em; margin: 0 0 0.9em; }
+    .reveal ul { display: block; margin: 0; }
+    .reveal li { font-size: 0.68em; line-height: 1.45; margin-bottom: 0.35em; }
+    .reveal li li { font-size: 0.92em; color: var(--muted); }
+    .reveal kbd {
+      font-family: ui-monospace, "Cascadia Code", Menlo, monospace; font-size: 0.85em;
+      padding: 0.05em 0.35em; border: 1px solid var(--line); border-bottom-width: 2px;
+      border-radius: 5px; background: var(--card); color: #e6e6e6; white-space: nowrap;
+    }
+    .reveal strong { color: #fff; }
+    .split { display: grid; grid-template-columns: 1fr 1.1fr; gap: 1.2em; align-items: center; text-align: left; }
+    .split.wide { grid-template-columns: 1.45fr 1fr; }
+    .shot { width: 100%; border-radius: 8px; border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); }
+    .reveal img.shot { margin: 0; max-height: 560px; object-fit: contain; object-position: top left; }
+    .tag { display: inline-block; font-size: 0.42em; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 99px; padding: 0.1em 0.7em; margin-bottom: 0.6em; }
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8em; margin-top: 1em; text-align: left; }
+    .step { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 0.8em 0.9em; }
+    .step b { display: block; font-size: 0.8em; margin-bottom: 0.3em; color: #fff; }
+    .step span { display: block; font-size: 0.55em; color: var(--muted); line-height: 1.45; }
+    .step .n { color: var(--accent); font-weight: 700; font-size: 0.55em; margin-bottom: 0.3em; }
+    .keys { display: grid; grid-template-columns: auto 1fr; gap: 0.35em 1em; text-align: left; font-size: 0.6em; align-items: baseline; }
+    .keys div:nth-child(odd) { white-space: nowrap; }
+    .keys div:nth-child(even) { color: #d0d0d0; }
+    .note { color: var(--muted); font-size: 0.5em; margin-top: 1em; }
+    .center { text-align: center; }
+  </style>
+</head>
+<body>
+<div class="reveal">
+  <div class="slides">
+
+    <!-- 1 · other -->
+    <section>
+      <div class="tag">Commit Corner for VS Code</div>
+      <h1>Watch, review, act</h1>
+      <p class="lead">Getting the most out of Commit Corner: one slide per view, plus the keys that tie them together.</p>
+      <div class="steps">
+        <div class="step"><div class="n">1 · WATCH</div><b>Graph</b><span>New commits glow as they arrive. A <b style="display:inline;font-size:1em">✎ 2</b> chip marks a commit whose worktree has uncommitted work.</span></div>
+        <div class="step"><div class="n">2 · REVIEW</div><b>Worktrees &amp; PRs</b><span>Changes vs main, file by file. <kbd>Space</kbd> ticks a file as <i>Viewed</i>, and it unticks itself when the agent changes it again.</span></div>
+        <div class="step"><div class="n">3 · ACT</div><b>Commit, compare, ship</b><span>Stage and commit right in the graph. ✨ writes commit messages and summaries. Push, rebase and cherry-pick are a key away.</span></div>
+      </div>
+      <aside class="notes">It can run next to the built-in Git, or replace it. Everything works by keyboard; every view is in the Commit Corner activity bar icon.</aside>
+    </section>
+
+    <!-- 2 · other -->
+    <section>
+      <h2>Getting around</h2>
+      <p class="lead">Every shortcut starts with <kbd>Ctrl+Alt+G</kbd>, then one key.</p>
+      <div class="split">
+        <div class="keys">
+          <div><kbd>Ctrl+Alt+G</kbd> <kbd>V</kbd></div><div><b>Back to the sidebar</b>: the Graph, keyboard in its list (from the editor too)</div>
+          <div><kbd>Ctrl+Alt+G</kbd> <kbd>Space</kbd></div><div>Actions hub: every view and action, searchable</div>
+          <div><kbd>Ctrl+Alt+G</kbd> <kbd>G</kbd></div><div>The full graph in an editor</div>
+          <div><kbd>Ctrl+Alt+G</kbd> <kbd>W</kbd> / <kbd>T</kbd></div><div>Worktrees overview / Repository Activity</div>
+          <div><kbd>Ctrl+Alt+G</kbd> <kbd>H</kbd> / <kbd>L</kbd></div><div>History of this file / of the selected lines</div>
+          <div><kbd>Ctrl+Alt+G</kbd> <kbd>Enter</kbd></div><div>Commit</div>
+          <div><kbd>?</kbd></div><div>In a graph: all of its keys</div>
+          <div><kbd>.</kbd> or <kbd>Shift+F10</kbd></div><div>Actions for the focused row, anywhere</div>
+        </div>
+        <img class="shot" src="images/hub.png" alt="The Actions hub: views and actions with their shortcuts">
+      </div>
+      <p class="note">One view at a time: the layers icon in each view's title bar (<i>Switch View</i>) moves between the six sidebar views.</p>
+    </section>
+
+    <!-- 3 · view -->
+    <section>
+      <div class="split">
+        <div>
+          <h2>Graph (sidebar)</h2>
+          <p class="lead"><kbd>Ctrl+Alt+G</kbd> <kbd>V</kbd>: what is going on, newest first</p>
+          <ul>
+            <li>Each row: <b>when</b> · <b>who</b> · <b>how much</b> · <b>what</b>, grouped into Today, Yesterday, This week…</li>
+            <li>A blue dot marks commits that arrived while you were away; <kbd>Ctrl+Alt+G</kbd> <kbd>Shift+V</kbd> shows the changes since you last looked</li>
+            <li><b>Uncommitted changes</b> on top: <kbd>→</kbd> opens a full staging area with a commit box
+              <ul><li><kbd>+</kbd> stages, <kbd>-</kbd> unstages, <kbd>Del</kbd> discards (a file, a folder or a group); <kbd>Enter</kbd> commits</li></ul></li>
+            <li><kbd>→</kbd> on a commit lists its files; <kbd>Enter</kbd> opens the diff</li>
+          </ul>
+        </div>
+        <img class="shot" src="images/graph.png" alt="The sidebar graph with the staging area expanded">
+      </div>
+    </section>
+
+    <!-- 4 · view -->
+    <section>
+      <div class="split wide">
+        <img class="shot" src="images/editorgraph.png" alt="The commit graph in an editor with a commit's details">
+        <div>
+          <h2>Graph (editor)</h2>
+          <p class="lead"><kbd>Ctrl+Alt+G</kbd> <kbd>G</kbd>: the whole history, with room</p>
+          <ul>
+            <li>Columns: author, a +/− bar, age, SHA; the details pane has the full message and actions</li>
+            <li><b>Select several commits</b> (<kbd>Shift</kbd>/<kbd>Ctrl</kbd>+click) for a <b>combined diff</b> of exactly those commits</li>
+            <li>Right-click or <kbd>.</kbd>: checkout, cherry-pick, revert, reset, rebase, bisect…</li>
+            <li>One click squashes, rewords, drops or fixes up a commit, and <kbd>Ctrl+Alt+G</kbd> <kbd>Shift+U</kbd> undoes it</li>
+            <li><kbd>Ctrl+F</kbd> searches messages, authors, paths or code changes</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5 · view -->
+    <section>
+      <div class="split">
+        <div>
+          <h2>Repository</h2>
+          <p class="lead">Branches, remotes, tags and stashes in one tree</p>
+          <ul>
+            <li><b>Outgoing / Incoming</b>: what a push or pull would move</li>
+            <li>Local branches with ↑ahead ↓behind and age; <kbd>Ctrl+Alt+G</kbd> <kbd>O</kbd> checks out any branch</li>
+            <li>Stashes as a group: open, apply, pop; <kbd>Del</kbd> drops</li>
+            <li><kbd>Ctrl+C</kbd> copies a name; <kbd>.</kbd> shows everything you can do with a branch or tag</li>
+            <li>Fetch, pull, push and sync: <kbd>Ctrl+Alt+G</kbd> <kbd>F</kbd> / <kbd>Shift+F</kbd> / <kbd>Shift+P</kbd> / <kbd>Y</kbd></li>
+          </ul>
+        </div>
+        <img class="shot" src="images/repository.png" alt="The Repository view: outgoing, local branches, remotes, tags and stashes">
+      </div>
+    </section>
+
+    <!-- 6 · view -->
+    <section>
+      <div class="split">
+        <div>
+          <h2>Pull Requests</h2>
+          <p class="lead">GitHub pull requests, diffed by git itself</p>
+          <ul>
+            <li>Each PR expands to its base, commits and <b>Files changed</b>, diffed from the merge base like GitHub's tab</li>
+            <li><b>Viewed</b> checkboxes per file; a push that changes a file unticks it</li>
+            <li>Reviews and CI checks when you are signed in to GitHub; without the API it falls back to <code>git ls-remote</code></li>
+            <li>✨ <b>Summarize Pull Request</b>: what it does, what looks risky, and what to read first</li>
+            <li><kbd>Ctrl+Alt+G</kbd> <kbd>P</kbd> opens a PR's changes, <kbd>N</kbd> creates one</li>
+          </ul>
+        </div>
+        <img class="shot" src="images/prs.png" alt="A pull request expanded: base, commits and files changed with Viewed checkboxes">
+      </div>
+    </section>
+
+    <!-- 7 · view -->
+    <section>
+      <div class="split">
+        <div>
+          <h2>Compare</h2>
+          <p class="lead"><kbd>Ctrl+Alt+G</kbd> <kbd>C</kbd>: any two refs, or a ref and your working tree</p>
+          <ul>
+            <li>Commits only on each side, grouped by time</li>
+            <li><b>Files changed</b> since they diverged; <kbd>Enter</kbd> opens a diff, or all of them in one multi-diff</li>
+            <li>Swap the sides, or compare against the working tree</li>
+            <li>Also from the graph: select two commits and choose <i>Compare</i></li>
+          </ul>
+        </div>
+        <img class="shot" src="images/compare.png" alt="Compare v0.2.0 with main: commits only in main, files changed">
+      </div>
+    </section>
+
+    <!-- 8 · view -->
+    <section>
+      <div class="split wide">
+        <img class="shot" src="images/filehistory.png" alt="File History next to the file, with the current line's commit inline">
+        <div>
+          <h2>File History</h2>
+          <p class="lead">Follows the file you are looking at</p>
+          <ul>
+            <li>Every commit that touched it, renames included</li>
+            <li><kbd>Ctrl+Alt+G</kbd> <kbd>L</kbd>: only the commits that touched the <b>selected lines</b></li>
+            <li><kbd>Ctrl+Alt+G</kbd> <kbd>←</kbd> / <kbd>→</kbd> steps through the file's revisions in a diff</li>
+            <li><kbd>Ctrl+Alt+G</kbd> <kbd>B</kbd>: blame; <kbd>I</kbd> shows the commit of the current line</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9 · view -->
+    <section>
+      <div class="split">
+        <div>
+          <h2>Worktrees</h2>
+          <p class="lead">Where your agents work, and where you review them</p>
+          <ul>
+            <li>Each worktree with its uncommitted changes, ↑ahead ↓behind and age, checked again every 10 seconds</li>
+            <li><b>Changes vs main</b>: everything the agent changed, committed or not
+              <ul><li><kbd>Enter</kbd> shows a diff and keeps the keyboard in the list; <kbd>Space</kbd> ticks it as <i>Viewed</i></li></ul></li>
+            <li>✨ <b>Summarize</b> the worktree's work; open all its changes in one multi-diff</li>
+            <li><kbd>Ctrl+Alt+G</kbd> <kbd>W</kbd>: the overview, one card per worktree</li>
+          </ul>
+        </div>
+        <img class="shot" src="images/worktrees.png" alt="An agent's worktree expanded to Changes vs main with Viewed checkboxes">
+      </div>
+    </section>
+
+    <!-- 10 · view -->
+    <section>
+      <div class="split wide">
+        <img class="shot" src="images/activity.png" alt="Repository Activity: commits per day, people, busiest files, merged pull requests, active branches">
+        <div>
+          <h2>Repository Activity</h2>
+          <p class="lead"><kbd>Ctrl+Alt+G</kbd> <kbd>T</kbd>: what has been going on</p>
+          <ul>
+            <li>Last 7 days, 30 days or 12 months, for all branches or one</li>
+            <li>Commits per day, people, lines and files changed</li>
+            <li>Busiest files, merged pull requests, active branches. Click a person, a file or a pull request to see their commits, history or changes</li>
+            <li>The one-line summary on top of the sidebar Graph opens it</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 11 · other -->
+    <section>
+      <div class="split">
+        <div>
+          <h2>✨ AI, on your terms</h2>
+          <p class="lead">With the language model you already use in VS Code</p>
+          <ul>
+            <li><b>Commit messages</b>: ✨ in the commit box writes one from the staged changes, and <kbd>Ctrl+Z</kbd> brings back what was there</li>
+            <li><b>Summaries</b> of a worktree, a pull request or selected commits: what changed, what looks risky, what to read first</li>
+            <li>Before anything is sent, <code>.env</code> and key files are left out and known secrets are removed. The page says what was left out</li>
+            <li>Nothing else leaves your machine: no telemetry, and GitHub is contacted only for pull requests</li>
+          </ul>
+        </div>
+        <img class="shot" src="../images/summary.png" alt="A summary page: what changed, what looks risky, what to review first">
+      </div>
+    </section>
+
+    <!-- 12 · other -->
+    <section>
+      <h2>Habits that pay off</h2>
+      <div class="steps" style="grid-template-columns: repeat(2, 1fr)">
+        <div class="step"><b>Let agents work in worktrees</b><span>Each agent gets its own folder and branch. You watch them in the Graph (the ✎ chip) and review them in Worktrees, without stashing your own work.</span></div>
+        <div class="step"><b>Review with Viewed</b><span><kbd>Enter</kbd> to read, <kbd>Space</kbd> to tick. A file the agent touches again comes back unticked, so nothing slips through.</span></div>
+        <div class="step"><b>Commit from the graph</b><span>Expand <i>Uncommitted changes</i>, stage with <kbd>+</kbd>, write or ✨ the message, press <kbd>Enter</kbd>. Source Control shares the same message.</span></div>
+        <div class="step"><b>Undo is one key</b><span>A squash, reword or drop went wrong? <kbd>Ctrl+Alt+G</kbd> <kbd>Shift+U</kbd> puts the branch back.</span></div>
+      </div>
+      <p class="note center">Press <kbd>?</kbd> in a graph for its keys · <kbd>Ctrl+Alt+G</kbd> <kbd>Space</kbd> for everything else</p>
+    </section>
+
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js" integrity="sha384-M/JtqCVlLcK9lwVnBnMXP0V577CBULkjodKsR/PITOe4MSKNbbwqCemEyluOw0+5" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/notes/notes.js" integrity="sha384-vGIe90H8q0nlnrw/zr9vn+r39OtjvzBfai9voOybn5Bx+KmKLtSxhM+YIfcrsfI3" crossorigin="anonymous"></script>
+<script>
+  Reveal.initialize({ hash: true, width: 1280, height: 720, margin: 0.05, transition: 'fade', plugins: [RevealNotes] });
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "cc-test-fake-lm",
+  "publisher": "cc-test",
+  "version": "0.0.1",
+  "private": true,
+  "description": "A language model provider for Commit Corner's UI tests: canned answers, no network.",
+  "engines": { "vscode": "^1.104.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": { "languageModelChatProviders": [{ "vendor": "cc-test", "displayName": "Test LM" }] }
+}

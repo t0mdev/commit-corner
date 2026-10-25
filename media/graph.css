@@ -1,0 +1,383 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  --cols: 100px 1fr 140px 110px 70px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  flex-wrap: wrap;
+}
+.toolbar .repo { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; margin-right: 2px; }
+.toolbar .field { display: inline-flex; align-items: center; gap: 4px; }
+.toolbar .field > .icon { opacity: 0.75; }
+.toolbar .search { width: 180px; }
+.toolbar .filter { max-width: 170px; }
+.toolbar .mode { max-width: 150px; }
+.toolbar .branch-btn .label { font-weight: 600; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+.toolbar .btn[hidden] { display: none; }
+/* A narrower editor: buttons keep their icon and count (and their accessible name), not the word. */
+@media (max-width: 1400px) {
+  .app:not(.compact) .toolbar .btn:not(.branch-btn) > .label { display: none; }
+}
+.help-overlay { max-height: calc(100vh - 64px); overflow: auto; }
+.toolbar .spacer { flex: 1; }
+.toolbar .match-info { opacity: 0.8; min-width: 60px; }
+
+.list-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: var(--cols);
+  align-items: center;
+  height: 24px;
+  line-height: 24px;
+  white-space: nowrap;
+}
+.row.header {
+  font-weight: 600;
+  font-size: 0.92em;
+  opacity: 0.75;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  height: 22px;
+  line-height: 22px;
+  padding-right: 10px;
+}
+.cell { overflow: hidden; text-overflow: ellipsis; padding: 0 6px; }
+.row.header .cell { display: flex; align-items: center; gap: 5px; }
+.cell.author { display: flex; align-items: center; gap: 6px; }
+.cell.author .author-name { overflow: hidden; text-overflow: ellipsis; }
+.cell.changes { display: flex; align-items: center; gap: 5px; font-size: 0.9em; font-variant-numeric: tabular-nums; }
+.cell.changes .pending { opacity: 0.4; }
+.cell.date { font-variant-numeric: tabular-nums; }
+.cell.graph { padding: 0; height: 24px; }
+
+.scroller { flex: 1; overflow: auto; outline: none; position: relative; }
+.scroller:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.sizer { position: relative; width: 100%; }
+.layer .row { position: absolute; left: 0; right: 0; cursor: default; }
+.layer .row:hover { background: var(--vscode-list-hoverBackground); }
+.layer .row.selected { background: var(--vscode-list-inactiveSelectionBackground); color: var(--vscode-list-inactiveSelectionForeground); }
+.scroller:focus .layer .row.selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+.layer .row.cursor { outline: 1px dotted var(--vscode-focusBorder); outline-offset: -1px; }
+.layer .row.match .subject { background: var(--vscode-editor-findMatchHighlightBackground); }
+.layer .row.dim { opacity: 0.45; }
+.layer .row.is-head .subject { font-weight: 600; }
+.layer .row.worktree .subject { font-style: italic; }
+.layer .row.more { display: flex; justify-content: center; }
+
+.cell.author, .cell.date { opacity: 0.85; }
+.cell.sha { font-family: var(--vscode-editor-font-family); opacity: 0.75; }
+
+.graph-svg { display: block; overflow: visible; }
+.lane { fill: none; stroke-width: 2; }
+.node { stroke: var(--vscode-editor-background); stroke-width: 1.5; }
+.node.merge { stroke-width: 2; fill: var(--vscode-editor-background) !important; }
+.node.head { stroke: var(--vscode-foreground); stroke-width: 2; }
+.node.worktree { fill: var(--vscode-editor-background) !important; stroke-dasharray: 2 2; stroke-width: 2; }
+.lane.c0 { stroke: var(--lane-0); } .node.c0 { fill: var(--lane-0); } .node.worktree.c0, .node.merge.c0 { stroke: var(--lane-0); }
+.lane.c1 { stroke: var(--lane-1); } .node.c1 { fill: var(--lane-1); } .node.worktree.c1, .node.merge.c1 { stroke: var(--lane-1); }
+.lane.c2 { stroke: var(--lane-2); } .node.c2 { fill: var(--lane-2); } .node.worktree.c2, .node.merge.c2 { stroke: var(--lane-2); }
+.lane.c3 { stroke: var(--lane-3); } .node.c3 { fill: var(--lane-3); } .node.worktree.c3, .node.merge.c3 { stroke: var(--lane-3); }
+.lane.c4 { stroke: var(--lane-4); } .node.c4 { fill: var(--lane-4); } .node.worktree.c4, .node.merge.c4 { stroke: var(--lane-4); }
+.lane.c5 { stroke: var(--lane-5); } .node.c5 { fill: var(--lane-5); } .node.worktree.c5, .node.merge.c5 { stroke: var(--lane-5); }
+.lane.c6 { stroke: var(--lane-6); } .node.c6 { fill: var(--lane-6); } .node.worktree.c6, .node.merge.c6 { stroke: var(--lane-6); }
+.lane.c7 { stroke: var(--lane-7); } .node.c7 { fill: var(--lane-7); } .node.worktree.c7, .node.merge.c7 { stroke: var(--lane-7); }
+.lane.c8 { stroke: var(--lane-8); } .node.c8 { fill: var(--lane-8); } .node.worktree.c8, .node.merge.c8 { stroke: var(--lane-8); }
+.lane.c9 { stroke: var(--lane-9); } .node.c9 { fill: var(--lane-9); } .node.worktree.c9, .node.merge.c9 { stroke: var(--lane-9); }
+
+.ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.85em;
+  line-height: 16px;
+  padding: 0 6px 0 4px;
+  margin-right: 4px;
+  border-radius: 9px;
+  border: 1px solid var(--ref-color, var(--vscode-badge-background));
+  color: var(--ref-color, var(--vscode-foreground));
+  background: color-mix(in srgb, var(--ref-color, var(--vscode-badge-background)) 16%, transparent);
+  vertical-align: middle;
+  max-width: 240px;
+}
+.ref .ref-name { overflow: hidden; text-overflow: ellipsis; color: var(--vscode-foreground); }
+.ref .ref-counts { margin-left: 2px; font-size: 0.92em; color: var(--vscode-foreground); opacity: 0.85; }
+.ref .ref-also { opacity: 0.8; }
+.ref-branch { --ref-color: var(--vscode-charts-blue, #3794ff); }
+.ref-branch.current { --ref-color: var(--vscode-charts-green, #89d185); font-weight: 700; }
+.ref-remote { --ref-color: var(--vscode-charts-purple, #b180d7); }
+.ref-tag { --ref-color: var(--vscode-charts-yellow, #cca700); }
+.ref-pr { --ref-color: var(--vscode-charts-green, #89d185); }
+.ref-head, .ref-other { --ref-color: var(--vscode-charts-red, #f14c4c); }
+
+.overlay {
+  position: absolute;
+  top: 30px;
+  right: 16px;
+  padding: 2px 10px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  border-radius: 10px;
+  display: none;
+}
+.overlay.visible { display: block; }
+
+.splitter {
+  height: 5px;
+  cursor: row-resize;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+.splitter:hover { background: var(--vscode-sash-hoverBorder, var(--vscode-focusBorder)); }
+
+.details {
+  height: 280px;
+  overflow: auto;
+  padding: 0 12px 12px;
+}
+.details .placeholder { opacity: 0.7; padding: 12px 0; }
+.details h2 { font-size: 1.15em; margin: 10px 0 6px; }
+.details h2.with-icon { display: flex; align-items: center; gap: 8px; }
+.details-head { display: flex; gap: 10px; align-items: center; margin: 10px 0 4px; }
+.details-head h2 { margin: 0 0 2px; }
+.details-who { min-width: 0; }
+.strong { font-weight: 600; }
+.card-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 4px 0; }
+.card-line > .icon { opacity: 0.75; }
+.card-line .chip:first-child { margin-left: 0; }
+.commit-item { display: flex; align-items: center; gap: 6px; }
+.file .stats { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
+.file .status { border-radius: 3px; }
+
+.meta { display: grid; gap: 2px; margin-bottom: 6px; }
+.meta-row { display: flex; gap: 8px; align-items: baseline; }
+.meta-label { width: 80px; flex: none; opacity: 0.75; }
+.meta-value { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.sha-link { color: var(--vscode-textLink-foreground); cursor: pointer; font-family: var(--vscode-editor-font-family); }
+.sha-link:hover { text-decoration: underline; }
+.body {
+  white-space: pre-wrap;
+  font-family: var(--vscode-editor-font-family);
+  background: var(--vscode-textCodeBlock-background);
+  padding: 6px 8px;
+  border-radius: 3px;
+  margin: 6px 0;
+}
+.actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.files-title { font-weight: 600; margin: 8px 0 4px; }
+.file {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 1px 4px;
+  cursor: pointer;
+  border-radius: 2px;
+  white-space: nowrap;
+}
+.file:hover { background: var(--vscode-list-hoverBackground); }
+.file:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+.file .status { width: 14px; text-align: center; font-weight: 700; font-family: var(--vscode-editor-font-family); }
+.file .path { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.file .dir { opacity: 0.65; }
+.file .group { opacity: 0.6; font-size: 0.9em; }
+.stats .add { color: var(--vscode-gitDecoration-addedResourceForeground); }
+.stats .del { color: var(--vscode-gitDecoration-deletedResourceForeground); }
+.s-M, .s-T { color: var(--vscode-gitDecoration-modifiedResourceForeground); }
+.s-A, .s-C, .s-U { color: var(--vscode-gitDecoration-addedResourceForeground); }
+.s-D { color: var(--vscode-gitDecoration-deletedResourceForeground); }
+.s-R { color: var(--vscode-gitDecoration-renamedResourceForeground); }
+.s-conflict { color: var(--vscode-gitDecoration-conflictingResourceForeground); }
+.sig-G, .sig-U, .sig-X, .sig-Y { color: var(--vscode-gitDecoration-addedResourceForeground); }
+.sig-B, .sig-R { color: var(--vscode-errorForeground); font-weight: 600; }
+.sig-E { opacity: 0.8; }
+.commit-list { margin: 4px 0; max-height: 120px; overflow: auto; }
+.commit-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 1px 0; }
+
+.help-overlay {
+  display: none;
+  position: fixed;
+  top: 48px;
+  right: 16px;
+  max-width: 460px;
+  padding: 10px 14px;
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.36));
+  z-index: 10;
+  outline: none;
+}
+.help-overlay.visible { display: block; }
+.help-overlay h2 { font-size: 1.05em; margin: 0 0 6px; }
+.help-row { display: grid; grid-template-columns: 190px 1fr; gap: 8px; margin: 2px 0; align-items: start; }
+.help-overlay kbd { font-family: var(--vscode-editor-font-family); border: 1px solid var(--vscode-panel-border); border-radius: 3px; padding: 0 4px; justify-self: start; }
+
+.layer { user-select: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+button.sha-link { background: none; border: none; padding: 0; font: inherit; font-family: var(--vscode-editor-font-family); }
+button.sha-link:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+
+/* ---- Sidebar (compact) graph ------------------------------------------------ */
+.summary-bar {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 10px;
+  border: none;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  background: transparent;
+  color: var(--vscode-foreground);
+  font: inherit;
+  font-size: 0.92em;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.summary-bar:hover { background: var(--vscode-list-hoverBackground); }
+.summary-bar:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.compact .summary-bar:not([hidden]) { display: flex; }
+.compact .toolbar { display: none; }
+.compact .toolbar.searching { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 6px; }
+.compact .toolbar.searching > :not(.search-part) { display: none; }
+/* Sidebar search: the text box gets the whole first line, mode and match buttons the second. */
+.compact .toolbar .search-part.field { flex: 1 1 100%; min-width: 0; flex-wrap: wrap; gap: 4px; }
+.compact .toolbar .search { width: auto; flex: 1 1 140px; min-width: 120px; }
+.compact .toolbar .mode { flex: 1 1 auto; max-width: none; min-width: 0; }
+.compact .toolbar .match-info { min-width: 0; }
+body.in-sidebar { background: var(--vscode-sideBar-background, var(--vscode-editor-background)); }
+.compact .toolbar .mode { max-width: 90px; }
+.compact .row.header, .compact .splitter, .compact .details { display: none; }
+.compact .cell { padding: 0 3px; }
+.compact .cell.date { text-align: right; opacity: 0.85; font-size: 0.92em; }
+.compact .cell.who { display: flex; align-items: center; justify-content: center; padding: 0; }
+.compact .cell.changes { justify-content: center; padding: 0; }
+/* A badge shows its (short) name, up to ~10 characters, and keeps that room; the message gets
+   the rest. Branch names with folders show their last part ("agent/task" -> "task"). */
+.compact .ref { flex: 0 0 auto; max-width: calc(10ch + 24px); padding: 0 5px 0 3px; }
+.compact .ref .ref-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Narrow sidebar: shorter badges (the change bar is slimmer, set in graph.js). */
+.compact.narrow .ref:not(.ref-more) { max-width: calc(7ch + 22px); }
+.compact .ref .ref-counts, .compact .ref .ref-also { display: none; }
+.compact .cell.desc { display: flex; align-items: center; gap: 3px; container-type: inline-size; }
+.compact .cell.desc .subject { flex: 1 1 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; }
+.compact .cell.desc .subject.wt-label { flex: 0 1 auto; min-width: 6ch; opacity: 0.85; }
+/* The label first; the chips may be cut at the end in a narrow sidebar (details in the tooltip). */
+.compact .row.worktree .cell.desc { overflow: hidden; }
+@container (max-width: 130px) {
+  /* Very narrow: the name shortened further, never gone (the agent's branch must stay recognisable). */
+  .compact .ref:not(.ref-more) { padding: 0 3px; max-width: calc(6ch + 20px); }
+}
+.compact .summary-bar > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.compact .summary-bar > span { flex: none; }
+body.in-sidebar .help-overlay { left: 8px; right: 8px; top: 8px; max-width: none; max-height: calc(100vh - 16px); overflow: auto; }
+body.in-sidebar .help-row { grid-template-columns: 1fr; gap: 0; margin: 0 0 6px; }
+.time-sep {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+.time-sep .graph-svg { flex: none; }
+.time-sep-label {
+  /* Sentence case, as in VS Code's modern UI (no all-caps labels). */
+  font-size: 0.8em;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
+.time-sep-rule { flex: 1; height: 1px; margin-right: 8px; background: var(--vscode-tree-indentGuidesStroke, var(--vscode-panel-border)); }
+body.vscode-high-contrast .layer .row.selected { outline: 1px solid var(--vscode-contrastActiveBorder, var(--vscode-focusBorder)); outline-offset: -1px; }
+body.vscode-high-contrast .layer .row.cursor { outline: 1px dashed var(--vscode-contrastActiveBorder, var(--vscode-focusBorder)); }
+body.vscode-high-contrast .ref { border-color: var(--vscode-contrastBorder); }
+
+/* Commits that arrived while you were away (sidebar). */
+.new-dot { display: inline-block; width: 6px; height: 6px; margin-right: 3px; border-radius: 50%; background: var(--vscode-charts-blue, #3794ff); vertical-align: middle; }
+
+/* Sidebar: a commit expanded to its changed files (folder tree). */
+.twisty { display: inline-flex; flex: none; width: 14px; justify-content: center; opacity: 0.7; cursor: pointer; }
+.twisty:hover { opacity: 1; }
+.twisty .icon { transition: transform 0.1s; }
+.twisty.open .icon { transform: rotate(90deg); }
+.files-block { position: absolute; left: 0; right: 0; display: flex; overflow: hidden; }
+.files-block .files-lanes { flex: none; }
+.files-lines { flex: 1; min-width: 0; }
+.file-line { display: flex; align-items: center; gap: 5px; height: 20px; line-height: 20px; padding-right: 8px; white-space: nowrap; overflow: hidden; font-size: 0.95em; outline: none; }
+.file-line .name { overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.file-line.folder { color: var(--vscode-descriptionForeground); }
+.file-line.folder .icon { opacity: 0.8; }
+.file-line.file, .file-line.folder { cursor: pointer; border-radius: 2px; }
+.file-line.file:hover, .file-line.folder:hover { background: var(--vscode-list-hoverBackground); }
+.file-line.folder .twisty { width: 12px; margin-right: -2px; opacity: 0.95; }
+.file-line.file:focus, .file-line.folder:focus { background: var(--vscode-list-focusBackground, var(--vscode-list-hoverBackground)); outline: 1px solid var(--vscode-list-focusOutline, var(--vscode-focusBorder)); outline-offset: -1px; }
+.file-line .status { width: 12px; text-align: center; font-weight: 700; font-family: var(--vscode-editor-font-family); flex: none; }
+body.vscode-reduce-motion .twisty .icon { transition: none; }
+.compact .cell.date { position: relative; }
+.compact .new-dot { position: absolute; left: 1px; top: 9px; margin: 0; }
+
+/* Nothing on the page is text to select (Ctrl+A selects commits); the message body and inputs are. */
+body { user-select: none; }
+input, textarea, .details .body, .details .meta-value code { user-select: text; }
+.ref-more { --ref-color: var(--vscode-descriptionForeground); padding: 0 5px; flex: none; }
+/* Editor graph: badges may not squeeze the message below a third of the column. */
+.app:not(.compact) .cell.desc { display: flex; align-items: center; }
+/* A long name gives way first (capped), so a short one is never the one cut. */
+.app:not(.compact) .cell.desc .ref { flex-shrink: 1; min-width: 40px; max-width: 16em; }
+.app:not(.compact) .cell.desc .ref.ref-short { flex-shrink: 0; }
+.app:not(.compact) .cell.desc .subject { flex: 1 0 33%; min-width: 33%; overflow: hidden; text-overflow: ellipsis; }
+
+.chip-wip { cursor: pointer; border-style: dashed; margin-right: 6px; }
+/* Sidebar rows draw their lanes inside a 3 px padded cell: separators and expanded file trees
+   start at the same x, so the lines continue straight. */
+.compact .time-sep .graph-svg, .compact .files-block .files-lanes { margin-left: 3px; }
+/* The uncommitted-changes row reads like a commit: message, then a quiet summary. */
+.row.worktree .wt-label { font-style: italic; }
+.row.worktree .wt-summary { opacity: 0.7; margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
+
+/* Uncommitted changes: inline staging actions (shown on hover and keyboard focus), commit box. */
+.file-line .file-acts { margin-left: auto; display: inline-flex; gap: 2px; visibility: hidden; padding-left: 6px; }
+.file-line:hover .file-acts, .file-line:focus .file-acts, .file-line:focus-within .file-acts { visibility: visible; }
+.file-act { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 3px; cursor: pointer; opacity: 0.85; }
+.file-act:hover { opacity: 1; background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+.commit-box { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 0 8px 0 8px; box-sizing: border-box; }
+.commit-box .commit-message { resize: none; overflow-y: auto; line-height: 18px; box-sizing: border-box; font: inherit; font-size: 0.95em; padding: 0 6px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; outline: none; min-width: 0; }
+.commit-box .commit-message:focus { border-color: var(--vscode-focusBorder); }
+.commit-box .commit-actions { display: flex; gap: 4px; height: 18px; }
+.commit-box { container-type: inline-size; }
+.commit-box.busy .commit-actions .btn { opacity: 0.6; cursor: progress; }
+.commit-box.busy .commit-message { cursor: progress; }
+.commit-box .commit-actions .btn { height: 18px; padding: 0 6px; font-size: 0.85em; white-space: nowrap; }
+@container (max-width: 300px) {
+  .commit-box .commit-actions .btn:not(.primary) .label { display: none; }
+  .commit-box .commit-actions .btn.primary { flex: 1; justify-content: center; }
+}
+
+/* A commit that just arrived (an agent committed, a fetch brought it): a short glow. */
+.row.arrived { animation: arrive 4s ease-out; }
+@keyframes arrive { from { background: var(--vscode-editor-findMatchHighlightBackground, rgba(255, 200, 0, 0.25)); } to { background: transparent; } }
+body.vscode-reduce-motion .row.arrived { animation: none; box-shadow: inset 2px 0 0 var(--vscode-focusBorder); }
+
+/* A folder without git: three buttons, no toolbar or details pane. */
+body.no-repo .toolbar, body.no-repo .details, body.no-repo .splitter, body.no-repo .summary-bar, body.no-repo .col-header { display: none !important; }
+.no-repo-box { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; max-width: 320px; }
+.no-repo-box p { margin: 0 0 4px; color: var(--vscode-descriptionForeground); }
+.no-repo-box .btn { justify-content: center; }
+
+/* main / master keep their full name (more specific than the editor graph's shrinking rule). */
+.ref.default-ref, .app:not(.compact) .cell.desc .ref.default-ref { flex-shrink: 0; min-width: auto; }

@@ -1,0 +1,20 @@
+[hidden] { display: none !important; }
+body { padding: 0 20px 24px; max-width: 920px; }
+.head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 0 6px; border-bottom: 1px solid var(--vscode-panel-border, transparent); }
+.title { font-size: 1.25em; font-weight: 600; margin: 0; flex: 1; min-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.actions { display: flex; gap: 6px; }
+.status { min-height: 1.4em; padding: 6px 0; color: var(--vscode-descriptionForeground); }
+body.busy .status::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: var(--vscode-progressBar-background); animation: pulse 1s ease-in-out infinite alternate; }
+@keyframes pulse { from { opacity: 0.3; } to { opacity: 1; } }
+.answer { line-height: 1.55; outline: none; }
+.answer h2 { font-size: 1.1em; margin: 18px 0 6px; }
+.answer h3, .answer h4 { font-size: 1em; margin: 14px 0 4px; }
+.answer ul, .answer ol { margin: 4px 0 8px; padding-left: 22px; }
+.answer li { margin: 2px 0; }
+.answer p { margin: 6px 0; }
+.answer code { font-family: var(--vscode-editor-font-family); font-size: 0.92em; padding: 0 3px; border-radius: 3px; background: var(--vscode-textCodeBlock-background); }
+.answer pre { padding: 8px 10px; overflow-x: auto; background: var(--vscode-textCodeBlock-background); border-radius: 3px; }
+.answer pre code { padding: 0; background: none; }
+.answer .error { color: var(--vscode-errorForeground); }
+.foot { margin-top: 18px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border, transparent); color: var(--vscode-descriptionForeground); font-size: 0.92em; }
+@media (max-width: 480px) { body { padding: 0 12px 20px; } }
