@@ -4,7 +4,7 @@
 
 The packaged extension (`.vsix`) contains only `src/`, `media/`, the two helper
 scripts git runs (`scripts/askpass-main.js`, `scripts/sequence-editor.js`),
-the manifest and the docs (see `.vscodeignore`). It has no npm dependencies.
+the manifest, README, CHANGELOG and LICENSE (see `.vscodeignore`). It has no npm dependencies.
 Its network traffic is the git commands you run; VS Code's own GitHub sign-in
 (if `commitCorner.githubAuthentication` is on); and, as a deliberate
 exception, **the GitHub REST API for pull request details**

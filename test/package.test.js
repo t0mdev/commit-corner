@@ -22,7 +22,7 @@ test('the .vsix contains every file the extension loads at runtime', { skip: !fs
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-vsix-'));
   t.after(() => fs.rmSync(work, { recursive: true, force: true }));
   const vsix = path.join(work, 'x.vsix');
-  execFileSync(process.execPath, [vsce, 'package', '--out', vsix], { cwd: root, stdio: 'pipe' });
+  execFileSync(process.execPath, [vsce, 'package', '--no-gitHubIssueLinking', '--out', vsix], { cwd: root, stdio: 'pipe' });
   const names = unzip(vsix, work);
   assert.ok(names.includes('extension.vsixmanifest'));
   assert.ok(names.includes('[Content_Types].xml'));

@@ -24,8 +24,9 @@ change summaries. Plain JavaScript, no runtime dependencies, no telemetry.
 <img src="docs/images/summary.png" alt="A summary page: what changed, what looks risky, what to review first" width="560">
 
 Everything works by keyboard: `Ctrl+Alt+G Space` opens the Actions hub, `?` in the graph
-lists its keys. A short slide deck tours every view: download the repository and open
-`docs/intro/index.html` in a browser. **Scope:** GitHub.com for pull requests and web links; everything that is
+lists its keys. The *Get started with Commit Corner*
+walkthrough (Help → Welcome) shows the basics; a short slide deck tours every view (download the
+repository and open `docs/intro/index.html` in a browser; it needs internet). **Scope:** GitHub.com for pull requests and web links; everything that is
 plain git works with any host.
 
 ## Features
@@ -430,21 +431,24 @@ features, inline/side-by-side view and word-level diffs all work as usual.
 
 ## Install
 
-Commit Corner is not on the Marketplace. Download `commit-corner-<version>.vsix` and
-`SHA256SUMS` from the [latest release](https://github.com/t0mdev/commit-corner/releases/latest),
-check the file and install it:
+Commit Corner is not on the Marketplace. Install it in three steps:
 
-```sh
-sha256sum -c SHA256SUMS                      # Linux; must print: commit-corner-<version>.vsix: OK
-shasum -a 256 -c SHA256SUMS                  # macOS
-code --install-extension commit-corner-<version>.vsix
-```
+1. **Download** `commit-corner-<version>.vsix` and `SHA256SUMS` from the
+   [latest release](https://github.com/t0mdev/commit-corner/releases/latest) into one folder.
+2. **Check** the download in that folder:
 
-On Windows (PowerShell), compare the hash with the one in `SHA256SUMS`:
-`(Get-FileHash commit-corner-<version>.vsix -Algorithm SHA256).Hash`
+   ```sh
+   sha256sum -c SHA256SUMS          # Linux; must print: commit-corner-<version>.vsix: OK
+   shasum -a 256 -c SHA256SUMS      # macOS
+   ```
 
-or in VS Code: Extensions view → `…` → *Install from VSIX…*. Updates are not automatic:
-install a newer `.vsix` the same way.
+   On Windows (PowerShell) this must print `True`:
+   `(Get-FileHash commit-corner-<version>.vsix).Hash -eq (Get-Content SHA256SUMS).Split()[0]`
+3. **Install**: in VS Code, Extensions view → `…` → *Install from VSIX…*, or from a
+   terminal `code --install-extension commit-corner-<version>.vsix` (on macOS, first run
+   *Shell Command: Install 'code' command in PATH* from the Command Palette).
+
+Updates are not automatic: install a newer `.vsix` the same way.
 
 **Requirements:** VS Code 1.140 or newer and git 2.27 or newer. Pull requests and web
 links need a GitHub.com remote; everything else works with any git host.
@@ -471,7 +475,9 @@ Then reload the window. The extension runs where your files are
 
 ## Coexisting with the built-in Git extension
 
-Both can run together. To avoid duplicate gutter markers, badges, Explorer
+Both can run together. *Use Commit Corner Only (Turn Off Built-in Git)…* (a command,
+also offered in the *Get started* walkthrough) sets `"git.enabled": false`; set it back
+to `true` to undo. To avoid duplicate gutter markers, badges, Explorer
 decorations and status bar items, Commit Corner's `quickDiff`, `countBadge`,
 `explorerDecorations` and `statusBar` settings default to `auto`: they switch
 on only when the built-in extension is disabled (`"git.enabled": false`). Set
@@ -683,8 +689,10 @@ legacy merge-tree output), and `stash --staged` (2.35).
 
 Commit Corner is a free hobby project, provided **as is** (see [LICENSE](LICENSE)): there
 is no guaranteed support and no promised time for fixes. Issues and pull requests are
-welcome; contributions are accepted under the project's MIT License. Please report
-security problems privately, as described in [SECURITY.md](SECURITY.md).
+welcome; contributions are accepted under the project's MIT License. In a bug report,
+please include the Commit Corner, VS Code, git and OS versions and the relevant lines from
+Output → *Commit Corner*. Please report security problems privately, as described in
+[SECURITY.md](SECURITY.md).
 
 ## License and trademarks
 
