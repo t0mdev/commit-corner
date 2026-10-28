@@ -129,6 +129,22 @@ suite('Webviews in VS Code (DOM)', () => {
     // The keyboard is on the answer (arrows and Page Down read it).
     await until(() => evaluate(summary, `document.hasFocus() && document.activeElement === document.querySelector('.answer')`), 'the summary to have the keyboard', 5000);
     assert.ok(path.isAbsolute(agent));
+    assert.match(await evaluate(summary, `document.querySelector('.foot').textContent`), /^Written by Test LM \(cc-test\) from/);
+  });
+
+  test('an empty answer says so on the page, with Choose Model and Show Log', async () => {
+    const agent = `${root()}-agent`;
+    const config = vscode.workspace.getConfiguration('commitCorner');
+    await config.update('ai.modelFamily', 'cc-test-silent', vscode.ConfigurationTarget.Global);
+    try {
+      await vscode.commands.executeCommand('commitCorner.worktreeSummarize', { repoRoot: root(), worktreePath: agent, worktree: { branch: 'agent', path: agent } });
+      const summary = await webview('summary.js');
+      const error = await until(() => evaluate(summary, `document.querySelector('.answer .error') && document.querySelector('.answer .error').textContent`), 'the empty answer to be reported');
+      assert.match(error, /^Silent LM \(cc-test\) sent an empty answer\./);
+      assert.deepStrictEqual(await evaluate(summary, `[...document.querySelectorAll('.answer .fix button')].map((b) => b.textContent)`), ['Choose Model…', 'Show Log']);
+    } finally {
+      await config.update('ai.modelFamily', undefined, vscode.ConfigurationTarget.Global);
+    }
   });
 });
 

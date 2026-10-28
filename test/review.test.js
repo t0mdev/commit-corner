@@ -252,6 +252,129 @@ test('without a model, or without permission, the reason is said in words', asyn
   mock.configValues.delete('ai.enabled');
 });
 
+/** A log channel that keeps its lines: [level, text]. */
+function quietLog(lines = []) {
+  const at = (level) => (text) => lines.push([level, String(text)]);
+  return { lines, info: at('info'), warn: at('warn'), error: at('error'), debug: at('debug'), trace: at('trace'), appendLine: at('info'), show() {} };
+}
+
+/** The AI lines logged while `fn` runs. */
+async function logged(fn) {
+  const util = require('../src/vscode/util');
+  const channel = quietLog();
+  util.setOutput(channel);
+  try {
+    await fn();
+  } finally {
+    util.setOutput(undefined);
+  }
+  return channel.lines;
+}
+
+test('the model the setting names: Copilot\'s when several providers offer it, never Copilot CLI\'s', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'a.txt': '1\n' });
+  r.write('a.txt', '2\n');
+  t.after(() => mock.configValues.delete('ai.modelFamily'));
+  // Copilot CLI lists the same families as Copilot, and answers other extensions with nothing.
+  const cli = fakeModel('', { vendor: 'copilotcli', id: 'claude-sonnet-4.5', family: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5' });
+  const byok = fakeModel('From BYOK', { vendor: 'anthropic', id: 'claude-sonnet-4.5', family: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5' });
+  const copilot = fakeModel('From Copilot', { vendor: 'copilot', id: 'claude-sonnet-4.5', family: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5' });
+  const def = fakeModel('From the default', { vendor: 'copilot', id: 'gpt-4.1', family: 'gpt-4.1', name: 'GPT-4.1' });
+  mock.lmModels.splice(0, mock.lmModels.length, cli, byok, def, copilot);
+  mock.configValues.set('ai.modelFamily', 'claude-sonnet-4.5');
+  assert.equal(await ai.commitMessage(repo), 'From Copilot');
+  assert.equal(cli.prompts.length, 0, 'Copilot CLI is never asked');
+  // By the name Copilot's picker shows, in any case.
+  mock.configValues.set('ai.modelFamily', 'CLAUDE SONNET 4.5');
+  assert.equal(await ai.commitMessage(repo), 'From Copilot');
+  // Only Copilot CLI has it: the default model, and the summary says why.
+  mock.lmModels.splice(0, mock.lmModels.length, cli, def);
+  mock.configValues.set('ai.modelFamily', 'claude-sonnet-4.5');
+  const lines = await logged(async () => assert.equal(await ai.commitMessage(repo), 'From the default'));
+  assert.ok(lines.some(([l, x]) => l === 'warn' && /"claude-sonnet-4\.5".*only offered by a provider that does not answer/.test(x) && /copilotcli\/claude-sonnet-4\.5/.test(x)), 'the log says why, and lists what there is');
+  const res = await ai.summarize({ title: 'T', what: 'w', patch: async () => ({ text: 'diff', files: 1, cut: 0, secrets: 0, withheld: 0 }) });
+  assert.equal(res.model, 'GPT-4.1');
+  assert.match(res.note, /only offered by a provider that does not answer/);
+  // Nothing but Copilot CLI: no model, and the reason names it.
+  mock.lmModels.splice(0, mock.lmModels.length, cli);
+  mock.configValues.delete('ai.modelFamily');
+  await assert.rejects(ai.commitMessage(repo), (e) => e instanceof ai.AiUnavailable && /No language model is available that answers extensions \(found only: copilotcli\/claude-sonnet-4\.5/.test(e.message));
+});
+
+test('an empty answer is an error that says so, with what came instead; a broken one is logged', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'a.txt': '1\n' });
+  r.write('a.txt', '2\n');
+  class LanguageModelToolCallPart {}
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel('', { parts: [new LanguageModelToolCallPart(), new LanguageModelToolCallPart()] }));
+  const lines = await logged(() => assert.rejects(ai.commitMessage(repo), (e) => e instanceof ai.AiUnavailable && e.chooseModel && /Fake Model sent an empty answer \(only 2 × LanguageModelToolCallPart\)/.test(e.message)));
+  assert.ok(lines.some(([l, x]) => l === 'info' && /copilot\/fake answered 0 characters in 2 parts .*not text: 2 × LanguageModelToolCallPart/.test(x)));
+  assert.ok(lines.some(([l, x]) => l === 'warn' && /empty answer/.test(x)));
+  // Only whitespace, or only fences: no message either.
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel(' \n '));
+  await assert.rejects(ai.commitMessage(repo), /empty answer/);
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel('```\n```'));
+  await assert.rejects(ai.commitMessage(repo), /answered without a commit message/);
+  // Stopped before anything came: no error (you stopped it).
+  const cts = new mock.vscode.CancellationTokenSource();
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel('Some message'));
+  const stopped = await ai.summarize({ title: 'T', what: 'w', patch: async () => (cts.cancel(), { text: 'diff', files: 1, cut: 0, secrets: 0, withheld: 0 }) }, { token: cts.token });
+  assert.equal(stopped.text, '');
+  // The answer breaks off: the error, its code and what had arrived are logged.
+  const broken = Object.assign(new Error('connection reset'), { code: 'ECONNRESET' });
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel('Half a message', { breakAfter: 1, breakWith: broken }));
+  const more = await logged(() => assert.rejects(ai.commitMessage(repo), /connection reset/));
+  assert.ok(more.some(([l, x]) => l === 'error' && /broke off after 7 characters.*Error \[ECONNRESET\]: connection reset/.test(x)), JSON.stringify(more));
+  // A provider without `stream` (only `text`) still works.
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel('Old style', { textOnly: true }));
+  assert.equal(await ai.commitMessage(repo), 'Old style');
+});
+
+test('the log follows a request: the model, what was sent, the answer (Debug) and the request (Trace)', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'a.txt': '1\n' });
+  r.write('a.txt', '2\n');
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel('Change a', { id: 'gpt-4.1', family: 'gpt-4.1', name: 'GPT-4.1' }), fakeModel('x', { id: 'other' }));
+  const lines = await logged(() => ai.commitMessage(repo));
+  const at = (level, re) => lines.some(([l, x]) => l === level && re.test(x));
+  assert.ok(at('info', /^AI commit message: using copilot\/gpt-4\.1 \(family gpt-4\.1, "GPT-4\.1", 8000 input tokens\); also matched: copilot\/other$/), JSON.stringify(lines));
+  assert.ok(at('info', /^AI commit message: all changes: 1 file \(budget \d+ characters\)$/));
+  assert.ok(at('info', /^AI commit message: sending \d+ characters to copilot\/gpt-4\.1$/));
+  assert.ok(at('info', /^AI commit message: copilot\/gpt-4\.1 answered 8 characters in 2 parts after \d+ ms$/));
+  assert.ok(at('debug', /^AI commit message: the answer:\nChange a$/));
+  assert.ok(at('trace', /^AI commit message: the request as sent:\n[\s\S]*\+2/));
+  assert.ok(!lines.some(([l, x]) => l !== 'trace' && /\+2$/m.test(x)), 'the diff only at Trace');
+  // A refused request: the error with its code.
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel('x', { error: mock.vscode.LanguageModelError.Blocked('quota exceeded') }));
+  const refused = await logged(() => assert.rejects(ai.commitMessage(repo), (e) => e.chooseModel && /blocked or rate-limited/.test(e.message)));
+  assert.ok(refused.some(([l, x]) => l === 'error' && /copilot\/fake did not take the request: .*\[Blocked\]: quota exceeded/.test(x)), JSON.stringify(refused));
+});
+
+test('Choose Language Model lists the models that answer and stores the choice in user settings', async (t) => {
+  t.after(() => mock.configValues.delete('ai.modelFamily'));
+  const cli = fakeModel('', { vendor: 'copilotcli', id: 'claude-sonnet-4.5', family: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5' });
+  const copilot = fakeModel('', { vendor: 'copilot', id: 'claude-sonnet-4.5', family: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5' });
+  const byok = fakeModel('', { vendor: 'anthropic', id: 'claude-sonnet-4.5', family: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5 $(alert)' });
+  mock.lmModels.splice(0, mock.lmModels.length, cli, byok, copilot);
+  let items;
+  mock.ui.answers.push(() => undefined);
+  const show = mock.vscode.window.showQuickPick;
+  mock.vscode.window.showQuickPick = async (list, opts) => ((items = await list), show(list, opts));
+  t.after(() => (mock.vscode.window.showQuickPick = show));
+  await ai.pickModel();
+  assert.deepEqual(items.map((i) => i.description), ["Copilot's default model", 'copilot · claude-sonnet-4.5', 'anthropic · claude-sonnet-4.5'], 'Copilot CLI is not offered; Copilot first');
+  assert.equal(items[1].value, 'claude-sonnet-4.5');
+  assert.doesNotMatch(items[2].label, /\$\(/, 'no icons from a provider\'s name');
+  // The same family and id under another provider: chosen by its name.
+  mock.ui.answers.push(2);
+  await ai.pickModel();
+  assert.equal(mock.configValues.get('ai.modelFamily'), 'Claude Sonnet 4.5 $(alert)');
+  mock.ui.answers.push(0);
+  await ai.pickModel();
+  assert.equal(mock.configValues.get('ai.modelFamily'), undefined, 'Default clears it');
+});
+
 test('a worktree summary covers its commits and its uncommitted work since the base', async (t) => {
   const { r, repo } = await setup(t);
   r.commit('base', { 'a.txt': '1\n' });
@@ -307,7 +430,8 @@ test('the summary page shows the summary again when it is re-created, and copies
   mock.lmModels.splice(0, mock.lmModels.length, fakeModel('## What changed\nA'));
   const source = { title: 'T', what: 'w', patch: async () => ({ text: 'diff', files: 1, cut: 0, secrets: 0, withheld: 0 }) };
   await p.run(source);
-  assert.deepEqual(posted.map((m) => m.type).filter((x, k, a) => x !== a[k - 1]), ['start', 'text', 'done']);
+  assert.deepEqual(posted.map((m) => m.type).filter((x, k, a) => x !== a[k - 1]), ['start', 'model', 'text', 'done']);
+  assert.equal(posted.find((m) => m.type === 'model').model, 'Fake Model', 'the page names the model while it asks');
   posted.length = 0;
   await p.onMessage({ type: 'ready' }); // hidden and shown again: a new page
   assert.deepEqual(posted.map((m) => m.type), ['start', 'done']);
@@ -315,6 +439,18 @@ test('the summary page shows the summary again when it is re-created, and copies
   // A newer run that fails: Copy has nothing, the old text is not copied under the new title.
   await p.run({ ...source, patch: async () => ({ text: '', files: 0, cut: 0, secrets: 0, withheld: 0 }) });
   assert.equal(p.text, '');
+  // An empty answer: said on the page, with the ways on (another model, the log).
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel(''));
+  posted.length = 0;
+  await p.run(source);
+  const error = posted.find((m) => m.type === 'error');
+  assert.match(error.message, /Fake Model sent an empty answer/);
+  assert.equal(error.chooseModel, true);
+  const shown = [];
+  require('../src/vscode/util').setOutput({ ...quietLog(), show: (keep) => shown.push(keep) });
+  await p.onMessage({ type: 'showLog' });
+  assert.deepEqual(shown, [true], 'Show Log opens the output, the page keeps the keyboard');
+  require('../src/vscode/util').setOutput(undefined);
   p.dispose();
 });
 

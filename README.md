@@ -406,7 +406,15 @@ Files ignored by `.gitignore` are not part of a summary or of Changes vs Base (a
 agent could hide work there: look at what it ignored). A
 summary is written from the changes, so text in them can steer it: read the
 diff for what matters. Turn it all off with `commitCorner.ai.enabled`; pick a
-model family with `commitCorner.ai.modelFamily` (both user settings only).
+model with **Commit Corner: Choose Language Model…** or `commitCorner.ai.modelFamily`
+(family, id or name; both user settings only).
+
+When an answer is empty or a model fails, the summary page (or the notification) says
+so and offers *Choose Model…* and *Show Log*. Output → *Commit Corner* names the model
+chosen, what was sent and how the model answered (lines starting with `AI`); set its
+log level to Debug (the gear on the Output panel, or **Developer: Set Log Level…**) to
+see the answers too, or Trace for the requests as sent. Copilot CLI's models are
+skipped: they answer other extensions with nothing.
 
 ## Scope and privacy
 

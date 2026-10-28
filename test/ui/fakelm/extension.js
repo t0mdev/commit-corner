@@ -10,9 +10,14 @@ const SUMMARY = '## What changed\nThe agent edited `agent.txt`. <img src=x onerr
 exports.activate = (context) => {
   context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider('cc-test', {
     async provideLanguageModelChatInformation() {
-      return [{ id: 'cc-test-1', name: 'Test LM', family: 'cc-test', version: '1', maxInputTokens: 32000, maxOutputTokens: 2000, capabilities: {} }];
+      return [
+        { id: 'cc-test-1', name: 'Test LM', family: 'cc-test', version: '1', maxInputTokens: 32000, maxOutputTokens: 2000, capabilities: {} },
+        // Answers nothing (as Copilot CLI's models do when another extension asks).
+        { id: 'cc-test-silent', name: 'Silent LM', family: 'cc-test-silent', version: '1', maxInputTokens: 32000, maxOutputTokens: 2000, capabilities: {} },
+      ];
     },
     async provideLanguageModelChatResponse(model, messages, options, progress, token) {
+      if (model.id === 'cc-test-silent') return;
       const prompt = messages.map((m) => m.content.map((p) => p.value || '').join('')).join('\n');
       const reply = /Write a git commit message/.test(prompt) ? COMMIT : SUMMARY;
       for (const chunk of reply.match(/[\s\S]{1,8}/g)) {

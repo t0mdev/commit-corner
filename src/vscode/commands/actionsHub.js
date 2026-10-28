@@ -67,7 +67,7 @@ const GROUPS = [
     ['$(file-code) Create Patch…', 'commitCorner.createPatch'],
     ['$(file-code) Apply Patch…', 'commitCorner.applyPatch'],
     ['$(github) Sign In to GitHub (HTTPS credentials)', 'commitCorner.githubSignIn'],
-    ['$(output) Show Git Output', 'commitCorner.showOutput'],
+    ['$(output) Show Log', 'commitCorner.showOutput'],
   ]],
 ];
 

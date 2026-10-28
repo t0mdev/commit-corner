@@ -113,6 +113,9 @@
     document.body.classList.toggle('busy', on);
   }
 
+  /** The model asked (its name, from the host), while it writes. */
+  let model = '';
+
   window.addEventListener('message', (ev) => {
     const m = ev.data;
     switch (m.type) {
@@ -120,29 +123,39 @@
         // The keyboard on the answer (not <body>), when this page has it.
         if (document.hasFocus() && document.activeElement === document.body) body.focus();
         title.textContent = `Summary: ${m.title}`;
-        status.textContent = 'Asking the language model…';
+        model = '';
+        status.textContent = 'Choosing a language model…';
         foot.textContent = '';
         body.replaceChildren();
         busy(true);
         break;
+      case 'model':
+        status.textContent = `Asking ${m.model}…`;
+        model = m.model;
+        break;
       case 'text':
-        status.textContent = 'Writing…';
+        status.textContent = model ? `${model} is writing…` : 'Writing…';
         render(m.text);
         break;
       case 'done':
         render(m.text);
         busy(false);
         status.textContent = m.stopped ? 'Stopped.' : '';
-        foot.textContent = `Written by ${m.model} from ${m.files} changed file${m.files === 1 ? '' : 's'}${m.cut ? ` (${m.cut} shortened or left out to fit)` : ''}${m.withheld ? `; ${m.withheld} file${m.withheld === 1 ? '' : 's'} that may hold secrets sent by name only` : ''}${m.secrets ? `; ${m.secrets} value${m.secrets === 1 ? '' : 's'} that looked like secrets removed` : ''}. A model can be wrong, and text in the changes can steer it: check what matters in the diff.`;
+        foot.textContent = `Written by ${m.model}${m.note ? ` (${m.note})` : ''} from ${m.files} changed file${m.files === 1 ? '' : 's'}${m.cut ? ` (${m.cut} shortened or left out to fit)` : ''}${m.withheld ? `; ${m.withheld} file${m.withheld === 1 ? '' : 's'} that may hold secrets sent by name only` : ''}${m.secrets ? `; ${m.secrets} value${m.secrets === 1 ? '' : 's'} that looked like secrets removed` : ''}. A model can be wrong, and text in the changes can steer it: check what matters in the diff.`;
         break;
       case 'focus':
         body.focus();
         break;
-      case 'error':
+      case 'error': {
         busy(false);
         status.textContent = '';
-        body.replaceChildren(el('p', 'error', m.message));
+        // What went wrong, and the ways on: another model, the log (what was sent and answered).
+        const fix = el('div', 'fix');
+        if (m.chooseModel) fix.appendChild(button('Choose Model…', 'Choose the language model Commit Corner asks', () => vscode.postMessage({ type: 'chooseModel' }), 'sparkle'));
+        fix.appendChild(button('Show Log', 'Show Output → Commit Corner: the model chosen, what was sent and how it answered', () => vscode.postMessage({ type: 'showLog' }), 'terminal'));
+        body.replaceChildren(el('p', 'error', m.message), fix);
         break;
+      }
       default:
         break;
     }

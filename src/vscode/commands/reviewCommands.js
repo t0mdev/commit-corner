@@ -1,7 +1,6 @@
 'use strict';
 
 const vscode = require('vscode');
-const notify = require('../notify');
 const viewed = require('../viewed');
 const ai = require('../ai');
 
@@ -60,13 +59,15 @@ function register(ctx) {
         if (!cts.token.isCancellationRequested) write(message || before);
       } catch (e) {
         if (provider.message === written) provider.message = before;
-        if (e instanceof ai.AiUnavailable) notify.warn(e.message);
+        if (e instanceof ai.AiUnavailable) ai.warn(e);
         else throw e;
       } finally {
         cts.dispose();
       }
     });
   });
+
+  cmd('commitCorner.ai.chooseModel', () => ai.pickModel());
 }
 
 module.exports = { register };

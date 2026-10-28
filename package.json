@@ -1119,7 +1119,7 @@
       },
       {
         "command": "commitCorner.showOutput",
-        "title": "Show Git Output",
+        "title": "Show Log",
         "category": "Commit Corner"
       },
       {
@@ -1314,6 +1314,11 @@
         "title": "Generate Commit Message",
         "category": "Commit Corner",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "commitCorner.ai.chooseModel",
+        "title": "Choose Language Model…",
+        "category": "Commit Corner"
       },
       {
         "command": "commitCorner.worktreeSummarize",
@@ -2292,6 +2297,10 @@
         },
         {
           "command": "commitCorner.generateCommitMessage",
+          "when": "config.commitCorner.ai.enabled"
+        },
+        {
+          "command": "commitCorner.ai.chooseModel",
           "when": "config.commitCorner.ai.enabled"
         },
         {
@@ -4694,7 +4703,7 @@
             "type": "string",
             "default": "",
             "scope": "application",
-            "markdownDescription": "The language model family to use (for example `gpt-4o` or `claude-sonnet-4`); empty: the default model of GitHub Copilot, else any available model. A user setting only."
+            "markdownDescription": "The language model to use: its family, id or name (for example `gpt-4.1` or `claude-sonnet-4.5`), or pick one with **Commit Corner: Choose Language Model…**. Empty, or not available: the default model of GitHub Copilot, else any available model. When several providers offer it, Copilot's is used; Copilot CLI's models are skipped (they do not answer other extensions). Output → Commit Corner logs the model chosen and how it answered. A user setting only."
           },
           "commitCorner.writeCommitGraph": {
             "type": "boolean",

@@ -737,7 +737,7 @@ class GraphPanel {
       post({ text, done: true });
     } catch (e) {
       post({ done: true, failed: true });
-      if (e instanceof ai.AiUnavailable) notify.warn(e.message);
+      if (e instanceof ai.AiUnavailable) ai.warn(e);
       else showError(e, 'Commit message');
     } finally {
       this.genCts = undefined;

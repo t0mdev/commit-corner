@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed:** summaries and generated commit messages came back empty when `commitCorner.ai.modelFamily` named a model that Copilot CLI lists too (Copilot CLI's models answer other extensions with nothing). They are skipped now, and Copilot's model is used when several providers offer the same one.
+- `commitCorner.ai.modelFamily` also takes a model's id or name; **Choose Language Model…** lists the models that answer and stores your choice.
+- An empty answer is an error with *Choose Model…* and *Show Log*, on the summary page and in the notification; the page names the model while it asks.
+- Output → Commit Corner follows every language model request: the model chosen, what was sent, how the answer came, and errors with their code; the answer at log level Debug, the request at Trace.
+- "Show Git Output" is now "Show Log".
+
 ## 1.0.0
 
 First public release.

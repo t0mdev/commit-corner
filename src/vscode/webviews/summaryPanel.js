@@ -2,7 +2,7 @@
 
 const vscode = require('vscode');
 const { webviewHtml } = require('./html');
-const { showError, closeStaleWebviewTabs } = require('../util');
+const { showError, closeStaleWebviewTabs, log } = require('../util');
 const ai = require('../ai');
 
 const VIEW_TYPE = 'commitCorner.summary';
@@ -74,6 +74,7 @@ class SummaryPanel {
     try {
       const r = await ai.summarize(source, {
         token: cts.token,
+        onModel: (model) => post({ type: 'model', model }),
         onText: (text) => {
           if (this.current !== cts) return;
           this.text = text;
@@ -82,11 +83,13 @@ class SummaryPanel {
       });
       if (this.current !== cts) return; // replaced by a newer summary
       this.text = r.text;
-      post({ type: 'done', text: r.text, model: r.model, files: r.files, cut: r.cut, secrets: r.secrets, withheld: r.withheld, stopped: cts.token.isCancellationRequested });
+      post({ type: 'done', text: r.text, model: r.model, note: r.note, files: r.files, cut: r.cut, secrets: r.secrets, withheld: r.withheld, stopped: cts.token.isCancellationRequested });
     } catch (e) {
       if (this.current !== cts) return;
       this.text = '';
-      post({ type: 'error', message: e.message || String(e) });
+      // The AI module logs its own reasons; anything else (git, a bug) is logged here.
+      if (!(e instanceof ai.AiUnavailable)) log().error(`Summary of ${source.title}: ${e.stack || e.message}`);
+      post({ type: 'error', message: e.message || String(e), chooseModel: !!e.chooseModel });
     } finally {
       if (this.cts === cts) this.cts = undefined;
       cts.dispose();
@@ -106,6 +109,12 @@ class SummaryPanel {
         break;
       case 'again':
         if (this.source) this.run(this.source);
+        break;
+      case 'showLog':
+        log().show(true);
+        break;
+      case 'chooseModel':
+        await vscode.commands.executeCommand('commitCorner.ai.chooseModel');
         break;
       case 'copy':
         // The answer the host has, not text from the page.

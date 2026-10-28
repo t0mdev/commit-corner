@@ -79,17 +79,26 @@ function fakeModel(reply, o = {}) {
       if (o.error) throw o.error;
       const text = typeof reply === 'function' ? reply(prompt) : reply;
       const chunks = text.match(/[\s\S]{1,7}/g) || [];
-      return {
-        text: (async function* gen() {
-          for (const c of chunks) {
-            if (token && token.isCancellationRequested) return;
-            yield c;
-          }
-        })(),
-      };
+      // As VS Code's: `stream` has every part (o.parts: others before the text), `text` only the text.
+      const parts = [...(o.parts || []), ...chunks.map((c) => new LanguageModelTextPart(c))];
+      async function* gen(asText) {
+        for (const p of parts) {
+          if (token && token.isCancellationRequested) return;
+          if (o.breakAfter !== undefined && p === parts[o.breakAfter]) throw o.breakWith;
+          if (!asText) yield p;
+          else if (p instanceof LanguageModelTextPart) yield p.value;
+        }
+      }
+      return o.textOnly ? { text: gen(true) } : { stream: gen(false), text: gen(true) };
     },
   };
   return model;
+}
+
+class LanguageModelTextPart {
+  constructor(value) {
+    this.value = value;
+  }
 }
 
 class Uri {
@@ -294,10 +303,11 @@ function createVscode() {
     CancellationTokenSource,
     LanguageModelError,
     LanguageModelChatMessage: { User: (content) => ({ role: 'user', content }) },
+    LanguageModelTextPart,
     // Language models: tests put fake ones (fakeModel) into `lmModels`.
     lm: {
       async selectChatModels(sel = {}) {
-        return lmModels.filter((m) => (!sel.vendor || m.vendor === sel.vendor) && (!sel.family || m.family === sel.family));
+        return lmModels.filter((m) => (!sel.vendor || m.vendor === sel.vendor) && (!sel.family || m.family === sel.family) && (!sel.id || m.id === sel.id));
       },
     },
     StatusBarAlignment: { Left: 1, Right: 2 },
