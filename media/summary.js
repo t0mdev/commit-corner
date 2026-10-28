@@ -7,6 +7,10 @@
 
   // @ts-ignore acquireVsCodeApi is provided by VS Code
   const vscode = acquireVsCodeApi();
+  // A failure in this page goes to the extension's log (otherwise only Developer Tools see it).
+  const report = (message, stack) => vscode.postMessage({ type: 'clientError', message: String(message).slice(0, 500), stack: String(stack || '').slice(0, 2000) });
+  window.addEventListener('error', (e) => report(e.message, e.error && e.error.stack));
+  window.addEventListener('unhandledrejection', (e) => report(e.reason && e.reason.message ? e.reason.message : e.reason, e.reason && e.reason.stack));
   const ui = window.gaUi;
 
   const el = (tag, cls, text) => {
@@ -113,8 +117,9 @@
     document.body.classList.toggle('busy', on);
   }
 
-  /** The model asked (its name, from the host), while it writes. */
+  /** The model asked (its name, from the host), while it writes; why it is not the one in the settings. */
   let model = '';
+  let note = '';
 
   window.addEventListener('message', (ev) => {
     const m = ev.data;
@@ -124,16 +129,20 @@
         if (document.hasFocus() && document.activeElement === document.body) body.focus();
         title.textContent = `Summary: ${m.title}`;
         model = '';
+        note = '';
         status.textContent = 'Choosing a language model…';
         foot.textContent = '';
         body.replaceChildren();
         busy(true);
         break;
       case 'model':
-        status.textContent = `Asking ${m.model}…`;
         model = m.model;
+        note = m.note || '';
+        status.textContent = `Asking ${m.model}…${note ? ` The language model ${note}.` : ''}`;
         break;
       case 'text':
+        if (m.model) model = m.model;
+        if (m.note) note = m.note;
         status.textContent = model ? `${model} is writing…` : 'Writing…';
         render(m.text);
         break;
@@ -141,19 +150,22 @@
         render(m.text);
         busy(false);
         status.textContent = m.stopped ? 'Stopped.' : '';
-        foot.textContent = `Written by ${m.model}${m.note ? ` (${m.note})` : ''} from ${m.files} changed file${m.files === 1 ? '' : 's'}${m.cut ? ` (${m.cut} shortened or left out to fit)` : ''}${m.withheld ? `; ${m.withheld} file${m.withheld === 1 ? '' : 's'} that may hold secrets sent by name only` : ''}${m.secrets ? `; ${m.secrets} value${m.secrets === 1 ? '' : 's'} that looked like secrets removed` : ''}. A model can be wrong, and text in the changes can steer it: check what matters in the diff.`;
+        if (m.stopped && !m.text) break; // nothing was written: no "Written by"
+        foot.textContent = `Written by ${m.model} from ${m.files} changed file${m.files === 1 ? '' : 's'}${m.cut ? ` (${m.cut} shortened or left out to fit)` : ''}${m.withheld ? `; ${m.withheld} file${m.withheld === 1 ? '' : 's'} that may hold secrets sent by name only` : ''}${m.secrets ? `; ${m.secrets} value${m.secrets === 1 ? '' : 's'} that looked like secrets removed` : ''}.${m.note ? ` The language model ${m.note}.` : ''} A model can be wrong, and text in the changes can steer it: check what matters in the diff.`;
         break;
       case 'focus':
         body.focus();
         break;
       case 'error': {
+        if (m.model) model = m.model;
+        if (m.note) note = m.note;
         busy(false);
         status.textContent = '';
         // What went wrong, and the ways on: another model, the log (what was sent and answered).
         const fix = el('div', 'fix');
         if (m.chooseModel) fix.appendChild(button('Choose Model…', 'Choose the language model Commit Corner asks', () => vscode.postMessage({ type: 'chooseModel' }), 'sparkle'));
         fix.appendChild(button('Show Log', 'Show Output → Commit Corner: the model chosen, what was sent and how it answered', () => vscode.postMessage({ type: 'showLog' }), 'terminal'));
-        body.replaceChildren(el('p', 'error', m.message), fix);
+        body.replaceChildren(el('p', 'error', m.message), ...(note ? [el('p', 'note', `The language model ${note}; ${model} was asked instead.`)] : []), fix);
         break;
       }
       default:

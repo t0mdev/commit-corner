@@ -3,9 +3,10 @@
 ## Unreleased
 
 - **Fixed:** summaries and generated commit messages came back empty when `commitCorner.ai.modelFamily` named a model that Copilot CLI lists too (Copilot CLI's models answer other extensions with nothing). They are skipped now, and Copilot's model is used when several providers offer the same one.
-- `commitCorner.ai.modelFamily` also takes a model's id or name; **Choose Language Model…** lists the models that answer and stores your choice.
-- An empty answer is an error with *Choose Model…* and *Show Log*, on the summary page and in the notification; the page names the model while it asks.
-- Output → Commit Corner follows every language model request: the model chosen, what was sent, how the answer came, and errors with their code; the answer at log level Debug, the request at Trace.
+- `commitCorner.ai.modelFamily` also takes a model's id, its name, or provider/id (one model that several providers offer); **Choose Language Model…** lists the models that answer, stores your choice and asks again on the summary page.
+- An empty answer is an error that says what came instead (a tool call, thinking…), with *Choose Model…* and *Show Log*, on the summary page and in the notification. Model refusals of any kind offer another model. The page names the model while it asks, and says when the model from the setting is not available (✨ says it once per session).
+- Stop is never reported as an error, also while the changes are read or before the model answers.
+- Output → Commit Corner starts with the Commit Corner, VS Code and OS versions, and follows every language model request: the model providers' versions, the model chosen, what was sent, how the answer came (time to the first part, a line every 30 s while a model is silent), errors with their code or git's command and words, each logged once; the answer at log level Debug, the request at Trace. Script errors of the summary page are logged too.
 - "Show Git Output" is now "Show Log".
 
 ## 1.0.0

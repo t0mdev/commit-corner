@@ -45,16 +45,20 @@ models), and asks you once whether Commit Corner may use it. The rules:
   untrusted as well. It only ever becomes text — the commit message box (you
   read it before committing) or the summary page, which renders a Markdown
   subset with DOM text nodes and runs nothing because of it.
-- The model: the one `commitCorner.ai.modelFamily` names (family, id or the
-  name Copilot's picker shows; Copilot's when several providers offer it), else
+- The model: the one `commitCorner.ai.modelFamily` names (family, id, the
+  name Copilot's picker shows, or provider/id; Copilot's when several providers
+  offer it), else
   Copilot's default, else any. Copilot CLI's models (vendor `copilotcli`) are
   never chosen: they fill Copilot CLI's model picker and answer other extensions
   with nothing. An empty answer is an error, never a blank page or message.
 - The log (Output → Commit Corner, lines starting with `AI`) follows every
-  request: at Info the model chosen and the others that matched, what was sent
-  (files, cut, withheld, size) and how the answer came (characters, parts, the
-  kinds of non-text parts, time, errors with their code); at Debug also the
-  answer; at Trace also the request as sent (the diff after the secret removal).
+  request: at Info the providers' versions (once), the model chosen, what was
+  sent (files, cut, withheld, size) and how the answer came (characters, parts,
+  the kinds of non-text parts, time to the first part, a line every 30 s while
+  silent, errors with their code, git's command and words); at Debug also the
+  other models that matched and the answer; at Trace also the request as sent
+  (the diff after the secret removal). A Stop is logged as stopped, never as an
+  error; each failure is logged once (`e.logged`).
   Log files stay on your machine, in VS Code's logs folder.
 
 ## Development: dev-only tooling

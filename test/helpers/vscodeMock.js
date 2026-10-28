@@ -101,6 +101,9 @@ class LanguageModelTextPart {
   }
 }
 
+class LanguageModelToolCallPart {}
+class LanguageModelThinkingPart {}
+
 class Uri {
   constructor(scheme, p, query = '', fragment = '') {
     this.scheme = scheme;
@@ -304,10 +307,12 @@ function createVscode() {
     LanguageModelError,
     LanguageModelChatMessage: { User: (content) => ({ role: 'user', content }) },
     LanguageModelTextPart,
+    LanguageModelToolCallPart,
+    LanguageModelThinkingPart,
     // Language models: tests put fake ones (fakeModel) into `lmModels`.
     lm: {
       async selectChatModels(sel = {}) {
-        return lmModels.filter((m) => (!sel.vendor || m.vendor === sel.vendor) && (!sel.family || m.family === sel.family) && (!sel.id || m.id === sel.id));
+        return lmModels.filter((m) => (!sel.vendor || m.vendor === sel.vendor) && (!sel.family || m.family === sel.family));
       },
     },
     StatusBarAlignment: { Left: 1, Right: 2 },

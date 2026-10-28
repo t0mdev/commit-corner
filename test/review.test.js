@@ -296,6 +296,10 @@ test('the model the setting names: Copilot\'s when several providers offer it, n
   const res = await ai.summarize({ title: 'T', what: 'w', patch: async () => ({ text: 'diff', files: 1, cut: 0, secrets: 0, withheld: 0 }) });
   assert.equal(res.model, 'GPT-4.1');
   assert.match(res.note, /only offered by a provider that does not answer/);
+  // One model that several providers offer: by provider/id, as the log names it.
+  mock.lmModels.splice(0, mock.lmModels.length, copilot, byok);
+  mock.configValues.set('ai.modelFamily', 'anthropic/claude-sonnet-4.5');
+  assert.equal(await ai.commitMessage(repo), 'From BYOK');
   // Nothing but Copilot CLI: no model, and the reason names it.
   mock.lmModels.splice(0, mock.lmModels.length, cli);
   mock.configValues.delete('ai.modelFamily');
@@ -306,10 +310,10 @@ test('an empty answer is an error that says so, with what came instead; a broken
   const { r, repo } = await setup(t);
   r.commit('base', { 'a.txt': '1\n' });
   r.write('a.txt', '2\n');
-  class LanguageModelToolCallPart {}
-  mock.lmModels.splice(0, mock.lmModels.length, fakeModel('', { parts: [new LanguageModelToolCallPart(), new LanguageModelToolCallPart()] }));
-  const lines = await logged(() => assert.rejects(ai.commitMessage(repo), (e) => e instanceof ai.AiUnavailable && e.chooseModel && /Fake Model sent an empty answer \(only 2 × LanguageModelToolCallPart\)/.test(e.message)));
-  assert.ok(lines.some(([l, x]) => l === 'info' && /copilot\/fake answered 0 characters in 2 parts .*not text: 2 × LanguageModelToolCallPart/.test(x)));
+  const { LanguageModelToolCallPart, LanguageModelThinkingPart } = mock.vscode;
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel('', { parts: [new LanguageModelThinkingPart(), new LanguageModelToolCallPart(), new LanguageModelToolCallPart(), {}] }));
+  const lines = await logged(() => assert.rejects(ai.commitMessage(repo), (e) => e instanceof ai.AiUnavailable && e.chooseModel && /Fake Model sent an empty answer \(only 1 × thinking, 2 × tool call, 1 × other\)/.test(e.message)));
+  assert.ok(lines.some(([l, x]) => l === 'info' && /copilot\/fake answered 0 characters in 4 parts .*not text: 1 × thinking, 2 × tool call, 1 × other/.test(x)));
   assert.ok(lines.some(([l, x]) => l === 'warn' && /empty answer/.test(x)));
   // Only whitespace, or only fences: no message either.
   mock.lmModels.splice(0, mock.lmModels.length, fakeModel(' \n '));
@@ -338,10 +342,11 @@ test('the log follows a request: the model, what was sent, the answer (Debug) an
   mock.lmModels.splice(0, mock.lmModels.length, fakeModel('Change a', { id: 'gpt-4.1', family: 'gpt-4.1', name: 'GPT-4.1' }), fakeModel('x', { id: 'other' }));
   const lines = await logged(() => ai.commitMessage(repo));
   const at = (level, re) => lines.some(([l, x]) => l === level && re.test(x));
-  assert.ok(at('info', /^AI commit message: using copilot\/gpt-4\.1 \(family gpt-4\.1, "GPT-4\.1", 8000 input tokens\); also matched: copilot\/other$/), JSON.stringify(lines));
+  assert.ok(at('info', /^AI commit message: using copilot\/gpt-4\.1 \(family gpt-4\.1, "GPT-4\.1", 8000 input tokens\)$/), JSON.stringify(lines));
+  assert.ok(at('debug', /^AI commit message: also matched: copilot\/other$/));
   assert.ok(at('info', /^AI commit message: all changes: 1 file \(budget \d+ characters\)$/));
   assert.ok(at('info', /^AI commit message: sending \d+ characters to copilot\/gpt-4\.1$/));
-  assert.ok(at('info', /^AI commit message: copilot\/gpt-4\.1 answered 8 characters in 2 parts after \d+ ms$/));
+  assert.ok(at('info', /^AI commit message: copilot\/gpt-4\.1 answered 8 characters in 2 parts after \d+ ms \(the first after \d+ ms\)$/));
   assert.ok(at('debug', /^AI commit message: the answer:\nChange a$/));
   assert.ok(at('trace', /^AI commit message: the request as sent:\n[\s\S]*\+2/));
   assert.ok(!lines.some(([l, x]) => l !== 'trace' && /\+2$/m.test(x)), 'the diff only at Trace');
@@ -349,6 +354,45 @@ test('the log follows a request: the model, what was sent, the answer (Debug) an
   mock.lmModels.splice(0, mock.lmModels.length, fakeModel('x', { error: mock.vscode.LanguageModelError.Blocked('quota exceeded') }));
   const refused = await logged(() => assert.rejects(ai.commitMessage(repo), (e) => e.chooseModel && /blocked or rate-limited/.test(e.message)));
   assert.ok(refused.some(([l, x]) => l === 'error' && /copilot\/fake did not take the request: .*\[Blocked\]: quota exceeded/.test(x)), JSON.stringify(refused));
+  // Any other refusal: the model's words and code, and the way to another model; no stack.
+  const E = mock.vscode.LanguageModelError;
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel('x', { error: new E('Response contained no choices.', 'Unknown') }));
+  const other = await logged(() => assert.rejects(ai.commitMessage(repo), (e) => e instanceof ai.AiUnavailable && e.chooseModel && /^Fake Model failed: Response contained no choices\. \(Unknown\)$/.test(e.message)));
+  assert.ok(!other.some(([, x]) => /\n\s+at /.test(x)), 'a model error is logged without a stack');
+});
+
+test('Stop is stopped, never an error: while the changes are read, or before the model answers', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'a.txt': '1\n' });
+  r.write('a.txt', '2\n');
+  const { GitError } = require('../src/git/exec');
+  const cancelled = () => new GitError({ args: ['diff'], exitCode: null, stdout: '', stderr: 'Cancelled' });
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel('never asked'));
+  // Stopped while git reads the diff.
+  const cts = new mock.vscode.CancellationTokenSource();
+  const reading = { title: 'T', what: 'w', patch: async () => { cts.cancel(); throw cancelled(); } };
+  const lines = await logged(async () => {
+    const res = await ai.summarize(reading, { token: cts.token });
+    assert.equal(res.text, '');
+    assert.equal(res.files, 0);
+  });
+  assert.deepEqual(lines.filter(([l]) => l === 'error' || l === 'warn'), [], 'nothing logged as a failure');
+  assert.ok(lines.some(([l, x]) => l === 'info' && /stopped while reading the changes/.test(x)));
+  assert.equal(mock.lmModels[0].prompts.length, 0, 'nothing sent');
+  // Stopped while the provider still had the request: its cancellation error is a stop.
+  const cts2 = new mock.vscode.CancellationTokenSource();
+  const model = fakeModel('x');
+  model.sendRequest = async () => { cts2.cancel(); throw Object.assign(new Error('Canceled'), { name: 'Canceled' }); };
+  mock.lmModels.splice(0, mock.lmModels.length, model);
+  const more = await logged(async () => assert.equal((await ai.summarize({ title: 'T', what: 'w', patch: async () => ({ text: 'diff', files: 1, cut: 0, secrets: 0, withheld: 0 }) }, { token: cts2.token })).text, ''));
+  assert.ok(more.some(([l, x]) => l === 'info' && /stopped before copilot\/fake answered/.test(x)), JSON.stringify(more));
+  // A failing git: logged once, with its command, exit code and words (credentials hidden).
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel('x'));
+  const broken = { title: 'T', what: 'w', patch: async () => { throw new GitError({ args: ['diff', 'https://me:tok@example.com/x'], exitCode: 128, stdout: '', stderr: 'fatal: bad object abc\n', cwd: '/repo' }); } };
+  const failed = await logged(() => assert.rejects(ai.summarize(broken), (e) => e.logged === true));
+  const errors = failed.filter(([l]) => l === 'error').map(([, x]) => x);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /reading the changes failed: git diff https:\/\/\*\*\*@example\.com\/x → exit 128 in \/repo:\nfatal: bad object abc$/);
 });
 
 test('Choose Language Model lists the models that answer and stores the choice in user settings', async (t) => {
@@ -363,13 +407,25 @@ test('Choose Language Model lists the models that answer and stores the choice i
   mock.vscode.window.showQuickPick = async (list, opts) => ((items = await list), show(list, opts));
   t.after(() => (mock.vscode.window.showQuickPick = show));
   await ai.pickModel();
-  assert.deepEqual(items.map((i) => i.description), ["Copilot's default model", 'copilot · claude-sonnet-4.5', 'anthropic · claude-sonnet-4.5'], 'Copilot CLI is not offered; Copilot first');
+  assert.deepEqual(items.map((i) => i.description), ["Copilot's default model, else any", 'copilot · claude-sonnet-4.5', 'anthropic · claude-sonnet-4.5'], 'Copilot CLI is not offered; Copilot first');
   assert.equal(items[1].value, 'claude-sonnet-4.5');
   assert.doesNotMatch(items[2].label, /\$\(/, 'no icons from a provider\'s name');
+  assert.match(items[0].label, /^\$\(check\) /, 'nothing set: the default is checked');
   // The same family and id under another provider: chosen by its name.
   mock.ui.answers.push(2);
-  await ai.pickModel();
+  assert.equal(await ai.pickModel(), true);
   assert.equal(mock.configValues.get('ai.modelFamily'), 'Claude Sonnet 4.5 $(alert)');
+  // Same family, id and name under two providers: provider/id; the check follows what the
+  // setting finds, also when it was written by hand.
+  const twin = fakeModel('', { vendor: 'anthropic', id: 'claude-sonnet-4.5', family: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5' });
+  mock.lmModels.splice(0, mock.lmModels.length, copilot, twin);
+  mock.configValues.set('ai.modelFamily', 'claude sonnet 4.5');
+  mock.ui.answers.push(2);
+  assert.equal(await ai.pickModel(), true);
+  assert.deepEqual(items.map((i) => i.label.startsWith('$(check)')), [false, true, false]);
+  assert.equal(mock.configValues.get('ai.modelFamily'), 'anthropic/claude-sonnet-4.5');
+  mock.ui.answers.push(2);
+  assert.equal(await ai.pickModel(), false, 'the same choice again: nothing changed');
   mock.ui.answers.push(0);
   await ai.pickModel();
   assert.equal(mock.configValues.get('ai.modelFamily'), undefined, 'Default clears it');
@@ -451,6 +507,19 @@ test('the summary page shows the summary again when it is re-created, and copies
   await p.onMessage({ type: 'showLog' });
   assert.deepEqual(shown, [true], 'Show Log opens the output, the page keeps the keyboard');
   require('../src/vscode/util').setOutput(undefined);
+  // The page's own failures reach the log.
+  const pageLog = quietLog();
+  require('../src/vscode/util').setOutput(pageLog);
+  await p.onMessage({ type: 'clientError', message: 'boom\nforged line', stack: 'at render' });
+  require('../src/vscode/util').setOutput(undefined);
+  assert.deepEqual(pageLog.lines, [['error', 'Summary page: boom forged line\nat render']]);
+  // Choose Model… that changes the model: asked again with it.
+  const pick = mock.vscode.commands.registerCommand('commitCorner.ai.chooseModel', async () => (mock.lmModels.splice(0, mock.lmModels.length, fakeModel('## What changed\nB')), true));
+  posted.length = 0;
+  await p.onMessage({ type: 'chooseModel' });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  pick.dispose();
+  assert.equal(posted.find((m) => m.type === 'done').text, '## What changed\nB');
   p.dispose();
 });
 

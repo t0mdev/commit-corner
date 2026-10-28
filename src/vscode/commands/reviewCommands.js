@@ -3,6 +3,7 @@
 const vscode = require('vscode');
 const viewed = require('../viewed');
 const ai = require('../ai');
+const { showError } = require('../util');
 
 /**
  * Reviewing changes: "Viewed" marks for a whole list (a pull request's files, a worktree's
@@ -60,7 +61,7 @@ function register(ctx) {
       } catch (e) {
         if (provider.message === written) provider.message = before;
         if (e instanceof ai.AiUnavailable) ai.warn(e);
-        else throw e;
+        else showError(e, 'Commit message');
       } finally {
         cts.dispose();
       }

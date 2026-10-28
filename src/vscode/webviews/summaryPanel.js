@@ -50,6 +50,8 @@ class SummaryPanel {
     /** What the page shows (start, the text so far, done or error): sent again when the page is re-created. */
     this.shown = [];
     panel.webview.html = webviewHtml(panel.webview, ctx.extensionUri, { title: 'Summary', script: 'summary.js', style: 'summary.css' });
+    // A page whose script never starts stays blank: said in the log.
+    this.loading = setTimeout(() => log().warn('Summary page: not loaded after 10 s (its script did not start; Developer: Open Webview Developer Tools shows why)'), 10000);
     this.disposables = [
       panel.onDidDispose(() => this.dispose()),
       panel.webview.onDidReceiveMessage((m) => this.onMessage(m).catch((e) => showError(e, 'Summary'))),
@@ -71,14 +73,17 @@ class SummaryPanel {
       this.panel.webview.postMessage(m);
     };
     post({ type: 'start', title: source.title });
+    let label;
+    this.note = undefined;
     try {
       const r = await ai.summarize(source, {
         token: cts.token,
-        onModel: (model) => post({ type: 'model', model }),
+        onModel: (model, note) => post({ type: 'model', model: (label = model), note: (this.note = note) }),
         onText: (text) => {
           if (this.current !== cts) return;
           this.text = text;
-          post({ type: 'text', text });
+          // The model and note go along: a page re-created while it writes still names them.
+          post({ type: 'text', text, model: label, note: this.note });
         },
       });
       if (this.current !== cts) return; // replaced by a newer summary
@@ -87,9 +92,15 @@ class SummaryPanel {
     } catch (e) {
       if (this.current !== cts) return;
       this.text = '';
-      // The AI module logs its own reasons; anything else (git, a bug) is logged here.
-      if (!(e instanceof ai.AiUnavailable)) log().error(`Summary of ${source.title}: ${e.stack || e.message}`);
-      post({ type: 'error', message: e.message || String(e), chooseModel: !!e.chooseModel });
+      // Stop while a request was on its way: stopped, not failed.
+      if (cts.token.isCancellationRequested) {
+        log().info(`Summary of ${source.title}: stopped (${e.message || e})`);
+        post({ type: 'done', text: '', stopped: true });
+        return;
+      }
+      // The AI module logs what it throws; anything else (a bug) is logged here.
+      if (!e.logged) log().error(`Summary of ${source.title}: ${e.stack || e.message}`);
+      post({ type: 'error', message: e.message || String(e), chooseModel: !!e.chooseModel, model: label, note: this.note });
     } finally {
       if (this.cts === cts) this.cts = undefined;
       cts.dispose();
@@ -101,6 +112,7 @@ class SummaryPanel {
     switch (m.type) {
       case 'ready':
         // First load, or the page was re-created (hidden and shown again): show it as it was.
+        clearTimeout(this.loading);
         this.resolveReady(true);
         for (const x of this.shown) this.panel.webview.postMessage(x);
         break;
@@ -110,11 +122,16 @@ class SummaryPanel {
       case 'again':
         if (this.source) this.run(this.source);
         break;
+      case 'clientError':
+        // The page's own text: one line for the message, the stack below it.
+        log().error(`Summary page: ${String(m.message).replace(/[\r\n]+/g, ' ').slice(0, 500)}${m.stack ? `\n${String(m.stack).slice(0, 2000)}` : ''}`);
+        break;
       case 'showLog':
         log().show(true);
         break;
       case 'chooseModel':
-        await vscode.commands.executeCommand('commitCorner.ai.chooseModel');
+        // Another model chosen: asked again right away.
+        if ((await vscode.commands.executeCommand('commitCorner.ai.chooseModel')) && this.source) this.run(this.source);
         break;
       case 'copy':
         // The answer the host has, not text from the page.
@@ -128,6 +145,7 @@ class SummaryPanel {
   }
 
   dispose() {
+    clearTimeout(this.loading);
     this.resolveReady(false);
     if (this.cts) this.cts.cancel();
     if (SummaryPanel.panels.get(this.key) === this) SummaryPanel.panels.delete(this.key);

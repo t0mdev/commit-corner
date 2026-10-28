@@ -18,6 +18,11 @@ function log() {
   return output || NO_LOG;
 }
 
+/** Hide credentials embedded in URLs (https://user:token@host) before they reach the log. */
+function redact(text) {
+  return text.replace(/(\w+:\/\/)([^/\s@:]+)(:[^/\s@]*)?@/g, '$1***@');
+}
+
 function config() {
   return vscode.workspace.getConfiguration('commitCorner');
 }
@@ -285,6 +290,7 @@ function validMessageShas(m, special = []) {
 }
 
 module.exports = {
+  redact,
   selectedShas,
   isSha,
   treeViews,

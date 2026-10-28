@@ -699,7 +699,9 @@ Commit Corner is a free hobby project, provided **as is** (see [LICENSE](LICENSE
 is no guaranteed support and no promised time for fixes. Issues and pull requests are
 welcome; contributions are accepted under the project's MIT License. In a bug report,
 please include the Commit Corner, VS Code, git and OS versions and the relevant lines from
-Output → *Commit Corner*. Please report security problems privately, as described in
+Output → *Commit Corner* (its first line names the versions). Lines at the Info level are
+enough; Debug and Trace lines contain your changes and the language model's answers about
+them. Please report security problems privately, as described in
 [SECURITY.md](SECURITY.md).
 
 ## License and trademarks

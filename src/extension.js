@@ -3,7 +3,7 @@
 const vscode = require('vscode');
 const notify = require('./vscode/notify');
 const exec = require('./git/exec');
-const { setOutput, config, log } = require('./vscode/util');
+const { setOutput, config, log, redact } = require('./vscode/util');
 const { RepositoryManager } = require('./vscode/model');
 const { GitFileSystemProvider } = require('./vscode/fsProvider');
 const { ScmManager } = require('./vscode/scm');
@@ -32,6 +32,9 @@ async function activate(extContext) {
       else output.trace(line);
     },
   });
+  // Versions first: a log pasted into a bug report says what it came from.
+  const remote = vscode.env.remoteName ? `, remote ${vscode.env.remoteName}` : '';
+  output.info(`Commit Corner ${require('../package.json').version} in ${vscode.env.appName} ${vscode.version} (${process.platform} ${process.arch}${remote})`);
   try {
     const v = await exec.getVersion();
     output.info(`Using ${v.raw}`);
@@ -262,11 +265,6 @@ async function startAskpass(extContext) {
   } catch (e) {
     log().warn(`Credential prompts unavailable: ${e.message}`);
   }
-}
-
-/** Hide credentials embedded in URLs (https://user:token@host) before they reach the log. */
-function redact(text) {
-  return text.replace(/(\w+:\/\/)([^/\s@:]+)(:[^/\s@]*)?@/g, '$1***@');
 }
 
 function deactivate() {}

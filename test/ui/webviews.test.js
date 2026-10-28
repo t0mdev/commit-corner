@@ -142,6 +142,11 @@ suite('Webviews in VS Code (DOM)', () => {
       const error = await until(() => evaluate(summary, `document.querySelector('.answer .error') && document.querySelector('.answer .error').textContent`), 'the empty answer to be reported');
       assert.match(error, /^Silent LM \(cc-test\) sent an empty answer\./);
       assert.deepStrictEqual(await evaluate(summary, `[...document.querySelectorAll('.answer .fix button')].map((b) => b.textContent)`), ['Choose Model…', 'Show Log']);
+      // Only a tool call: named in words (VS Code's own class names are minified).
+      await config.update('ai.modelFamily', 'cc-test-tool', vscode.ConfigurationTarget.Global);
+      await vscode.commands.executeCommand('commitCorner.worktreeSummarize', { repoRoot: root(), worktreePath: agent, worktree: { branch: 'agent', path: agent } });
+      const tool = await until(() => evaluate(summary, `(document.querySelector('.answer .error') || {}).textContent || ''`).then((t) => /Tool LM/.test(t) && t), 'the tool-call-only answer to be reported');
+      assert.match(tool, /^Tool LM \(cc-test\) sent an empty answer \(only 1 × tool call\)\./);
     } finally {
       await config.update('ai.modelFamily', undefined, vscode.ConfigurationTarget.Global);
     }

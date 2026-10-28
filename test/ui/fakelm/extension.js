@@ -14,10 +14,16 @@ exports.activate = (context) => {
         { id: 'cc-test-1', name: 'Test LM', family: 'cc-test', version: '1', maxInputTokens: 32000, maxOutputTokens: 2000, capabilities: {} },
         // Answers nothing (as Copilot CLI's models do when another extension asks).
         { id: 'cc-test-silent', name: 'Silent LM', family: 'cc-test-silent', version: '1', maxInputTokens: 32000, maxOutputTokens: 2000, capabilities: {} },
+        // Answers only with a tool call (no text).
+        { id: 'cc-test-tool', name: 'Tool LM', family: 'cc-test-tool', version: '1', maxInputTokens: 32000, maxOutputTokens: 2000, capabilities: { toolCalling: true } },
       ];
     },
     async provideLanguageModelChatResponse(model, messages, options, progress, token) {
       if (model.id === 'cc-test-silent') return;
+      if (model.id === 'cc-test-tool') {
+        progress.report(new vscode.LanguageModelToolCallPart('call-1', 'some_tool', {}));
+        return;
+      }
       const prompt = messages.map((m) => m.content.map((p) => p.value || '').join('')).join('\n');
       const reply = /Write a git commit message/.test(prompt) ? COMMIT : SUMMARY;
       for (const chunk of reply.match(/[\s\S]{1,8}/g)) {

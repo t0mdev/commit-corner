@@ -1,9 +1,10 @@
 'use strict';
 
 const vscode = require('vscode');
-const { config, log } = require('../util');
+const { config, log, redact } = require('../util');
 const notify = require('../notify');
 const { INDEX, EMPTY_TREE } = require('../../git/repository');
+const { GitError, ErrorCodes } = require('../../git/exec');
 const P = require('./prompt');
 
 /**
@@ -43,9 +44,12 @@ class AiUnavailable extends Error {
  */
 const SILENT_VENDORS = new Set(['copilotcli']);
 
+/** A provider's text on one log line (a name cannot start a line of its own). */
+const one = (x) => String(x).replace(/[\r\n]+/g, ' ');
+
 /** A model for the log: its provider and id, family, name and input size. */
 function describeModel(m) {
-  return `${m.vendor}/${m.id} (family ${m.family}${m.name && m.name !== m.id ? `, "${m.name}"` : ''}${m.version ? `, version ${m.version}` : ''}, ${m.maxInputTokens} input tokens)`;
+  return one(`${m.vendor}/${m.id} (family ${m.family}${m.name && m.name !== m.id ? `, "${m.name}"` : ''}${m.version ? `, version ${m.version}` : ''}, ${m.maxInputTokens} input tokens)`);
 }
 
 /** A model for the page: its name, and who provides it when that is not Copilot. */
@@ -53,17 +57,45 @@ function modelLabel(m) {
   return `${m.name || m.family || m.id}${m.vendor && m.vendor !== 'copilot' ? ` (${m.vendor})` : ''}`;
 }
 
-/** An error's kind, code, message and cause, for the log. */
+/**
+ * An error for the log: git's command, exit code and words; a model's error with its code and
+ * cause; the stack only for anything else (a bug).
+ */
 function errorDetail(e) {
   if (!e || typeof e !== 'object') return String(e);
+  if (e instanceof GitError) {
+    const said = String(e.stderr || e.stdout || '').trim().split('\n').slice(0, 8).join('\n');
+    return redact(`git ${e.args.join(' ').slice(0, 300)} → exit ${e.exitCode}${e.cwd ? ` in ${e.cwd}` : ''}${said ? `:\n${said}` : ''}`);
+  }
   const cause = e.cause ? ` (cause: ${e.cause.message || e.cause})` : '';
-  return `${e.name || 'Error'}${e.code ? ` [${e.code}]` : ''}: ${e.message}${cause}`;
+  const known = (vscode.LanguageModelError && e instanceof vscode.LanguageModelError) || e instanceof AiUnavailable;
+  return `${e.name || 'Error'}${e.code ? ` [${e.code}]` : ''}: ${e.message}${cause}${!known && e.stack ? `\n${e.stack}` : ''}`;
+}
+
+/** An error once logged here (the summary page does not log it again). */
+function logged(e) {
+  if (e && typeof e === 'object') e.logged = true;
+  return e;
+}
+
+/** Stopped by you: git cancelled, or the request (the provider's cancellation error). */
+function stopped(e, token) {
+  return !!(token && token.isCancellationRequested) || (e instanceof GitError && e.code === ErrorCodes.Cancelled);
 }
 
 /** The reason nothing can be asked, logged under the request it belongs to. */
 function unavailable(what, message, o) {
   log().warn(`AI ${what}: ${message}`);
-  return new AiUnavailable(message, o);
+  return logged(new AiUnavailable(message, o));
+}
+
+/** The model providers' versions, once per session (a provider's update can change what answers). */
+let providersLogged = false;
+function logProviders() {
+  if (providersLogged) return;
+  providersLogged = true;
+  const known = ['GitHub.copilot-chat', 'GitHub.copilot'].map((id) => vscode.extensions && vscode.extensions.getExtension(id)).filter(Boolean);
+  log().info(`AI: model providers: ${known.map((x) => `${x.id} ${x.packageJSON && x.packageJSON.version}`).join(', ') || 'no GitHub Copilot extension'} (VS Code ${vscode.version})`);
 }
 
 function enabled() {
@@ -75,14 +107,17 @@ function usable(models) {
   return models.filter((m) => !SILENT_VENDORS.has(m.vendor)).sort((a, b) => (b.vendor === 'copilot') - (a.vendor === 'copilot'));
 }
 
-/** The models `wanted` names: by family, id or name (as Copilot's model picker shows it), any case. */
+/**
+ * The models `wanted` names: by family, id or name (as Copilot's model picker shows it), or as
+ * provider/id (as the log shows it, for one model that several providers offer), any case.
+ */
 function matching(models, wanted) {
   const w = wanted.toLowerCase();
-  return models.filter((m) => [m.family, m.id, m.name].some((x) => String(x || '').toLowerCase() === w));
+  return models.filter((m) => [m.family, m.id, m.name, `${m.vendor}/${m.id}`].some((x) => String(x || '').toLowerCase() === w));
 }
 
 /** Every model, for the log: provider/id (family). */
-const listModels = (models) => models.map((m) => `${m.vendor}/${m.id} (family ${m.family})`).join(', ') || 'none';
+const listModels = (models) => one(models.map((m) => `${m.vendor}/${m.id} (family ${m.family})`).join(', ') || 'none');
 
 /**
  * The model to ask: the one "commitCorner.ai.modelFamily" names (family, id or name), else
@@ -93,6 +128,7 @@ const listModels = (models) => models.map((m) => `${m.vendor}/${m.id} (family ${
 async function chooseModel(what = 'request') {
   if (!enabled()) throw unavailable(what, 'Generated messages and summaries are off (setting "commitCorner.ai.enabled").');
   if (!vscode.lm || typeof vscode.lm.selectChatModels !== 'function') throw unavailable(what, 'This version of VS Code has no language model API.');
+  logProviders();
   const wanted = String(config().get('ai.modelFamily', '') || '').trim();
   let models = [];
   let note;
@@ -101,8 +137,8 @@ async function chooseModel(what = 'request') {
     const named = matching(all, wanted);
     models = usable(named);
     if (!models.length) {
-      note = `"${wanted}" (setting commitCorner.ai.modelFamily) is ${named.length ? 'only offered by a provider that does not answer extensions' : 'not available'}`;
-      log().warn(`AI ${what}: the model ${note}; using the default instead. Available: ${listModels(all)}`);
+      note = `"${wanted}" from the setting commitCorner.ai.modelFamily is ${named.length ? 'only offered by a provider that does not answer extensions' : 'not available'}`;
+      log().warn(`AI ${what}: the model ${one(note)}; using the default instead. Available: ${listModels(all)}`);
     }
   }
   if (!models.length) models = usable(await vscode.lm.selectChatModels({ vendor: 'copilot' }));
@@ -113,53 +149,66 @@ async function chooseModel(what = 'request') {
       throw unavailable(what, `No language model is available${all.length ? ` that answers extensions (found only: ${listModels(all)})` : ''}. Install GitHub Copilot Chat (or another extension that provides language models) and sign in.`);
     }
   }
+  log().info(`AI ${what}: using ${describeModel(models[0])}`);
   const others = models.slice(1, 8).map((m) => `${m.vendor}/${m.id}`).join(', ');
-  log().info(`AI ${what}: using ${describeModel(models[0])}${others ? `; also matched: ${others}${models.length > 8 ? ', …' : ''}` : ''}`);
+  if (others) log().debug(`AI ${what}: also matched: ${others}${models.length > 8 ? ', …' : ''}`);
   return { model: models[0], note };
 }
 
 /**
  * The setting's value that chooses `m`: its family when that finds it first, else its id, else
- * its name (the same id or family under another provider).
+ * its name, else provider/id (the same model under several providers).
  */
 function settingFor(m, models) {
   for (const value of [m.family, m.id, m.name]) if (value && usable(matching(models, value))[0] === m) return value;
-  return m.id;
+  return `${m.vendor}/${m.id}`;
 }
 
-/** "Choose Language Model…": every model that answers, the choice stored in your user settings. */
+/**
+ * "Choose Language Model…": every model that answers, the choice stored in your user settings.
+ * @returns {Promise<boolean>} whether the setting changed
+ */
 async function pickModel() {
+  if (!enabled()) {
+    notify.warn('Generated messages and summaries are off (setting "commitCorner.ai.enabled").');
+    return false;
+  }
   if (!vscode.lm || typeof vscode.lm.selectChatModels !== 'function') {
     notify.warn('This version of VS Code has no language model API.');
-    return;
+    return false;
   }
   const all = await vscode.lm.selectChatModels();
   const models = usable(all);
   log().info(`AI: models offered: ${listModels(all)}`);
   if (!models.length) {
     notify.warn('No language model is available. Install GitHub Copilot Chat (or another extension that provides language models) and sign in.');
-    return;
+    return false;
   }
   const current = String(config().get('ai.modelFamily', '') || '').trim();
+  // The model in use: the one the setting finds (written by hand, too), else the default.
+  const inUse = current ? usable(matching(all, current))[0] : undefined;
+  const check = (on) => (on ? '$(check) ' : '');
   const items = [
-    { label: `${current ? '' : '$(check) '}Default`, description: "Copilot's default model", value: '' },
-    ...models.map((m) => {
-      const value = settingFor(m, all);
-      // Names come from the providers: no $(icons) from them.
-      return { label: `${current && value.toLowerCase() === current.toLowerCase() ? '$(check) ' : ''}${notify.plainText(m.name || m.id)}`, description: notify.plainText(`${m.vendor} · ${m.family}`), detail: m.maxInputTokens ? `${Math.round(m.maxInputTokens / 1000)}k input tokens` : undefined, value };
-    }),
+    { label: `${check(!inUse)}Default`, description: "Copilot's default model, else any", value: '' },
+    // Names come from the providers: no $(icons) from them.
+    ...models.map((m) => ({ label: `${check(m === inUse)}${notify.plainText(m.name || m.id)}`, description: notify.plainText(`${m.vendor} · ${m.family}`), detail: m.maxInputTokens ? `${Math.round(m.maxInputTokens / 1000)}k input tokens` : undefined, value: settingFor(m, all) })),
   ];
   const pick = await vscode.window.showQuickPick(items, { title: 'Language Model for Commit Messages and Summaries', placeHolder: 'Stored in your user settings (commitCorner.ai.modelFamily)', matchOnDescription: true });
-  if (!pick) return;
+  if (!pick || pick.value === current) return false;
   await config().update('ai.modelFamily', pick.value || undefined, vscode.ConfigurationTarget.Global);
-  log().info(`AI: model set to ${pick.value ? `"${pick.value}"` : 'the default'}`);
+  log().info(`AI: model set to ${pick.value ? `"${one(pick.value)}"` : 'the default'}`);
+  return true;
 }
 
-/** An AiUnavailable as a warning, with the way to another model and to the log. */
+/** An AiUnavailable as a warning, with the way to another model and to the log (not awaited by callers). */
 async function warn(e) {
-  const choice = await notify.warn(e.message, ...(e.chooseModel ? ['Choose Model…'] : []), 'Show Log');
-  if (choice === 'Show Log') log().show(true);
-  else if (choice === 'Choose Model…') await vscode.commands.executeCommand('commitCorner.ai.chooseModel');
+  try {
+    const choice = await notify.warn(e.message, ...(e.chooseModel ? ['Choose Model…'] : []), 'Show Log');
+    if (choice === 'Show Log') log().show(true);
+    else if (choice === 'Choose Model…') await vscode.commands.executeCommand('commitCorner.ai.chooseModel');
+  } catch (err) {
+    log().warn(`AI: ${errorDetail(err)}`);
+  }
 }
 
 /**
@@ -195,24 +244,32 @@ function signalOf(token) {
 }
 
 /** Language model errors in words a user can act on (the error itself is logged). */
-function friendly(e) {
+function friendly(e, model) {
   const E = vscode.LanguageModelError;
   if (E && e instanceof E) {
-    if (e.code === E.NoPermissions().code) return new AiUnavailable('Commit Corner may not use language models. Allow it when VS Code asks, or under Accounts → Manage Language Model Access.');
-    if (e.code === E.NotFound().code) return new AiUnavailable('The language model is not available any more.', { chooseModel: true });
-    if (e.code === E.Blocked().code) return new AiUnavailable(`The language model did not answer (blocked or rate-limited): ${e.message}`, { chooseModel: true });
+    if (e.code === E.NoPermissions().code) return logged(new AiUnavailable('Commit Corner may not use language models. Allow it when VS Code asks, or under Accounts → Manage Language Model Access.'));
+    if (e.code === E.NotFound().code) return logged(new AiUnavailable(`${modelLabel(model)} is not available any more.`, { chooseModel: true }));
+    if (e.code === E.Blocked().code) return logged(new AiUnavailable(`${modelLabel(model)} did not answer (blocked or rate-limited): ${e.message}`, { chooseModel: true }));
+    // Any other refusal (unsupported, no choices…): the model's words, and the way to another.
+    return logged(new AiUnavailable(`${modelLabel(model)} failed: ${e.message}${e.code ? ` (${e.code})` : ''}`, { chooseModel: true }));
   }
-  return e;
+  return logged(e);
 }
 
-/** What a part of the answer that is not text is (a tool call, thinking…), for the log. */
+/** Parts of an answer that are not text, in words (class names are minified in VS Code). */
+const PART_KINDS = [['LanguageModelToolCallPart', 'tool call'], ['LanguageModelThinkingPart', 'thinking'], ['LanguageModelDataPart', 'data'], ['LanguageModelToolResultPart', 'tool result'], ['LanguageModelPromptTsxPart', 'prompt']];
+
+/** What a part of the answer that is not text is (a tool call, thinking…), for the log and the error. */
 function kindOf(part) {
-  const name = part && part.constructor && part.constructor.name;
-  return name && name !== 'Object' ? name : typeof part;
+  for (const [cls, word] of PART_KINDS) if (typeof vscode[cls] === 'function' && part instanceof vscode[cls]) return word;
+  return 'other';
 }
 
 /** The answer in the log (Debug): long ones cut. */
 const LOGGED_ANSWER = 20000;
+
+/** A model still silent after this long is said in the log (and again every time it passes). */
+const WAITING_MS = 30000;
 
 /**
  * Ask the model. `onText(all)` gets the answer so far while it arrives.
@@ -220,7 +277,7 @@ const LOGGED_ANSWER = 20000;
  * @returns {Promise<string>} the whole answer (what arrived, if cancelled)
  */
 async function ask(model, prompt, token, onText, what = 'request') {
-  const name = `${model.vendor}/${model.id}`;
+  const name = one(`${model.vendor}/${model.id}`);
   // Stopped (or the page closed) while the changes were read: nothing is sent.
   if (token && token.isCancellationRequested) {
     log().info(`AI ${what}: stopped before anything was sent`);
@@ -237,11 +294,18 @@ async function ask(model, prompt, token, onText, what = 'request') {
       token,
     );
   } catch (e) {
+    if (stopped(e, token)) {
+      log().info(`AI ${what}: stopped before ${name} answered`);
+      return '';
+    }
     log().error(`AI ${what}: ${name} did not take the request: ${errorDetail(e)}`);
-    throw friendly(e);
+    throw friendly(e, model);
   }
   let all = '';
   let parts = 0;
+  let first;
+  // A model that takes long (or hangs) is told from a stuck extension by the log.
+  const waiting = setInterval(() => log().info(`AI ${what}: still waiting for ${name} after ${Math.round((Date.now() - started) / 1000)} s (${all.length} characters so far)`), WAITING_MS);
   /** Parts that are not text, by kind: what came instead when no text does. */
   const skipped = new Map();
   try {
@@ -250,7 +314,7 @@ async function ask(model, prompt, token, onText, what = 'request') {
     const T = vscode.LanguageModelTextPart;
     if (res.stream && T) {
       for await (const part of res.stream) {
-        parts++;
+        if (!parts++) first = Date.now() - started;
         if (part instanceof T) {
           all += part.value;
           if (onText) onText(all);
@@ -258,24 +322,26 @@ async function ask(model, prompt, token, onText, what = 'request') {
       }
     } else {
       for await (const chunk of res.text) {
-        parts++;
+        if (!parts++) first = Date.now() - started;
         all += chunk;
         if (onText) onText(all);
       }
     }
   } catch (e) {
-    if (token && token.isCancellationRequested) {
+    if (stopped(e, token)) {
       log().info(`AI ${what}: stopped after ${all.length} characters`);
       return all;
     }
     log().error(`AI ${what}: the answer from ${name} broke off after ${all.length} characters (${Date.now() - started} ms): ${errorDetail(e)}`);
-    throw friendly(e);
+    throw friendly(e, model);
+  } finally {
+    clearInterval(waiting);
   }
-  const stopped = !!(token && token.isCancellationRequested);
+  const halted = !!(token && token.isCancellationRequested);
   const other = [...skipped].map(([k, n]) => `${n} × ${k}`).join(', ');
-  log().info(`AI ${what}: ${stopped ? 'stopped; ' : ''}${name} answered ${all.length} characters in ${parts} part${parts === 1 ? '' : 's'} after ${Date.now() - started} ms${other ? ` (not text: ${other})` : ''}`);
+  log().info(`AI ${what}: ${halted ? 'stopped; ' : ''}${name} answered ${all.length} characters in ${parts} part${parts === 1 ? '' : 's'} after ${Date.now() - started} ms${first !== undefined ? ` (the first after ${first} ms)` : ''}${other ? ` (not text: ${other})` : ''}`);
   if (all) log().debug(`AI ${what}: the answer:\n${all.length > LOGGED_ANSWER ? `${all.slice(0, LOGGED_ANSWER)}\n… (${all.length - LOGGED_ANSWER} more characters)` : all}`);
-  if (!all.trim() && !stopped) {
+  if (!all.trim() && !halted) {
     throw unavailable(what, `${modelLabel(model)} sent an empty answer${other ? ` (only ${other})` : ''}. Choose another model, or see Output → Commit Corner for details.`, { chooseModel: true });
   }
   return all;
@@ -289,7 +355,8 @@ async function ask(model, prompt, token, onText, what = 'request') {
  */
 async function commitMessage(repo, o = {}) {
   const what = 'commit message';
-  const { model } = await chooseModel(what);
+  const { model, note } = await chooseModel(what);
+  if (note) tellOnce(note, model);
   const s = await repo.refreshState();
   const from = s.head.sha || EMPTY_TREE;
   const staged = s.staged.length > 0;
@@ -297,9 +364,19 @@ async function commitMessage(repo, o = {}) {
   const budget = budgetFor(model);
   // Nothing staged: what smart commit would stage, new files included (with their content).
   // New files only where you show them (untrackedFiles "no": you chose not to see them).
-  const patch = await repo.patchText(from, staged ? INDEX : undefined, { withUntracked: !staged && sendUntracked(repo), maxBytes: bytesFor(budget), signal: signalOf(o.token) });
+  let patch;
+  try {
+    patch = await repo.patchText(from, staged ? INDEX : undefined, { withUntracked: !staged && sendUntracked(repo), maxBytes: bytesFor(budget), signal: signalOf(o.token) });
+  } catch (e) {
+    if (stopped(e, o.token)) {
+      log().info(`AI ${what}: stopped while reading the changes`);
+      return '';
+    }
+    log().error(`AI ${what}: reading the changes failed: ${errorDetail(e)}`);
+    throw logged(e);
+  }
   // This branch's own recent subjects (not every branch's and tag's), each at most 200 characters.
-  const subjects = s.head.sha ? (await repo.log({ revs: ['HEAD'], maxCount: 10 }).catch(() => [])).map((c) => String(c.subject).slice(0, 200)) : [];
+  const subjects = s.head.sha ? (await repo.log({ revs: ['HEAD'], maxCount: 10 }).catch((e) => (log().debug(`AI ${what}: no recent subjects for the style: ${errorDetail(e)}`), []))).map((c) => String(c.subject).slice(0, 200)) : [];
   const fitted = P.fitPatch(patch, budget);
   log().info(`AI ${what}: ${staged ? 'the staged changes' : 'all changes'}: ${fitted.files} file${fitted.files === 1 ? '' : 's'}${fitted.cut ? `, ${fitted.cut} shortened or left out` : ''}${fitted.withheld ? `, ${fitted.withheld} by name only` : ''}${fitted.secrets ? `, ${fitted.secrets} secret-looking values removed` : ''} (budget ${budget} characters)`);
   // Commit subjects can hold a secret too (a pasted token): the same removal as the diff.
@@ -309,6 +386,14 @@ async function commitMessage(repo, o = {}) {
   const message = P.cleanMessage(text);
   if (text.trim() && !message && !(o.token && o.token.isCancellationRequested)) throw unavailable(what, `${modelLabel(model)} answered without a commit message in it. Choose another model, or see Output → Commit Corner for the answer (log level Debug).`, { chooseModel: true });
   return message;
+}
+
+/** Settings already said to be unavailable this session (✨ has no page to say it on). */
+const told = new Set();
+function tellOnce(note, model) {
+  if (told.has(note)) return;
+  told.add(note);
+  notify.info(`The language model ${note}: ${modelLabel(model)} writes the message instead.`, 'Choose Model…').then((c) => c && vscode.commands.executeCommand('commitCorner.ai.chooseModel'), (e) => log().warn(`AI: ${errorDetail(e)}`));
 }
 
 /**
@@ -370,20 +455,25 @@ function commitsSource(repo, shas) {
 /**
  * Summarize: the model's answer, as it arrives, through `onText`; `onModel(label)` once the model is chosen.
  * @param {SummarySource} source
- * @param {{token?: vscode.CancellationToken, onText?: (text: string) => void, onModel?: (label: string) => void}} [o]
+ * @param {{token?: vscode.CancellationToken, onText?: (text: string) => void, onModel?: (label: string, note?: string) => void}} [o]
  * @returns {Promise<{text: string, model: string, note?: string, files: number, cut: number, secrets: number, withheld: number}>}
  */
 async function summarize(source, o = {}) {
   const what = `summary of ${source.title}`;
   const { model, note } = await chooseModel(what);
-  if (o.onModel) o.onModel(modelLabel(model));
+  if (o.onModel) o.onModel(modelLabel(model), note);
   const budget = budgetFor(model);
+  const none = { text: '', model: modelLabel(model), note, files: 0, cut: 0, secrets: 0, withheld: 0 };
   let fitted;
   try {
     fitted = await source.patch(budget, signalOf(o.token));
   } catch (e) {
-    log().error(`AI ${what}: reading the changes failed: ${e.stack || errorDetail(e)}`);
-    throw e;
+    if (stopped(e, o.token)) {
+      log().info(`AI ${what}: stopped while reading the changes`);
+      return none;
+    }
+    log().error(`AI ${what}: reading the changes failed: ${errorDetail(e)}`);
+    throw logged(e);
   }
   log().info(`AI ${what}: ${fitted.files} file${fitted.files === 1 ? '' : 's'}${fitted.cut ? `, ${fitted.cut} shortened or left out` : ''}${fitted.withheld ? `, ${fitted.withheld} by name only` : ''}${fitted.secrets ? `, ${fitted.secrets} secret-looking values removed` : ''} (budget ${budget} characters)`);
   if (!fitted.files) throw unavailable(what, 'Nothing to summarize: no changes.');
@@ -392,4 +482,4 @@ async function summarize(source, o = {}) {
   return { text, model: modelLabel(model), note, files: fitted.files, cut: fitted.cut, secrets: fitted.secrets || 0, withheld: fitted.withheld || 0 };
 }
 
-module.exports = { AiUnavailable, SILENT_VENDORS, enabled, commitMessage, summarize, worktreeSource, pullRequestSource, commitsSource, chooseModel, pickModel, warn };
+module.exports = { AiUnavailable, enabled, commitMessage, summarize, worktreeSource, pullRequestSource, commitsSource, chooseModel, pickModel, warn };
