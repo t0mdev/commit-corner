@@ -2,7 +2,7 @@
   "name": "commit-corner",
   "displayName": "Commit Corner",
   "description": "A visual Git client for VS Code: commit graph with staging, worktree and pull request review (GitHub.com), multi-commit diffs, line staging, blame, interactive rebase, stashes and worktrees. No runtime dependencies, no telemetry; network access is git itself plus, optionally, GitHub sign-in and the GitHub API for pull request details.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "t0mdev",
   "license": "MIT",
   "private": true,
