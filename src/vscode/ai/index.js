@@ -64,7 +64,8 @@ function modelLabel(m) {
 function errorDetail(e) {
   if (!e || typeof e !== 'object') return String(e);
   if (e instanceof GitError) {
-    const said = String(e.stderr || e.stdout || '').trim().split('\n').slice(0, 8).join('\n');
+    // git's words only: the output of a failing diff would be your code.
+    const said = String(e.stderr || '').trim().split('\n').slice(0, 8).join('\n');
     return redact(`git ${e.args.join(' ').slice(0, 300)} → exit ${e.exitCode}${e.cwd ? ` in ${e.cwd}` : ''}${said ? `:\n${said}` : ''}`);
   }
   const cause = e.cause ? ` (cause: ${e.cause.message || e.cause})` : '';
@@ -253,7 +254,8 @@ function friendly(e, model) {
     // Any other refusal (unsupported, no choices…): the model's words, and the way to another.
     return logged(new AiUnavailable(`${modelLabel(model)} failed: ${e.message}${e.code ? ` (${e.code})` : ''}`, { chooseModel: true }));
   }
-  return logged(e);
+  // A provider's own error (a failed HTTP request, a rate limit in its words): the model failed.
+  return logged(new AiUnavailable(`${modelLabel(model)} failed: ${(e && e.message) || e}`, { chooseModel: true }));
 }
 
 /** Parts of an answer that are not text, in words (class names are minified in VS Code). */
@@ -268,7 +270,7 @@ function kindOf(part) {
 /** The answer in the log (Debug): long ones cut. */
 const LOGGED_ANSWER = 20000;
 
-/** A model still silent after this long is said in the log (and again every time it passes). */
+/** A model silent for this long is said in the log (again each time, while it stays silent). */
 const WAITING_MS = 30000;
 
 /**
@@ -304,8 +306,12 @@ async function ask(model, prompt, token, onText, what = 'request') {
   let all = '';
   let parts = 0;
   let first;
-  // A model that takes long (or hangs) is told from a stuck extension by the log.
-  const waiting = setInterval(() => log().info(`AI ${what}: still waiting for ${name} after ${Math.round((Date.now() - started) / 1000)} s (${all.length} characters so far)`), WAITING_MS);
+  let last = started;
+  // A model that takes long (or hangs) is told from a stuck extension by the log: said when
+  // nothing has come for a while, not while it writes.
+  const waiting = setInterval(() => {
+    if (Date.now() - last >= WAITING_MS) log().info(`AI ${what}: nothing from ${name} for ${Math.round((Date.now() - last) / 1000)} s (${Math.round((Date.now() - started) / 1000)} s since sent, ${all.length} characters so far)`);
+  }, WAITING_MS);
   /** Parts that are not text, by kind: what came instead when no text does. */
   const skipped = new Map();
   try {
@@ -314,7 +320,8 @@ async function ask(model, prompt, token, onText, what = 'request') {
     const T = vscode.LanguageModelTextPart;
     if (res.stream && T) {
       for await (const part of res.stream) {
-        if (!parts++) first = Date.now() - started;
+        last = Date.now();
+        if (!parts++) first = last - started;
         if (part instanceof T) {
           all += part.value;
           if (onText) onText(all);
@@ -322,7 +329,8 @@ async function ask(model, prompt, token, onText, what = 'request') {
       }
     } else {
       for await (const chunk of res.text) {
-        if (!parts++) first = Date.now() - started;
+        last = Date.now();
+        if (!parts++) first = last - started;
         all += chunk;
         if (onText) onText(all);
       }
@@ -356,11 +364,11 @@ async function ask(model, prompt, token, onText, what = 'request') {
 async function commitMessage(repo, o = {}) {
   const what = 'commit message';
   const { model, note } = await chooseModel(what);
-  if (note) tellOnce(note, model);
   const s = await repo.refreshState();
   const from = s.head.sha || EMPTY_TREE;
   const staged = s.staged.length > 0;
   if (!staged && !s.unstaged.length && !s.untracked.length) throw unavailable(what, 'Nothing to describe: there are no changes.');
+  if (note) tellOnce(note, model);
   const budget = budgetFor(model);
   // Nothing staged: what smart commit would stage, new files included (with their content).
   // New files only where you show them (untrackedFiles "no": you chose not to see them).

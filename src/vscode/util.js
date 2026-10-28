@@ -137,7 +137,8 @@ const FRIENDLY = {
 async function showError(e, context) {
   if (e instanceof GitError && e.code === ErrorCodes.Cancelled) return;
   const detail = e instanceof GitError ? `${e.stderr || e.message}`.trim() : e && e.stack ? e.stack : String(e);
-  if (output) output.error(`${context ? context + ': ' : ''}${detail}`);
+  // Already logged where it happened (with more detail): not again.
+  if (output && !(e && e.logged)) output.error(`${context ? context + ': ' : ''}${detail}`);
   let message = e instanceof GitError ? FRIENDLY[e.code] || e.message : (e && e.message) || String(e);
   // Keep git's own words next to the friendly explanation: they often name the exact cause.
   if (e instanceof GitError && FRIENDLY[e.code] && e.message) {

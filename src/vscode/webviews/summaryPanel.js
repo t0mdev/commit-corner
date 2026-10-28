@@ -4,6 +4,7 @@ const vscode = require('vscode');
 const { webviewHtml } = require('./html');
 const { showError, closeStaleWebviewTabs, log } = require('../util');
 const ai = require('../ai');
+const { GitError } = require('../../git/exec');
 
 const VIEW_TYPE = 'commitCorner.summary';
 
@@ -52,6 +53,7 @@ class SummaryPanel {
     panel.webview.html = webviewHtml(panel.webview, ctx.extensionUri, { title: 'Summary', script: 'summary.js', style: 'summary.css' });
     // A page whose script never starts stays blank: said in the log.
     this.loading = setTimeout(() => log().warn('Summary page: not loaded after 10 s (its script did not start; Developer: Open Webview Developer Tools shows why)'), 10000);
+    if (this.loading.unref) this.loading.unref();
     this.disposables = [
       panel.onDidDispose(() => this.dispose()),
       panel.webview.onDidReceiveMessage((m) => this.onMessage(m).catch((e) => showError(e, 'Summary'))),
@@ -67,7 +69,7 @@ class SummaryPanel {
     this.panel.title = `Summary: ${source.title}`;
     this.current = cts;
     const post = (m) => {
-      if (this.current !== cts) return; // a newer summary took over
+      if (this.current !== cts || this.disposed) return; // a newer summary took over, or the page closed
       // Kept to show the page again: the start, then the latest text, or the end (with its text).
       this.shown = m.type === 'start' ? [m] : [this.shown[0], m];
       this.panel.webview.postMessage(m);
@@ -100,7 +102,7 @@ class SummaryPanel {
       }
       // The AI module logs what it throws; anything else (a bug) is logged here.
       if (!e.logged) log().error(`Summary of ${source.title}: ${e.stack || e.message}`);
-      post({ type: 'error', message: e.message || String(e), chooseModel: !!e.chooseModel, model: label, note: this.note });
+      post({ type: 'error', message: `${e instanceof GitError ? 'Reading the changes failed: ' : ''}${e.message || String(e)}`, chooseModel: !!e.chooseModel, model: label, note: this.note });
     } finally {
       if (this.cts === cts) this.cts = undefined;
       cts.dispose();
@@ -123,7 +125,11 @@ class SummaryPanel {
         if (this.source) this.run(this.source);
         break;
       case 'clientError':
-        // The page's own text: one line for the message, the stack below it.
+        // The page's own text: one line for the message, the stack below it; each message once
+        // (a render that fails, fails for every piece of the answer).
+        if (!this.clientErrors) this.clientErrors = new Set();
+        if (this.clientErrors.has(String(m.message)) || this.clientErrors.size >= 20) break;
+        this.clientErrors.add(String(m.message));
         log().error(`Summary page: ${String(m.message).replace(/[\r\n]+/g, ' ').slice(0, 500)}${m.stack ? `\n${String(m.stack).slice(0, 2000)}` : ''}`);
         break;
       case 'showLog':
@@ -145,6 +151,7 @@ class SummaryPanel {
   }
 
   dispose() {
+    this.disposed = true;
     clearTimeout(this.loading);
     this.resolveReady(false);
     if (this.cts) this.cts.cancel();

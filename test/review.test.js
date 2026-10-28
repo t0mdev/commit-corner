@@ -328,8 +328,11 @@ test('an empty answer is an error that says so, with what came instead; a broken
   // The answer breaks off: the error, its code and what had arrived are logged.
   const broken = Object.assign(new Error('connection reset'), { code: 'ECONNRESET' });
   mock.lmModels.splice(0, mock.lmModels.length, fakeModel('Half a message', { breakAfter: 1, breakWith: broken }));
-  const more = await logged(() => assert.rejects(ai.commitMessage(repo), /connection reset/));
+  const more = await logged(() => assert.rejects(ai.commitMessage(repo), (e) => e instanceof ai.AiUnavailable && e.message === 'Fake Model failed: connection reset'));
   assert.ok(more.some(([l, x]) => l === 'error' && /broke off after 7 characters.*Error \[ECONNRESET\]: connection reset/.test(x)), JSON.stringify(more));
+  // A provider's own error: the model failed, with the way to another (logged once, by ai).
+  mock.lmModels.splice(0, mock.lmModels.length, fakeModel('x', { error: new Error('Request Failed: 429') }));
+  await assert.rejects(ai.commitMessage(repo), (e) => e instanceof ai.AiUnavailable && e.chooseModel && e.logged && /^Fake Model failed: Request Failed: 429$/.test(e.message));
   // A provider without `stream` (only `text`) still works.
   mock.lmModels.splice(0, mock.lmModels.length, fakeModel('Old style', { textOnly: true }));
   assert.equal(await ai.commitMessage(repo), 'Old style');
@@ -393,6 +396,13 @@ test('Stop is stopped, never an error: while the changes are read, or before the
   const errors = failed.filter(([l]) => l === 'error').map(([, x]) => x);
   assert.equal(errors.length, 1);
   assert.match(errors[0], /reading the changes failed: git diff https:\/\/\*\*\*@example\.com\/x → exit 128 in \/repo:\nfatal: bad object abc$/);
+  // The notification for it (✨) does not log it a second time.
+  const shown = await logged(async () => {
+    const e = new GitError({ args: ['diff'], exitCode: 128, stdout: '+your code', stderr: 'fatal: bad\n', cwd: '/repo' });
+    e.logged = true;
+    await require('../src/vscode/util').showError(e, 'Commit message');
+  });
+  assert.deepEqual(shown, []);
 });
 
 test('Choose Language Model lists the models that answer and stores the choice in user settings', async (t) => {
@@ -511,6 +521,7 @@ test('the summary page shows the summary again when it is re-created, and copies
   const pageLog = quietLog();
   require('../src/vscode/util').setOutput(pageLog);
   await p.onMessage({ type: 'clientError', message: 'boom\nforged line', stack: 'at render' });
+  await p.onMessage({ type: 'clientError', message: 'boom\nforged line', stack: 'at render' }); // once
   require('../src/vscode/util').setOutput(undefined);
   assert.deepEqual(pageLog.lines, [['error', 'Summary page: boom forged line\nat render']]);
   // Choose Model… that changes the model: asked again with it.

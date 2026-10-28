@@ -700,8 +700,8 @@ is no guaranteed support and no promised time for fixes. Issues and pull request
 welcome; contributions are accepted under the project's MIT License. In a bug report,
 please include the Commit Corner, VS Code, git and OS versions and the relevant lines from
 Output → *Commit Corner* (its first line names the versions). Lines at the Info level are
-enough; Debug and Trace lines contain your changes and the language model's answers about
-them. Please report security problems privately, as described in
+enough (they can name your folders' paths); Debug and Trace lines contain your changes and
+the language model's answers about them. Please report security problems privately, as described in
 [SECURITY.md](SECURITY.md).
 
 ## License and trademarks
