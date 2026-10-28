@@ -192,3 +192,30 @@ suite('VS Code chords in the graph', () => {
     assert.strictEqual(await evaluate(again, `document.querySelector('.commit-message').value`), 'Chord test', 'no "w" typed');
   });
 });
+
+suite('The uncommitted changes row', () => {
+  test('stays clean right after a commit (Amend and Undo at hand), and goes when the last change is discarded', async () => {
+    await vscode.commands.executeCommand('commitCorner.showGraph');
+    await sleep(1500);
+    const page = await webview('graph.js', "!document.body.classList.contains('in-sidebar') && document.querySelectorAll('.row').length > 2");
+    if (!(await evaluate(page, `!!document.querySelector('${box}')`))) {
+      await key(page, '.scroller, [role=tree]', 'Home');
+      await key(page, null, 'ArrowRight');
+    }
+    await until(() => evaluate(page, `!!document.querySelector('${box}')`), 'the staging area');
+    // Everything committed from the box: the tree is clean, the row stays.
+    git('add', '-A');
+    await evaluate(page, `(() => { const i = document.querySelector('${box}'); i.focus(); i.value = 'Commit everything'; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await press(page, 'Enter');
+    await until(() => git('log', '-1', '--format=%s') === 'Commit everything' && !git('status', '--porcelain'), 'the commit, and a clean tree');
+    await until(() => evaluate(page, `document.querySelector('${box}').value === ''`), 'the box to be cleared');
+    await sleep(1200); // the graph loads again after the commit
+    assert.ok(await evaluate(page, `!!document.querySelector('.row.worktree') && !!document.querySelector('${box}')`), 'the staging area stays after the commit');
+    // A new change, then discarded: clean again, and this time the row goes.
+    require('fs').writeFileSync(path.join(root(), 'a.txt'), 'changed again\n');
+    await until(() => evaluate(page, `/1/.test((document.querySelector('.row.worktree .wt-summary') || {}).textContent || '')`), 'the change in the row');
+    git('checkout', '-q', '--', 'a.txt');
+    await until(() => evaluate(page, `!document.querySelector('.row.worktree') && !document.querySelector('${box}')`), 'the row to go', 8000)
+      .catch(async (e) => assert.fail(`${e.message}: ${await evaluate(page, `(document.querySelector('.row.worktree') || {}).textContent || 'no row'`)}`));
+  });
+});

@@ -7,6 +7,7 @@
 - An empty answer is an error that says what came instead (a tool call, thinking…), with *Choose Model…* and *Show Log*, on the summary page and in the notification. Model refusals of any kind offer another model. The page names the model while it asks, and says when the model from the setting is not available (Generate Commit Message says it once per session).
 - Stop is never reported as an error, also while the changes are read or before the model answers.
 - Output → Commit Corner starts with the Commit Corner, VS Code and OS versions, and follows every language model request: the model providers' versions, the model chosen, what was sent, how the answer came (time to the first part, a line every 30 s while a model is silent), errors with their code or git's command and words, each logged once; the answer at log level Debug, the request at Trace. Script errors of the summary page are logged too.
+- **Fixed:** the graph's *Uncommitted changes* row stayed ("clean") after discarding the last change while its staging area was open. It now goes until there are changes again; only right after a commit does it stay, with Amend and Undo Last Commit at hand.
 - "Show Git Output" is now "Show Log".
 
 ## 1.0.0

@@ -424,8 +424,11 @@ class GraphPanel {
       this.filtered = filtered;
       const shas = new Set(commits.map((c) => c.sha));
       const dirty = state && !this.search && state.staged.length + state.unstaged.length + state.untracked.length + state.conflicts.length;
-      // Also clean while the staging area is open (just committed): Amend and Undo stay at hand.
-      if ((dirty || (this.wtOpen && state && !this.search)) && state.head.sha) {
+      // Changes again: a clean tree from now on removes the row.
+      if (dirty) this.wtJustCommitted = false;
+      // Also clean right after a commit while the staging area is open: Amend and Undo stay at
+      // hand. Clean any other way (the last file discarded, stashed): the row goes.
+      if ((dirty || (this.wtJustCommitted && this.wtOpen && state && !this.search)) && state.head.sha) {
         const wt = { sha: WORKTREE_SHA, parents: [state.head.sha] };
         rows.push(row(wt, layout.addOne(wt), {
           subject: worktreeSubject(state) || 'No uncommitted changes',
@@ -505,6 +508,7 @@ class GraphPanel {
       case 'ready':
         // A new page (re-created webview): it asks again for what it shows.
         this.wtOpen = false;
+        this.wtJustCommitted = false;
         this.lastWip = undefined;
         await this.load();
         // Ctrl+Alt+G V before the view existed: the page is here now, focus its list.
@@ -601,6 +605,7 @@ class GraphPanel {
       case 'filesClosed': {
         if (m.sha !== WORKTREE_SHA || !this.wtOpen) break;
         this.wtOpen = false;
+        this.wtJustCommitted = false;
         // Shown only because it was open (the tree is clean): closed, the row goes.
         const st = repo.state;
         if (st && !(st.staged.length + st.unstaged.length + st.untracked.length + st.conflicts.length)) await this.load({ keepScroll: true });
@@ -707,6 +712,7 @@ class GraphPanel {
             provider.message = provider.template || '';
             GraphPanel.draftSent.set(repo.root, provider.message);
           }
+          this.wtJustCommitted = true;
           this.post({ type: 'wtCommitted' });
           GraphPanel.committedElsewhere(repo, this);
         }
@@ -754,7 +760,11 @@ class GraphPanel {
   }
 
   static committedElsewhere(repo, except) {
-    for (const p of [GraphPanel.current, GraphPanel.sidebar]) if (p && p !== except && p.repo === repo) p.post({ type: 'wtCommitted' });
+    for (const p of [GraphPanel.current, GraphPanel.sidebar]) {
+      if (!p || p === except || p.repo !== repo) continue;
+      p.wtJustCommitted = true; // an open staging area stays, as after a commit from its own box
+      p.post({ type: 'wtCommitted' });
+    }
   }
 
   /** Whether every commit is in HEAD's history. */
