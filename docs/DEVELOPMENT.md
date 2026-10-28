@@ -15,13 +15,13 @@ Diffs never depend on it.
 
 A second deliberate exception: **language models, through VS Code's
 Language Model API** (`src/vscode/ai/`, shown by `webviews/summaryPanel.js`),
-for a generated commit message (✨) and summaries of changes (Changes vs Base,
+for a generated commit message (Generate Commit Message, the sparkle button) and summaries of changes (Changes vs Base,
 pull requests, selected commits). The extension makes no HTTP request for it
 and adds no dependency: VS Code hands the request to the model provider you
 installed and signed in to (GitHub Copilot, or another extension providing
 models), and asks you once whether Commit Corner may use it. The rules:
 
-- Nothing is sent unless you ask (the ✨ button, a Summarize command); off with
+- Nothing is sent unless you ask (the Generate Commit Message button, a Summarize command); off with
   `commitCorner.ai.enabled`.
 - Nothing is sent when the setting is off — a user (application) setting, so
   a workspace cannot turn it on or choose the model.
@@ -179,7 +179,7 @@ These hold everywhere and have tests (`test/regressions.test.js`):
   creates a fresh throwaway repository for each run.
 - `test/ui/*.test.js` (mocha TDD, `npm run test:ui`, also part of `vscode-test`): the
   webviews' DOM in a real VS Code 1.143 — the graph's staging area (keys and focus, the
-  commit message across reloads, ✨ with undo, Enter commits) and the summary page (the
+  commit message across reloads, Generate Commit Message with undo, Enter commits) and the summary page (the
   model's answer stays text). VS Code is started with a DevTools port and the tests read
   and drive the pages through it with Node's own WebSocket (`test/ui/cdp.js`); a test
   language model (`test/ui/fakelm`, canned answers, no network) is loaded as a second

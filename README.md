@@ -2,7 +2,7 @@
 
 **Watch and review what your AI coding agent does — and everything else you do with git.**
 A complete Git client for VS Code: a commit graph with a full staging area, worktree
-review with *Viewed* checkboxes, pull request diffs, ✨ generated commit messages and
+review with *Viewed* checkboxes, pull request diffs, generated commit messages and
 change summaries. Plain JavaScript, no runtime dependencies, no telemetry.
 
 <p>
@@ -18,7 +18,7 @@ change summaries. Plain JavaScript, no runtime dependencies, no telemetry.
    everything it changed, committed or not. `Enter` shows a file's diff and keeps the
    keyboard in the list, `Space` ticks it off as *Viewed*; a file the agent changes again
    unticks itself.
-3. **Summarize** — ✨ on that row (or on a pull request, or selected commits) asks your
+3. **Summarize** — the sparkle button on that row (or on a pull request, or selected commits) asks your
    language model what changed, **what looks risky** and which files to read first.
 
 <img src="docs/images/summary.png" alt="A summary page: what changed, what looks risky, what to review first" width="560">
@@ -247,7 +247,7 @@ api.github.com is contacted, and unchanged lists are revalidated with ETags.
 
 **Files changed** has a **Viewed** checkbox on each file, as on GitHub
 (kept per pull request in this workspace; a push that changes the file
-unchecks it), and ✨ **Summarize Pull Request** describes what it does and what
+unchecks it), and **Summarize Pull Request** (sparkle button) describes what it does and what
 looks risky.
 
 **The diffs always come from git.** GitHub publishes every pull request as
@@ -373,7 +373,7 @@ newest commit.
   file to see its diff, tick it off when you have read it (or `Shift+F10` →
   Toggle Viewed); the row counts "5/12 viewed". When the agent changes
   a file again it unchecks itself. Mark All as Viewed / Clear in its menu,
-  ✨ Summarize and Open All Changes as inline buttons.
+  Summarize (sparkle) and Open All Changes as inline buttons.
 - Stashes are a group in the Repository view (`Delete` drops the focused one).
 - **Worktrees overview** (`Ctrl+Alt+G W`, or the dashboard button on the
   Worktrees view): one card per worktree with branch, path, staged / changed /
@@ -387,11 +387,12 @@ With a language model provider installed and signed in (GitHub Copilot Chat,
 or another extension that provides models; VS Code asks once whether Commit
 Corner may use it):
 
-- **✨ in the graph's commit box** (and in Source Control's title bar) writes a
-  commit message for what Commit would commit — the staged changes, or all of
-  them when nothing is staged — in the style of your recent commits. You see
-  it being written; ✨ turns into Stop (or `Escape`). It works the same with
-  the built-in Git switched off.
+- **Generate Commit Message** — the sparkle button next to Commit in the graph's
+  commit box (and in Source Control's title bar when it shows Commit Corner's
+  changes) — writes a commit message for what Commit would commit — the staged
+  changes, or all of them when nothing is staged — in the style of your recent
+  commits. You see it being written; the button turns into Stop (or `Escape`).
+  It works the same with the built-in Git switched off.
 - **Summarize** a worktree's Changes vs Base, a pull request, or the commits
   selected in the graph (context menu): what changed, **what looks risky**, and
   which files to review first, on a page you can copy from.
