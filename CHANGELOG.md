@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0
 
 - **Open the working file from any file row** (graph, details pane, Repository, Compare, Pull Requests, File History): `O` or the new file button, at the line you were looking at in that revision's diff (mapped through the edits since), under its new name when it was renamed. *Open Working File* (`Ctrl+Alt+G Shift+W`) is also in the title bar of revision and diff editors. *Compare with Working File* (`W`) follows renames too.
 - **Compare a file with the base branch** in one step (`B`): the one you last picked with *Compare with Branch, Tag or Commit…* (`Shift+B`), else origin's default branch (such as `origin/main`, or a local `main`/`master`). Copy Relative Path and Reveal in Explorer View on every file row.
