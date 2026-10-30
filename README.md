@@ -10,7 +10,7 @@ change summaries. Plain JavaScript, no runtime dependencies, no telemetry.
   <img src="docs/images/worktree-review.png" alt="An agent's worktree in the Worktrees view: Changes vs main, file by file, with Viewed checkboxes" width="300">
 </p>
 
-### Review an agent's work in three steps
+### Review an agent's work in four steps
 1. **Watch** — the sidebar **Graph** (`Ctrl+Alt+G V`) shows new commits as they arrive
    (they glow for a moment) and a `✎ 2` chip on commits whose worktree has uncommitted
    work.
@@ -18,7 +18,10 @@ change summaries. Plain JavaScript, no runtime dependencies, no telemetry.
    everything it changed, committed or not. `Enter` shows a file's diff and keeps the
    keyboard in the list, `Space` ticks it off as *Viewed*; a file the agent changes again
    unticks itself.
-3. **Summarize** — the sparkle button on that row (or on a pull request, or selected commits) asks your
+3. **Comment** — the **+** in an editor's gutter adds a review comment on that line (in the
+   agent's files or in a commit's diff). **Copy Review for the Agent** puts all of them together
+   — file, line, the code as it is now, your comment — to paste into the agent's chat.
+4. **Summarize** — the sparkle button on that row (or on a pull request, or selected commits) asks your
    language model what changed, **what looks risky** and which files to read first.
 
 <img src="docs/images/summary.png" alt="A summary page: what changed, what looks risky, what to review first" width="560">
@@ -411,6 +414,18 @@ newest commit.
   Toggle Viewed); the row counts "5/12 viewed". When the agent changes
   a file again it unchecks itself. Mark All as Viewed / Clear in its menu,
   Summarize (sparkle) and Open All Changes as inline buttons.
+- **Review comments for the agent.** The **+** in the gutter of a worktree's
+  files (or the repository's) and of a commit's diff adds a comment on that
+  line; reply, edit and delete in the comment itself. A comment keeps the text
+  of its lines: when the agent changes the file above it, it moves with them;
+  when it changes those lines, the comment says so. The worktree's row in the
+  Worktrees view gets **Review for the agent** with every comment (click one to
+  go there) and two buttons: **Copy Review for the Agent** (one Markdown text:
+  what to do, then each comment with its file, lines and current code — paste
+  it into the agent's chat) and **Save Review to the Worktree** (the same as
+  `.review-comments.md` in its folder, ignored by git; tell the agent to read
+  it). Delete All Review Comments in its menu. Settings:
+  `commitCorner.review.comments`, `commitCorner.review.fileName`.
 - Stashes are a group in the Repository view (`Delete` drops the focused one).
 - **Worktrees overview** (`Ctrl+Alt+G W`, or the dashboard button on the
   Worktrees view): one card per worktree with branch, path, staged / changed /

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Review comments for the agent**: the **+** in the gutter of a worktree's files (or the repository's) and of a commit's diff adds a comment on that line. **Copy Review for the Agent** puts all of a worktree's comments together — file, lines, the code as it is now, your comments — as one text to paste into the agent's chat; **Save Review to the Worktree** writes it as `.review-comments.md` there, ignored by git. Comments follow their lines when the file changes and say when those lines changed. They are listed under the worktree in the Worktrees view (**Review for the agent**). Settings: `commitCorner.review.comments`, `commitCorner.review.fileName`.
+
 ## 1.2.0
 
 - **Open the working file from any file row** (graph, details pane, Repository, Compare, Pull Requests, File History): `O` or the new file button, at the line you were looking at in that revision's diff (mapped through the edits since), under its new name when it was renamed. *Open Working File* (`Ctrl+Alt+G Shift+W`) is also in the title bar of revision and diff editors. *Compare with Working File* (`W`) follows renames too.
