@@ -49,6 +49,10 @@ for (const [menu, items] of Object.entries(pkg.contributes.menus)) {
 // VS Code adds a "<view id>.focus" command for every contributed view.
 const viewFocus = new Set(Object.values(pkg.contributes.views).flat().map((v) => `${v.id}.focus`));
 for (const kb of pkg.contributes.keybindings || []) if (!declared.has(kb.command) && !viewFocus.has(kb.command)) problems.push(`keybinding: unknown command ${kb.command}`);
+// The chords are Cmd+Alt+G on macOS (README): every Ctrl+Alt+G binding needs its mac variant.
+for (const kb of pkg.contributes.keybindings || []) {
+  if (/^ctrl\+alt\+g\b/i.test(kb.key) && !(kb.mac && /^cmd\+alt\+g\b/i.test(kb.mac))) problems.push(`keybinding ${kb.key} (${kb.command}): no "mac" variant with cmd+alt+g`);
+}
 
 // The same property twice in a row (an edit applied twice): legal JavaScript, never meant.
 for (const f of jsFiles.filter((p) => p.includes(`${path.sep}src${path.sep}`) || p.includes(`${path.sep}media${path.sep}`))) {

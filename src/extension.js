@@ -69,6 +69,7 @@ async function activate(extContext) {
   const ctx = new Context(extContext, manager);
   require('./vscode/avatars').init(extContext.globalStorageUri);
   extContext.subscriptions.push(require('./vscode/viewed').init(extContext.workspaceState));
+  extContext.subscriptions.push(require('./vscode/viewed').registerDecorations());
   const remoteUrl = require('./git/remoteUrl');
   remoteUrl.setGithubHostAliases(config().get('githubHostAliases', []));
   extContext.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
@@ -83,6 +84,7 @@ async function activate(extContext) {
   require('./vscode/commands/lineStaging').register(ctx);
   require('./vscode/commands/branchCommands').register(ctx);
   require('./vscode/commands/historyCommands').register(ctx);
+  require('./vscode/commands/fileCommands').register(ctx);
   require('./vscode/commands/repoCommands').register(ctx);
   require('./vscode/commands/navigationCommands').register(ctx);
   require('./vscode/commands/actionsHub').register(ctx);
@@ -123,10 +125,8 @@ async function activate(extContext) {
     else manager.setActive(repo);
   });
   ctx.command('commitCorner.switchRepository', async () => {
-    const repos = manager.repositories;
-    if (!repos.length) return;
-    const pick = await vscode.window.showQuickPick(repos.map((r) => ({ label: r.name, description: r.root, picked: r === manager.active, repo: r })), { placeHolder: 'Repository shown in Commit Corner views' });
-    if (pick) manager.setActive(pick.repo);
+    const repo = await require('./vscode/pickers').pickRepository(manager, manager.active);
+    if (repo) manager.setActive(repo);
   });
 
   extContext.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {

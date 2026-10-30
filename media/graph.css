@@ -264,6 +264,7 @@ body.in-sidebar { background: var(--vscode-sideBar-background, var(--vscode-edit
 .compact .cell.date { text-align: right; opacity: 0.85; font-size: 0.92em; }
 .compact .cell.who { display: flex; align-items: center; justify-content: center; padding: 0; }
 .compact .cell.changes { justify-content: center; padding: 0; }
+.compact .cell.expander { display: flex; align-items: center; justify-content: center; padding: 0; }
 /* A badge shows its (short) name, up to ~10 characters, and keeps that room; the message gets
    the rest. Branch names with folders show their last part ("agent/task" -> "task"). */
 .compact .ref { flex: 0 0 auto; max-width: calc(10ch + 24px); padding: 0 5px 0 3px; }
@@ -374,10 +375,50 @@ input, textarea, .details .body, .details .meta-value code { user-select: text; 
 body.vscode-reduce-motion .row.arrived { animation: none; box-shadow: inset 2px 0 0 var(--vscode-focusBorder); }
 
 /* A folder without git: three buttons, no toolbar or details pane. */
-body.no-repo .toolbar, body.no-repo .details, body.no-repo .splitter, body.no-repo .summary-bar, body.no-repo .col-header { display: none !important; }
+body.no-repo .toolbar, body.no-repo .details, body.no-repo .splitter, body.no-repo .summary-bar, body.no-repo .top-bar, body.no-repo .col-header { display: none !important; }
 .no-repo-box { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; max-width: 320px; }
 .no-repo-box p { margin: 0 0 4px; color: var(--vscode-descriptionForeground); }
 .no-repo-box .btn { justify-content: center; }
 
 /* main / master keep their full name (more specific than the editor graph's shrinking rule). */
 .ref.default-ref, .app:not(.compact) .cell.desc .ref.default-ref { flex-shrink: 0; min-width: auto; }
+
+/* ---- Viewed marks: a commit's files you have not opened yet are bold ---------- */
+.file-line.file.unviewed .name, .files .file.unviewed .name { font-weight: 700; }
+.file-line.file.unviewed .status { opacity: 1; }
+.viewed-count { flex: none; margin-left: 6px; padding: 0 5px; border-radius: 8px; font-size: 0.85em; line-height: 15px; height: 15px; display: inline-flex; align-items: center; color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); opacity: 0.85; font-variant-numeric: tabular-nums; }
+.viewed-count.done { background: transparent; color: var(--vscode-descriptionForeground); padding: 0 2px; }
+
+/* ---- Several repositories: the name in the toolbar switches ------------------- */
+.toolbar .repo .repo-chevron { display: none; transform: rotate(90deg); opacity: 0.7; }
+.toolbar .repo.switchable { cursor: pointer; border-radius: 3px; padding: 1px 4px; margin-left: -4px; }
+.toolbar .repo.switchable .repo-chevron { display: inline-flex; }
+.toolbar .repo.switchable:hover { background: var(--vscode-toolbar-hoverBackground, var(--vscode-list-hoverBackground)); }
+.toolbar .repo.switchable:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+
+/* A commit's file: its buttons float over the line's end on hover or focus, so the change bars
+   line up whether or not they show. */
+.file-line { position: relative; }
+.file-line .file-acts.float, .files .file .file-acts.float { position: absolute; right: 4px; top: 1px; z-index: 1; padding-left: 4px; border-radius: 3px;
+  /* The hover colour is see-through: laid over the view's own background, so the bar never shows through. */
+  background: linear-gradient(var(--vscode-list-hoverBackground), var(--vscode-list-hoverBackground)), var(--vscode-sideBar-background, var(--vscode-editor-background)); }
+.app:not(.compact) .file-acts.float { background: linear-gradient(var(--vscode-list-hoverBackground), var(--vscode-list-hoverBackground)), var(--vscode-editor-background); }
+.file-line:focus .file-acts.float, .files .file:focus .file-acts.float { background: linear-gradient(var(--vscode-list-focusBackground, var(--vscode-list-hoverBackground)), var(--vscode-list-focusBackground, var(--vscode-list-hoverBackground))), var(--vscode-sideBar-background, var(--vscode-editor-background)); }
+.files .file { position: relative; }
+.files .file .file-acts { display: inline-flex; gap: 2px; visibility: hidden; }
+.files .file:hover .file-acts, .files .file:focus .file-acts, .files .file:focus-within .file-acts { visibility: visible; }
+
+/* ---- The sidebar's view switcher (always in sight) ----------------------------- */
+.top-bar { display: none; }
+.compact .top-bar { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.compact .top-bar .summary-bar { flex: 1 1 auto; min-width: 0; padding-right: 6px; }
+/* A narrow sidebar: the message keeps its room; "all viewed" shows only on a wider one. */
+.compact.narrow .viewed-count.done { display: none; }
+.top-bar .view-switch[hidden] { display: none; }
+.top-bar .view-switch { flex: none; display: inline-flex; align-items: center; gap: 3px; margin: 2px 0 2px 4px; font-weight: 600; }
+.top-bar .view-switch .icon:last-child { transform: rotate(90deg); opacity: 0.7; }
+
+/* A narrow editor graph (a diff open beside it): the author is its avatar. */
+.app.tight .cell.author .author-name { display: none; }
+.app.tight .cell.author { padding: 0 4px; justify-content: center; }
+.app.xtight .cell.changes { justify-content: center; padding: 0; }

@@ -56,6 +56,12 @@ function register(ctx) {
     // The same, titled for the Switch View menu ("Graph", not "Sidebar: Show Graph").
     ctx.command(`commitCorner.sidebar.to.${id}`, () => showView(id));
   }
+  // The switcher at the top of the sidebar Graph (always visible; the title bar's dropdown shows
+  // only while the mouse is over the view).
+  ctx.command('commitCorner.sidebar.pickView', async () => {
+    const pick = await vscode.window.showQuickPick(VIEWS.map(([id, label, icon]) => ({ label: `$(${icon}) ${label}`, id })), { placeHolder: 'Show in the Commit Corner sidebar' });
+    if (pick) await showView(pick.id);
+  });
   ctx.command('commitCorner.sidebar.showAllViews', () => config().update('sidebar.oneViewAtATime', false, vscode.ConfigurationTarget.Global));
   ctx.command('commitCorner.sidebar.oneViewAtATime', () => config().update('sidebar.oneViewAtATime', true, vscode.ConfigurationTarget.Global));
   ctx.extContext.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {

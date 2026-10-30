@@ -4,7 +4,7 @@ const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 const { SCHEME, fromGitUri, isImmutableRef } = require('./uri');
-const { INDEX } = require('../git/repository');
+const { INDEX, WORKTREE } = require('../git/repository');
 
 /** Immutable content cache budget (bytes): big blobs must not pin hundreds of MB. */
 const MAX_CACHE_BYTES = 64 * 1024 * 1024;
@@ -46,7 +46,16 @@ class GitFileSystemProvider {
       indexStamp = fs.statSync(path.join(repo.gitDir, 'index')).mtimeMs;
     } catch { /* no index yet */ }
     const tips = (repo.refTips !== undefined ? repo.refTips : await repo.getRefTips().catch(() => ''));
-    const sig = `${repo.state && repo.state.head.sha}|${repo.state && repo.state.head.branch}|${indexStamp}|${tips}`;
+    // Working-tree entries shown as git sees them (a symlink, a submodule's folder): their own
+    // stamp, so a re-pointed link shows its new target (a submodule follows its HEAD as before).
+    const stamps = [];
+    for (const uri of this.mutable.values()) {
+      const q = fromGitUri(uri);
+      if (q.repo !== repo.root || q.ref !== WORKTREE) continue;
+      const w = repo.workingFile(q.path);
+      stamps.push(w && w.st ? `${w.st.mtimeMs}:${w.st.ctimeMs}` : '-');
+    }
+    const sig = `${repo.state && repo.state.head.sha}|${repo.state && repo.state.head.branch}|${indexStamp}|${tips}|${stamps.join(',')}`;
     if (this.signatures.get(repo.root) === sig) return;
     this.signatures.set(repo.root, sig);
     const events = [];

@@ -49,6 +49,12 @@
   let onGitHub = false;
   /** sha -> [files, added, deleted], filled lazily for the rows on screen. */
   const stats = new Map();
+  /** What B compares a file with (the host says, after each load). */
+  let compareBaseName = '';
+  /** sha -> [viewed, total]: commits you started on (some file opened). */
+  const viewedCounts = new Map();
+  /** Viewed mark key -> viewed, as the host last said (newer than the file lists drawn before). */
+  const vkState = new Map();
   const statsRequested = new Set();
   /** @type {Set<string>} */
   let selected = new Set();
@@ -78,6 +84,31 @@
   const repoLabel = el('span', 'repo');
   const repoName = el('span', 'repo-name');
   repoLabel.append(ui.icon('folder'), repoName);
+  // Several repositories open: the name is a switch (the sidebar has it in the view's title bar).
+  const repoChevron = ui.icon('chevron', { size: 11 });
+  repoChevron.classList.add('repo-chevron');
+  repoLabel.appendChild(repoChevron);
+  const switchRepo = () => {
+    if (repoLabel.classList.contains('switchable')) vscode.postMessage({ type: 'switchRepo' });
+  };
+  repoLabel.addEventListener('click', switchRepo);
+  repoLabel.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      switchRepo();
+    }
+  });
+  function setMultiRepo(multi) {
+    repoLabel.classList.toggle('switchable', !!multi);
+    repoLabel.tabIndex = multi ? 0 : -1;
+    if (multi) {
+      repoLabel.setAttribute('role', 'button');
+      repoLabel.title = 'Switch repository (Ctrl+Alt+G Shift+O)';
+    } else {
+      repoLabel.removeAttribute('role');
+      repoLabel.removeAttribute('title');
+    }
+  }
   const branchBtn = button('', 'Current branch: check out another one (Ctrl+Alt+G O)', () => vscode.postMessage({ type: 'command', command: 'commitCorner.checkout', args: {} }), 'branch');
   branchBtn.classList.add('branch-btn');
   const filterSelect = /** @type {HTMLSelectElement} */ (el('select', 'filter'));
@@ -110,7 +141,8 @@
   pushBtn.classList.add('primary');
   const fetchBtn = button('Fetch', 'Fetch from remotes (Ctrl+Alt+G F)', () => vscode.postMessage({ type: 'command', command: 'commitCorner.fetch', args: {} }), 'cloudDown');
   const headBtn = button('HEAD', 'Jump to the checked-out commit', () => revealSha(head && head.sha, true), 'target');
-  toolbar.append(repoLabel, branchBtn, filterWrap, searchWrap, prevBtn, nextBtn, clearBtn, matchInfo, spacer, headBtn, pullBtn, pushBtn, fetchBtn, refreshBtn);
+  const collapseBtn = button('', 'Collapse all commits', () => collapseAll(), 'collapse');
+  toolbar.append(repoLabel, branchBtn, filterWrap, searchWrap, prevBtn, nextBtn, clearBtn, matchInfo, spacer, headBtn, pullBtn, pushBtn, fetchBtn, collapseBtn, refreshBtn);
   for (const part of [searchWrap, prevBtn, nextBtn, clearBtn, matchInfo]) part.classList.add('search-part');
   searchBox.addEventListener('input', () => updateSearchParts());
 
@@ -144,7 +176,13 @@
   summaryBar.hidden = true;
   summaryBar.type = 'button';
   summaryBar.addEventListener('click', () => vscode.postMessage({ type: 'activity' }));
-  root.append(summaryBar, toolbar, listWrap, splitter, detailsPane);
+  // The sidebar's view switcher, always in sight (the title bar's dropdown shows only on hover).
+  const topBar = el('div', 'top-bar');
+  const viewBtn = button('Graph', 'Switch view: Repository, Pull Requests, Compare, File History, Worktrees', () => vscode.postMessage({ type: 'switchView' }), 'menu');
+  viewBtn.classList.add('view-switch');
+  viewBtn.appendChild(ui.icon('chevron', { size: 10 }));
+  topBar.append(viewBtn, summaryBar);
+  root.append(topBar, toolbar, listWrap, splitter, detailsPane);
   document.body.appendChild(root);
   if (saved.detailsHeight) detailsPane.style.height = saved.detailsHeight + 'px';
   if (saved.mode) modeSelect.value = saved.mode;
@@ -248,12 +286,23 @@
 
   // ---------------------------------------------------------------- rows
 
+  /** The SHA column: off in a narrow editor graph (a diff open beside it). */
+  const shaShown = () => !!settings.showSha && !root.classList.contains('tight');
+
   function graphWidth() {
     return Math.max(settings.compact ? 24 : 56, lanesShown() * LANE_W + 10);
   }
 
+  /**
+   * Where a file line's content starts (px from the end of the lanes): one step in from the
+   * commit's ▸, and 12 px more per folder level — a tree under the commit.
+   */
+  const fileIndent = (depth) => (settings.compact ? 0 : 6) + 14 + depth * 12;
+
   function applyColumns() {
     root.classList.toggle('compact', !!settings.compact);
+    // All views stacked: each has its own title, no switcher needed.
+    viewBtn.hidden = settings.oneView === false;
     document.body.classList.toggle('in-sidebar', !!settings.compact);
     // A tree in both graphs: commits (and the uncommitted changes) expand to their files.
     scroller.setAttribute('role', 'tree');
@@ -263,17 +312,24 @@
     const narrow = !!settings.compact && window.innerWidth < 360;
     root.classList.toggle('narrow', narrow);
     if (settings.compact) {
-      // Sidebar: lanes │ when │ who │ how much │ what — the same columns on every row.
-      root.style.setProperty('--cols', `${graphWidth()}px 34px 22px ${narrow ? 20 : 30}px minmax(60px, 1fr)`);
+      // Sidebar: lanes │ ▸ │ when │ who │ how much │ what — the same columns on every row; the
+      // expander first, so a commit's files are indented under it like a tree.
+      root.style.setProperty('--cols', `${graphWidth()}px 16px 34px 22px ${narrow ? 20 : 30}px minmax(60px, 1fr)`);
       header.replaceChildren();
       return;
     }
     const relative = settings.dateFormat === 'relative';
+    // Narrow (a diff open beside it): the message keeps its room; the author is its avatar.
+    const tight = !settings.compact && window.innerWidth < 700;
+    root.classList.toggle('tight', tight);
     const cols = [`${graphWidth()}px`, 'minmax(160px, 1fr)'];
-    if (settings.showAuthor) cols.push('150px');
-    if (settings.showChanges) cols.push('118px');
+    if (settings.showAuthor) cols.push(tight ? '30px' : '150px');
+    // Very narrow (a side panel open too): the change bar alone, as in the sidebar.
+    const xtight = tight && window.innerWidth < 520;
+    root.classList.toggle('xtight', xtight);
+    if (settings.showChanges) cols.push(xtight ? '34px' : '118px');
     if (settings.showDate) cols.push(relative ? '74px' : '130px');
-    if (settings.showSha) cols.push('70px');
+    if (shaShown()) cols.push('70px');
     root.style.setProperty('--cols', cols.join(' '));
     const col = (iconName, text) => {
       const c = el('div', 'cell');
@@ -285,7 +341,7 @@
     if (settings.showAuthor) header.appendChild(col('person', 'Author'));
     if (settings.showChanges) header.appendChild(col('diff', 'Changes'));
     if (settings.showDate) header.appendChild(col('clock', relative ? 'When' : 'Date'));
-    if (settings.showSha) header.appendChild(col('', 'SHA'));
+    if (shaShown()) header.appendChild(col('', 'SHA'));
   }
 
   /**
@@ -377,7 +433,11 @@
     // themselves check that the commit is in the current branch.
     const mine = headHistory();
     const on = (sha) => !mine || mine.has(sha);
-    return JSON.stringify({ webviewSection: 'commit', surface: settings.surface, sha: r.sha, multi, wip: !!wipBySha[r.sha], onHead: on(r.sha), ...(multi ? { selection: sel, allOnHead: sel.every(on) } : {}), preventDefaultContextMenuItems: true });
+    // Mark All Files as Viewed / Not Viewed: only the one that applies (by its known count).
+    const vc = viewedCounts.get(r.sha);
+    const viewedAll = !multi && !!vc && vc[0] >= vc[1];
+    const viewedAny = multi || (!!vc && vc[0] > 0);
+    return JSON.stringify({ webviewSection: 'commit', surface: settings.surface, sha: r.sha, multi, wip: !!wipBySha[r.sha], onHead: on(r.sha), viewedAll, viewedAny, ...(multi ? { selection: sel, allOnHead: sel.every(on) } : {}), preventDefaultContextMenuItems: true });
   }
 
   /** The loaded commits reachable from HEAD (worked out again when rows or HEAD change). */
@@ -467,6 +527,8 @@
     desc.appendChild(twistyFor(div, i));
     if (r.sha === WORKTREE_SHA) {
       desc.append(el('span', 'subject wt-label', 'Uncommitted changes'), el('span', 'wt-summary', worktreeSummary(r.wt)));
+      const vc = viewedBadge(r.sha);
+      if (vc) desc.appendChild(vc);
       desc.title = 'Enter or double-click opens Source Control';
     } else {
       // HEAD -> branch: only the branch is shown; bare HEAD only when detached.
@@ -486,6 +548,8 @@
       const wip = wipChip(r);
       if (wip) desc.appendChild(wip);
       desc.appendChild(el('span', 'subject', r.subject));
+      const vc = viewedBadge(r.sha);
+      if (vc) desc.appendChild(vc);
     }
     div.append(graphCell, desc);
     if (settings.showAuthor) {
@@ -507,7 +571,7 @@
       }
       div.appendChild(d);
     }
-    if (settings.showSha) div.appendChild(el('div', 'cell sha', r.sha === WORKTREE_SHA ? '' : short(r.sha)));
+    if (shaShown()) div.appendChild(el('div', 'cell sha', r.sha === WORKTREE_SHA ? '' : short(r.sha)));
     return div;
   }
 
@@ -553,8 +617,10 @@
     const ch = el('div', 'cell changes');
     fillChanges(ch, r.sha, true);
     const desc = el('div', 'cell desc');
-    // ▸ / ▾: show this commit's changed files under it (→ / ← on the keyboard).
-    desc.appendChild(twistyFor(div, i));
+    // ▸ / ▾: show this commit's changed files under it (→ / ← on the keyboard); first, right
+    // after the lanes, so the files below line up under it.
+    const expander = el('div', 'cell expander');
+    expander.appendChild(twistyFor(div, i));
     if (wt) {
       // Like a commit row: a message and a short summary; ▸ shows the files (collapsed by
       // default), Enter/click opens Source Control, where staging happens.
@@ -568,6 +634,8 @@
         });
       }
       desc.append(label, summary);
+      const vc = viewedBadge(r.sha);
+      if (vc) desc.appendChild(vc);
       desc.title = `${r.subject || 'Uncommitted changes'} — click or Enter opens Source Control, ▸ or → shows the files`;
     }
     else {
@@ -585,8 +653,14 @@
         desc.appendChild(more);
       }
       desc.appendChild(el('span', 'subject', r.subject));
+      const vc = viewedBadge(r.sha);
+      if (vc) desc.appendChild(vc);
     }
-    div.append(graphCell, when, who, ch, desc);
+    if (wt) {
+      // No age, avatar or bar: its summary gets their room.
+      desc.style.gridColumn = '3 / -1';
+      div.append(graphCell, expander, desc);
+    } else div.append(graphCell, expander, when, who, ch, desc);
     return div;
   }
 
@@ -682,7 +756,7 @@
   }
 
   /** The Changes cell: a +/− bar and counts once known, a placeholder until then. */
-  function fillChanges(cell, sha, barOnly = settings.compact) {
+  function fillChanges(cell, sha, barOnly = settings.compact || root.classList.contains('xtight')) {
     cell.replaceChildren();
     if (sha === WORKTREE_SHA) return;
     const st = stats.get(sha);
@@ -845,7 +919,7 @@
     }
     const lines = [];
     const walk = (node, depth, prefix) => {
-      for (const [name, child] of [...node.dirs].sort((a, b) => a[0].localeCompare(b[0]))) {
+      for (const [name, child] of [...node.dirs].sort((a, b) => a[0].localeCompare(b[0], 'en'))) {
         let label = name;
         let c = child;
         while (c.dirs.size === 1 && !c.files.length) {
@@ -859,7 +933,7 @@
         // A collapsed folder hides what is in it (▸), like any tree.
         if (open) walk(c, depth + 1, `${prefix}${label}/`);
       }
-      for (const f of node.files.sort((a, b) => a.name.localeCompare(b.name))) lines.push({ kind: 'file', text: f.name, file: f.file, depth });
+      for (const f of node.files.sort((a, b) => a.name.localeCompare(b.name, 'en'))) lines.push({ kind: 'file', text: f.name, file: f.file, depth });
     };
     walk(root, baseDepth, '');
     return lines;
@@ -897,6 +971,18 @@
     announcer.textContent = open ? 'Expanded: changed files' : 'Collapsed';
   }
 
+  /** Collapse All (title bar, toolbar): every expanded commit, and the staging area, closes. */
+  function collapseAll() {
+    if (!expanded.size) return;
+    const hadFiles = document.activeElement && document.activeElement.closest && document.activeElement.closest('.files-block');
+    if (expanded.has(WORKTREE_SHA)) vscode.postMessage({ type: 'filesClosed', sha: WORKTREE_SHA });
+    expanded.clear();
+    persist({ expanded: [] });
+    relayout();
+    if (hadFiles) scroller.focus();
+    announcer.textContent = 'All commits collapsed';
+  }
+
   /** Everything below a changed row moves: re-create the visible rows at their new places. */
   function relayout() {
     computeLines();
@@ -915,7 +1001,8 @@
     box.setAttribute('role', 'group');
     box.setAttribute('aria-label', `Files changed in ${r.subject || 'the working tree'}`);
     const lanes = document.createElementNS(SVG_NS, 'svg');
-    lanes.setAttribute('width', String(lanesShown() * LANE_W + 6));
+    // As wide as the rows' lane column, so the file tree lines up with the commit's ▸.
+    lanes.setAttribute('width', String(graphWidth() - (settings.compact ? 3 : 0)));
     lanes.setAttribute('height', String(lines.length * FILE_H));
     lanes.setAttribute('class', 'graph-svg files-lanes');
     for (const l of r.g.lines) {
@@ -936,7 +1023,7 @@
         continue;
       }
       const div = el('div', `file-line ${line.kind}`);
-      div.style.paddingLeft = `${8 + line.depth * 12}px`;
+      div.style.paddingLeft = `${fileIndent(line.depth)}px`;
       if (line.kind === 'note') div.appendChild(el('span', 'dim', line.text));
       else if (line.kind === 'folder') {
         // A folder (or a Staged/Changes group): ▾/▸ collapses and expands it, by click or keys.
@@ -967,7 +1054,7 @@
         const what = ({ A: 'Added', M: 'Modified', D: 'Deleted', R: 'Renamed', C: 'Copied', T: 'Type changed', U: 'Untracked', '!': 'Conflict' })[s] || 'Changed';
         const lineInfo = f.added !== undefined && f.added !== null ? `, ${f.added} added, ${f.deleted} deleted` : '';
         div.setAttribute('aria-label', `${what} ${f.path}${lineInfo}`);
-        div.title = `${what}: ${f.origPath && f.origPath !== f.path ? `${f.origPath} → ` : ''}${f.path}${lineInfo.replace(/^, /, ' — ')}`;
+        div.title = `${what}: ${f.origPath && f.origPath !== f.path ? `${f.origPath} → ` : ''}${f.path}${lineInfo.replace(/^, /, ' — ')}\n${fileKeysHint(wt)}`;
         // keep: Space previews and leaves the keyboard here (step through files); Enter/click go there.
         const open = (keep) => vscode.postMessage(r.sha === WORKTREE_SHA
           ? { type: 'openFile', kind: 'worktree', file: f, keepFocus: keep === true }
@@ -979,7 +1066,16 @@
           div.setAttribute('aria-label', `${div.getAttribute('aria-label')}, ${f.group === 'staged' ? 'staged' : f.group === 'merge' ? 'conflicted' : 'not staged'}. ${acts.hint}`);
         }
         div.dataset.fkey = `${f.group || ''}:${f.path}`;
-        div.addEventListener('keydown', (ev) => onFileKey(ev, div, i, open, undefined, acts));
+        decorateFile(div, f, r.sha, e && e.parent);
+        if (!wt) {
+          const ca = commitFileActions(r.sha, f, e && e.parent);
+          div.appendChild(ca.el);
+          div.setAttribute('aria-label', `${div.getAttribute('aria-label')}. ${ca.hint}`);
+        } else if (acts) acts.el.prepend(actButton('goToFile', 'Open the working file (O)', () => fileAction('openWorking', r.sha, f)));
+        div.addEventListener('keydown', (ev) => {
+          if (fileKey(ev, r.sha, f, e && e.parent, div)) return;
+          onFileKey(ev, div, i, open, undefined, acts);
+        });
       }
       list.appendChild(div);
     }
@@ -1126,6 +1222,165 @@
       fn();
     });
     return b;
+  }
+
+  // ------------------------------------------------ any file row: open, compare, viewed
+
+  /** The second line of a file row's tooltip: its keys, naming the base branch once known. */
+  function fileKeysHint(wt) {
+    const base = compareBaseName || 'the base branch';
+    return wt ? `Enter: changes · O: open the file · B: compare with ${base} · N: next not viewed · V: viewed on/off` : `Enter: changes · O: working file · W: compare with the working file · B: compare with ${base} · N: next not viewed · V: viewed on/off`;
+  }
+
+  /** Ask the host to do something with a file row (the file commands; see GraphPanel.fileAction). */
+  function fileAction(action, sha, f, parent) {
+    vscode.postMessage({ type: 'fileAction', action, sha, parent, file: { path: f.path, origPath: f.origPath, status: f.status, group: f.group } });
+  }
+
+  /**
+   * What every file row carries: its right-click menu (the file commands), its viewed mark key,
+   * and — a commit's file you have not opened yet — bold.
+   */
+  function decorateFile(div, f, sha, parent) {
+    const wt = sha === WORKTREE_SHA;
+    div.dataset.vscodeContext = JSON.stringify({
+      webviewSection: 'file', surface: settings.surface, sha, parent, path: f.path, origPath: f.origPath, status: f.status, group: f.group,
+      wtFile: wt, deleted: f.status === 'D', unviewed: !!f.unviewed, preventDefaultContextMenuItems: true,
+    });
+    if (!f.vk) return;
+    div.dataset.vk = f.vk;
+    div.dataset.sha = sha;
+    setUnviewed(div, settings.markUnviewed !== false && (vkState.has(f.vk) ? !vkState.get(f.vk) : !!f.unviewed));
+  }
+
+  /** "3/12" (or ✓ when all) after a commit's message: how many of its files you have opened. */
+  function viewedBadge(sha) {
+    const c = viewedCounts.get(sha);
+    if (!c || settings.markUnviewed === false) return null;
+    const [v, t] = c;
+    const b = el('span', `viewed-count${v >= t ? ' done' : ''}`);
+    if (v >= t) b.appendChild(ui.icon('check', { size: 11 }));
+    else b.textContent = `${v}/${t}`;
+    b.title = v >= t ? (t === 1 ? 'The file is viewed' : `All ${t} files viewed`) : `${v} of ${t} file${t === 1 ? '' : 's'} viewed`;
+    return b;
+  }
+
+  /** Redraw the "3/12" of the rows on screen. */
+  function refreshViewedBadges() {
+    for (const [i, entry] of live) {
+      const r = rows[i];
+      const desc = r && entry.el.querySelector('.cell.desc');
+      if (!desc) continue;
+      const old = desc.querySelector('.viewed-count');
+      const b = viewedBadge(r.sha);
+      if (old && b) old.replaceWith(b);
+      else if (old) old.remove();
+      else if (b) desc.appendChild(b);
+    }
+  }
+
+  /** A commit's file list arrived: its count, when you have opened any of them. */
+  function countFromFiles(sha, files) {
+    if (!files || settings.markUnviewed === false) return;
+    const marked = files.filter((f) => f.vk);
+    const v = marked.filter((f) => !(vkState.has(f.vk) ? !vkState.get(f.vk) : f.unviewed)).length;
+    if (v) viewedCounts.set(sha, [v, marked.length]);
+    else viewedCounts.delete(sha);
+  }
+
+  /** Bold (not opened yet) or not, with the tooltip and the context menu's data to match. */
+  function setUnviewed(div, on) {
+    div.classList.toggle('unviewed', on);
+    const base = (div.title || '').replace(/\n?Not viewed: .*$/s, '');
+    const note = 'Not viewed: bold until you open it (V toggles, N goes to the next one)';
+    div.title = on ? (base ? `${base}\n${note}` : note) : base;
+    try {
+      const c = JSON.parse(div.dataset.vscodeContext || '{}');
+      c.unviewed = on;
+      div.dataset.vscodeContext = JSON.stringify(c);
+    } catch { /* no context */ }
+  }
+
+  /** The buttons of a commit's file: open it as it is now, compare it with the working file. */
+  function commitFileActions(sha, f, parent) {
+    const acts = { el: el('span', 'file-acts float') };
+    if (f.status !== 'D') acts.el.append(actButton('compare', 'Compare with the working file (W)', () => fileAction('compareWorking', sha, f, parent)));
+    acts.el.append(actButton('goToFile', 'Open the working file (O), at this line if its diff is open', () => fileAction('openWorking', sha, f, parent)));
+    acts.hint = `O opens the working file, W compares with it, B with ${compareBaseName || 'the base branch'}, V toggles viewed, N goes to the next unviewed file.`;
+    return acts;
+  }
+
+  /**
+   * Letter keys on any file row: o open the working file, w compare with it, b compare with the
+   * base branch (Shift+B: pick a branch), v viewed on/off, n next unviewed file. True when taken.
+   */
+  function fileKey(ev, sha, f, parent, div) {
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || chordKeys.has(ev) || ev.key.length !== 1) return false;
+    const wt = sha === WORKTREE_SHA;
+    const marks = !!f.vk && settings.markUnviewed !== false;
+    const k = ev.key.toLowerCase(); // Caps Lock: Shift decides, not the letter's case
+    let action;
+    if (k === 'o') action = 'openWorking';
+    else if (k === 'w' && !wt && f.status !== 'D') action = 'compareWorking';
+    else if (k === 'b') action = ev.shiftKey ? 'compareRef' : 'compareBase';
+    else if (k === 'v' && marks) action = div.classList.contains('unviewed') ? 'markViewed' : 'markUnviewed';
+    else if (k === 'n' && marks) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      nextUnviewed(div);
+      return true;
+    }
+    if (!action) return false;
+    ev.preventDefault();
+    ev.stopPropagation();
+    fileAction(action, sha, f, parent);
+    return true;
+  }
+
+  /**
+   * The next file of the same commit that is still bold, after `from` (around to the start):
+   * the keyboard goes there and its diff opens beside, as Space does.
+   */
+  function nextUnviewed(from) {
+    const box = from.closest('.files-block');
+    if (box && from.dataset.sha !== WORKTREE_SHA) {
+      // A commit's files: in the order of its whole tree, folders closed or not.
+      const i = Number(box.id.replace('files-', ''));
+      const e = rows[i] && expanded.get(rows[i].sha);
+      const order = e && e.files ? fileTreeLines(e.files).filter((l) => l.kind === 'file').map((l) => l.file) : [];
+      const unviewed = (f) => (vkState.has(f.vk) ? !vkState.get(f.vk) : !!f.unviewed);
+      const k = order.findIndex((f) => `${f.group || ''}:${f.path}` === from.dataset.fkey);
+      const next = [...order.slice(k + 1), ...order.slice(0, Math.max(0, k))].find(unviewed);
+      if (!next) return allViewed();
+      let line = box.querySelector(`[data-fkey="${CSS.escape(`:${next.path}`)}"]`);
+      if (!line && e.collapsed && e.collapsed.size) {
+        // In a closed folder: open the folders, then it is there.
+        e.collapsed.clear();
+        e.lines = undefined;
+        relayout();
+        const again = liveFiles.get(i);
+        line = again && again.el.querySelector(`[data-fkey="${CSS.escape(`:${next.path}`)}"]`);
+      }
+      if (line) return openFrom(line);
+      return vscode.postMessage({ type: 'openFile', kind: 'commit', file: next, sha: rows[i].sha, parent: e.parent, keepFocus: true });
+    }
+    // The uncommitted files and the details pane: the list as shown.
+    const scope = from.closest('.files-block, .files');
+    const lines = scope ? [...scope.querySelectorAll('[data-vk]')] : [];
+    const k = lines.indexOf(from);
+    const next = [...lines.slice(k + 1), ...lines.slice(0, Math.max(0, k))].find((x) => x.classList.contains('unviewed'));
+    if (!next) return allViewed(from.dataset.sha === WORKTREE_SHA);
+    openFrom(next);
+  }
+  function allViewed(uncommitted) {
+    vscode.postMessage({ type: 'allViewed', uncommitted: !!uncommitted });
+    announcer.textContent = uncommitted ? 'All uncommitted files are viewed' : 'All files of this commit are viewed';
+  }
+  /** Keyboard to that line, and its diff opens beside (as Space does). */
+  function openFrom(line) {
+    line.focus();
+    line.scrollIntoView({ block: 'nearest' });
+    line.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
   }
 
   /** The actions of one uncommitted file, by its group. */
@@ -1550,7 +1805,8 @@
   /** How many branch badges an editor-graph row shows in full: 1–3, by the message column's width. */
   function badgeRoom() {
     const relative = settings.dateFormat === 'relative';
-    const others = graphWidth() + (settings.showAuthor ? 150 : 0) + (settings.showChanges ? 118 : 0) + (settings.showDate ? (relative ? 74 : 130) : 0) + (settings.showSha ? 70 : 0);
+    const tight = root.classList.contains('tight');
+    const others = graphWidth() + (settings.showAuthor ? (tight ? 30 : 150) : 0) + (settings.showChanges ? (root.classList.contains('xtight') ? 34 : 118) : 0) + (settings.showDate ? (relative ? 74 : 130) : 0) + (shaShown() ? 70 : 0);
     const desc = Math.max(160, window.innerWidth - others);
     // Badges take at most about 60% of it (the message keeps the rest), some 90 px each.
     return Math.max(1, Math.min(3, Math.floor((desc * 0.6) / 90)));
@@ -1560,7 +1816,9 @@
   window.addEventListener('resize', () => {
     // Crossing the narrow width changes the columns; another number of badges, the rows.
     const narrow = !!settings.compact && window.innerWidth < 360;
-    if (narrow !== root.classList.contains('narrow')) {
+    const tight = !settings.compact && window.innerWidth < 700;
+    const xtight = tight && window.innerWidth < 520;
+    if (narrow !== root.classList.contains('narrow') || tight !== root.classList.contains('tight') || xtight !== root.classList.contains('xtight')) {
       applyColumns();
       dataVersion++;
     }
@@ -2067,6 +2325,7 @@
       item.tabIndex = 0;
       item.setAttribute('role', 'button');
       item.setAttribute('aria-label', `${f.status} ${f.path}`);
+      if (kind !== 'multi') item.title = `${f.path}${f.added !== undefined && f.added !== null ? ` — +${f.added} −${f.deleted || 0}` : ''}\n${fileKeysHint(kind === 'worktree')}`;
       const status = el('span', `status s-${f.status === '!' ? 'conflict' : f.status[0]}`, f.status === '!' ? '!' : f.status[0]);
       status.title = ({ A: 'Added', M: 'Modified', D: 'Deleted', R: 'Renamed', C: 'Copied', T: 'Type changed', U: 'Untracked', '!': 'Conflict' })[f.status === '!' ? '!' : f.status[0]] || f.status;
       const name = f.path.split('/').pop();
@@ -2081,12 +2340,22 @@
       } else if (f.binary) item.appendChild(el('span', 'stats', 'binary'));
       if (f.group) item.appendChild(el('span', 'group', f.group));
       if (f.commits && f.commits.length > 1) item.appendChild(el('span', 'group', `${f.commits.length} commits`));
-      const open = () => vscode.postMessage({ type: 'openFile', kind, file: f, ...extra });
-      item.addEventListener('click', open);
+      // Space keeps the keyboard in the list (N steps through the files), Enter and a click go there.
+      const open = (keep) => vscode.postMessage({ type: 'openFile', kind, file: f, ...extra, keepFocus: keep === true });
+      item.addEventListener('click', () => open());
+      const fsha = kind === 'commit' ? extra.sha : kind === 'worktree' ? WORKTREE_SHA : undefined;
+      if (fsha) decorateFile(item, f, fsha, extra.parent);
+      if (kind === 'commit') item.appendChild(commitFileActions(fsha, f, extra.parent).el);
+      else if (kind === 'worktree') {
+        const acts = el('span', 'file-acts float');
+        acts.appendChild(actButton('goToFile', 'Open the working file (O)', () => fileAction('openWorking', fsha, f)));
+        item.appendChild(acts);
+      }
       item.addEventListener('keydown', (e) => {
+        if (fsha && fileKey(e, fsha, f, extra.parent, item)) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          open();
+          open(e.key === ' ');
         } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
           const sib = e.key === 'ArrowDown' ? item.nextElementSibling : item.previousElementSibling;
@@ -2395,6 +2664,7 @@
         statsRequested.clear();
         indexBySha = new Map(rows.map((r, i) => [r.sha, i]));
         repoName.textContent = m.repoName;
+        setMultiRepo(m.multiRepo);
         updateToolbar();
         persist({ repoRoot: m.repoRoot, filter: m.filter });
         fillFilter(m.branches, m.filter);
@@ -2464,6 +2734,62 @@
       case 'focusList':
         scroller.focus();
         break;
+      case 'viewed': {
+        // Marks changed (here, in a tree, from a diff): bold goes or comes, counts follow.
+        for (const k of m.viewed || []) vkState.set(k, true);
+        for (const k of m.unviewed || []) vkState.set(k, false);
+        for (const [sha, c] of Object.entries(m.counts || {})) {
+          if (Array.isArray(c) && c[0] > 0) viewedCounts.set(sha, c);
+          else viewedCounts.delete(sha);
+        }
+        for (const div of document.querySelectorAll('[data-vk]')) {
+          const k = div.dataset.vk;
+          if (vkState.has(k)) setUnviewed(div, settings.markUnviewed !== false && !vkState.get(k));
+        }
+        refreshViewedBadges();
+        break;
+      }
+      case 'viewedSetting':
+        settings.markUnviewed = !!m.on;
+        viewedCounts.clear();
+        for (const div of document.querySelectorAll('[data-vk]')) setUnviewed(div, false);
+        refreshViewedBadges();
+        if (m.on) {
+          // Ask again (and draw the answer even when it is the same list as before).
+          for (const [sha, e] of expanded) {
+            e.filesKey = undefined;
+            vscode.postMessage({ type: 'files', sha });
+          }
+          if (selected.size && !settings.compact) notifySelection();
+          vscode.postMessage({ type: 'viewedCounts', shas: [...live.keys()].map((i) => rows[i] && rows[i].sha).filter((x) => x && x !== WORKTREE_SHA) });
+        }
+        break;
+      case 'nextUnviewed': {
+        // From the context menu: the next bold file after that one.
+        const from = [...document.querySelectorAll('[data-vk]')].find((d) => {
+          const c = JSON.parse(d.dataset.vscodeContext || '{}');
+          return d.dataset.sha === m.sha && c.path === m.path && (m.group === undefined || c.group === m.group);
+        });
+        if (from) nextUnviewed(from);
+        break;
+      }
+      case 'repoCount':
+        setMultiRepo(m.multi);
+        break;
+      case 'oneView':
+        settings.oneView = !!m.on;
+        viewBtn.hidden = !m.on;
+        break;
+      case 'compareBase':
+        if ((m.name || '') === compareBaseName) break;
+        compareBaseName = m.name || '';
+        // The tooltips name it: drawn again.
+        for (const [, e] of expanded) e.lines = undefined;
+        relayout();
+        break;
+      case 'collapseAll':
+        collapseAll();
+        break;
       case 'files': {
         // The changed files of an expanded commit (or of the working tree).
         const e = expanded.get(m.sha);
@@ -2476,6 +2802,8 @@
         }
         e.filesKey = filesKey;
         e.files = m.files || [];
+        countFromFiles(m.sha, e.files);
+        refreshViewedBadges();
         e.parent = m.parent;
         e.error = m.error;
         // A message typed in Source Control: the empty box here takes it over (one draft).
@@ -2578,6 +2906,10 @@
       // The staging area: the uncommitted changes, expanded.
       ['→ on Uncommitted changes', 'the staging area: first the commit message (Enter commits, Shift+Enter new line, ↓ to the files)'],
       ['+ or S / − or U', 'stage / unstage the file or group'], ['Delete or D', 'discard the file or group (asks first)'],
+      // Any file row.
+      ['O / W on a file', 'open the working file (at the line of its open diff) / compare with it'],
+      ['B / Shift+B on a file', 'compare with the base branch (the one you last picked with Shift+B, else origin\'s default branch) / pick a branch, tag or commit'],
+      ['N / V on a file', 'next file not opened yet (bold) / viewed on or off'],
     ];
     if (settings.compact) {
       return [

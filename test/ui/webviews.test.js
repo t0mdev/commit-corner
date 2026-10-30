@@ -219,3 +219,123 @@ suite('The uncommitted changes row', () => {
       .catch(async (e) => assert.fail(`${e.message}: ${await evaluate(page, `(document.querySelector('.row.worktree') || {}).textContent || 'no row'`)}`));
   });
 });
+
+suite('A commit\'s files in the graph', () => {
+  /** Expand the row with this subject and wait for its file lines. */
+  async function expand(page, subject) {
+    await until(() => evaluate(page, `(() => {
+      const row = [...document.querySelectorAll('.row')].find((r) => (r.querySelector('.subject') || {}).textContent === ${JSON.stringify(subject)});
+      if (!row) return false;
+      if (!row.querySelector('.twisty.open')) row.querySelector('.twisty').click();
+      return true;
+    })()`), `the row "${subject}"`);
+    await until(() => evaluate(page, `(() => {
+      const row = [...document.querySelectorAll('.row')].find((r) => (r.querySelector('.subject') || {}).textContent === ${JSON.stringify(subject)});
+      const box = row && document.getElementById(row.getAttribute('aria-owns') || '');
+      return !!box && box.querySelectorAll('.file-line.file[data-vk]').length > 0;
+    })()`), 'its files');
+    // Selectors inside that commit only (another open commit or the staging area must not count).
+    return evaluate(page, `(() => { const row = [...document.querySelectorAll('.row')].find((r) => (r.querySelector('.subject') || {}).textContent === ${JSON.stringify(subject)}); return { files: '#' + row.getAttribute('aria-owns'), row: '#' + row.id }; })()`);
+  }
+
+  test('are bold until opened; then the row counts them viewed, and O opens the working file', async () => {
+    // The sidebar graph: it stays on screen while the diffs open in the editor.
+    await vscode.commands.executeCommand('commitCorner.graphView.focusList');
+    const page = await webview('graph.js', "document.body.classList.contains('in-sidebar') && document.querySelectorAll('.row').length > 2");
+    const at = await expand(page, 'Change two');
+    const line = `${at.files} .file-line.file[data-vk]`;
+    const weight = () => evaluate(page, `Number(getComputedStyle(document.querySelector('${line} .name')).fontWeight)`);
+    assert.ok(await evaluate(page, `document.querySelector('${line}').classList.contains('unviewed')`), 'not opened yet');
+    assert.ok((await weight()) >= 700, 'bold');
+    await key(page, line, 'Enter');
+    await until(() => evaluate(page, `!document.querySelector('${line}').classList.contains('unviewed')`), 'not bold once opened');
+    // (Its row is redrawn: looked up again by its subject.)
+    await until(() => evaluate(page, `[...document.querySelectorAll('.row')].some((r) => (r.querySelector('.subject') || {}).textContent === 'Change two' && r.querySelector('.viewed-count'))`), 'the row counts it viewed');
+    // O: the file as it is now, in a normal editor.
+    await key(page, line, 'o');
+    await until(() => {
+      const ed = vscode.window.activeTextEditor;
+      return ed && ed.document.uri.scheme === 'file' && ed.document.uri.fsPath.endsWith('a.txt');
+    }, 'the working a.txt in an editor').catch((e) => assert.fail(`${e.message}; active: ${vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri.toString()}`));
+    // The right-click menu offers "Mark as Not Viewed" now (park it for later).
+    assert.strictEqual(await evaluate(page, `JSON.parse(document.querySelector('${line}').dataset.vscodeContext).unviewed`), false);
+    // V: not viewed again.
+    await key(page, line, 'v');
+    await until(() => evaluate(page, `document.querySelector('${line}').classList.contains('unviewed')`), 'bold again after V');
+  });
+
+  test('in the sidebar, the ▸ comes first and the files are indented under it', async () => {
+    await vscode.commands.executeCommand('commitCorner.graphView.focusList');
+    const page = await webview('graph.js', "document.body.classList.contains('in-sidebar') && document.querySelectorAll('.row').length > 2");
+    await expand(page, 'Change two');
+    const at = await evaluate(page, `(() => {
+      const row = [...document.querySelectorAll('.row')].find((r) => (r.querySelector('.subject') || {}).textContent === 'Change two');
+      const tw = row.querySelector('.twisty').getBoundingClientRect();
+      const date = row.querySelector('.cell.date').getBoundingClientRect();
+      const file = document.getElementById(row.getAttribute('aria-owns')).querySelector('.file-line.file .status').getBoundingClientRect();
+      return { twisty: tw.left, date: date.left, file: file.left };
+    })()`);
+    assert.ok(at.twisty < at.date, `▸ before the age: ${JSON.stringify(at)}`);
+    assert.ok(at.file > at.twisty + 4 && at.file < at.twisty + 30, `files one step in from the ▸: ${JSON.stringify(at)}`);
+  });
+});
+
+suite('Graph: collapse all, and viewed marks of the uncommitted changes', () => {
+  test('Collapse All closes every expanded commit', async () => {
+    await vscode.commands.executeCommand('commitCorner.graphView.focusList');
+    const page = await webview('graph.js', "document.body.classList.contains('in-sidebar') && document.querySelectorAll('.row').length > 2");
+    for (const subject of ['Change two', 'Initial commit']) {
+      await evaluate(page, `(() => { const row = [...document.querySelectorAll('.row')].find((r) => (r.querySelector('.subject') || {}).textContent === ${JSON.stringify(subject)}); if (row && !row.querySelector('.twisty.open')) row.querySelector('.twisty').click(); return true; })()`);
+    }
+    await until(() => evaluate(page, `document.querySelectorAll('.files-block').length >= 2`), 'two commits open');
+    await vscode.commands.executeCommand('commitCorner.graphView.collapseAll');
+    await until(() => evaluate(page, `document.querySelectorAll('.files-block').length === 0 && !document.querySelector('.twisty.open')`), 'all closed');
+    assert.ok(await evaluate(page, `!!document.querySelector('.top-bar .view-switch')`), 'the view switcher is at the top');
+  });
+
+  test('an uncommitted file is bold until opened, and bold again when it changes', async () => {
+    const fs = require('fs');
+    const file = path.join(root(), 'a.txt');
+    const line = '.files-block .file-line.file[data-fkey="unstaged:a.txt"]';
+    try {
+      fs.writeFileSync(file, 'viewed test 1\n');
+      await vscode.commands.executeCommand('commitCorner.graphView.focusList');
+      const page = await webview('graph.js', "document.body.classList.contains('in-sidebar') && document.querySelectorAll('.row').length > 2");
+      await vscode.commands.executeCommand('commitCorner.refresh');
+      await until(() => evaluate(page, `!!document.querySelector('.row.worktree')`), 'the uncommitted changes row');
+      await evaluate(page, `(() => { const row = document.querySelector('.row.worktree'); if (!row.querySelector('.twisty.open')) row.querySelector('.twisty').click(); return true; })()`);
+      await until(() => evaluate(page, `!!document.querySelector('${line}[data-vk].unviewed')`), 'a.txt bold');
+      await key(page, line, 'Enter');
+      await until(() => evaluate(page, `!document.querySelector('${line}').classList.contains('unviewed')`), 'not bold once opened');
+      fs.writeFileSync(file, 'viewed test 2, changed again\n');
+      await vscode.commands.executeCommand('commitCorner.refresh'); // as the file watcher would
+      await until(() => evaluate(page, `!!document.querySelector('${line}.unviewed')`), 'bold again after the change', 20000);
+    } finally {
+      git('checkout', '-q', '--', 'a.txt');
+    }
+  });
+});
+
+suite('The editor graph opens diffs beside itself', () => {
+  test('Space on a commit\'s file keeps the graph (and its keyboard) on screen', async () => {
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await vscode.commands.executeCommand('commitCorner.showGraph');
+    const page = await webview('graph.js', "!document.body.classList.contains('in-sidebar') && document.querySelectorAll('.row').length > 2");
+    await evaluate(page, `(() => { const row = [...document.querySelectorAll('.row')].find((r) => (r.querySelector('.subject') || {}).textContent === 'Change two'); if (!row.querySelector('.twisty.open')) row.querySelector('.twisty').click(); return true; })()`);
+    await until(() => evaluate(page, `document.querySelectorAll('.files-block .file-line.file').length > 0`), 'its files');
+    await key(page, '.files-block .file-line.file', ' ');
+    await until(() => vscode.window.tabGroups.all.some((g) => g.tabs.some((t) => t.input instanceof vscode.TabInputTextDiff)), 'the diff');
+    const graphTab = vscode.window.tabGroups.all.flatMap((g) => g.tabs).find((t) => t.label === 'Commit Graph');
+    assert.ok(graphTab, 'the graph tab is still open');
+    const diffTab = vscode.window.tabGroups.all.flatMap((g) => g.tabs).find((t) => t.input instanceof vscode.TabInputTextDiff);
+    assert.notStrictEqual(diffTab.group.viewColumn, graphTab.group.viewColumn, 'the diff is beside it, in another group');
+    // N: the next file not viewed yet of that commit gets the keyboard, its diff opens beside.
+    await evaluate(page, `(() => { const row = [...document.querySelectorAll('.row')].find((r) => (r.querySelector('.subject') || {}).textContent === 'Initial commit'); if (!row.querySelector('.twisty.open')) row.querySelector('.twisty').click(); return true; })()`);
+    const box = await until(() => evaluate(page, `(() => { const row = [...document.querySelectorAll('.row')].find((r) => (r.querySelector('.subject') || {}).textContent === 'Initial commit'); const b = row && document.getElementById(row.getAttribute('aria-owns') || ''); return b && b.querySelectorAll('.file-line.file[data-vk]').length === 2 ? '#' + b.id : ''; })()`), 'Initial commit\'s files');
+    await key(page, `${box} .file-line.file[data-fkey=":a.txt"]`, 'n');
+    await until(() => evaluate(page, `document.activeElement && document.activeElement.dataset.fkey === ':b.txt'`), 'N moved to b.txt');
+    // (The graph is redrawn narrower once the diff is beside it: looked up again each time.)
+    await until(() => evaluate(page, `(() => { const l = document.querySelector('.file-line.file[data-vk][data-fkey=":b.txt"]'); return !!l && !l.classList.contains('unviewed'); })()`), 'b.txt opened (no longer bold)');
+    assert.ok(await evaluate(page, `!!document.querySelector('.files-block .file-line.file')`), 'and its page is alive');
+  });
+});

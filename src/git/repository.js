@@ -431,7 +431,24 @@ class Repository extends EventEmitter {
       const rel = path.relative(this.root, path.join(this.root, relPath));
       if (!rel || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return null;
       try {
-        return await fs.promises.readFile(path.join(this.root, relPath));
+        const abs = path.join(this.root, relPath);
+        // Never through a symlinked folder or into a nested repository.
+        if (!this.ownFolder(path.dirname(abs))) return null;
+        // As git sees it: a symlink is its target's name (never followed: it may point at
+        // /dev/zero or out of the repository); only a regular file has content to read.
+        const st = await fs.promises.lstat(abs);
+        if (st.isSymbolicLink()) return Buffer.from(await fs.promises.readlink(abs));
+        if (st.isDirectory()) return this.submoduleText(ref, relPath);
+        if (!st.isFile()) return null;
+        // Opened without following a link (it may have become one since the lstat), and only
+        // read when what was opened is a regular file (a FIFO would block).
+        const fh = await fs.promises.open(abs, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+        try {
+          if (!(await fh.stat()).isFile()) return null;
+          return await fh.readFile();
+        } finally {
+          await fh.close();
+        }
       } catch (e) {
         // A submodule's working tree is a directory: describe its checked-out commit.
         if (e && e.code === 'EISDIR') return this.submoduleText(ref, relPath);
@@ -697,11 +714,12 @@ class Repository extends EventEmitter {
     else if (to === undefined) revs = [from];
     else revs = [opts.threeDot ? `${from}...${to}` : from, ...(opts.threeDot ? [] : [to])];
     const tail = ['--', ...(opts.paths || []).map(lit)];
+    // blobs: --raw instead of --name-status (the same list, plus each side's blob id).
     const [ns, num] = await Promise.all([
-      this.exec([...base, '--name-status', '-z', ...revs, ...tail], { signal: opts.signal }),
+      this.exec([...base, ...(opts.blobs ? ['--raw', '--no-abbrev'] : ['--name-status']), '-z', ...revs, ...tail], { signal: opts.signal }),
       this.exec([...base, '--numstat', '-z', ...revs, ...tail], { signal: opts.signal }),
     ]);
-    return mergeStats(P.parseNameStatus(ns.stdout), P.parseNumstat(num.stdout));
+    return mergeStats(opts.blobs ? P.parseRaw(ns.stdout) : P.parseNameStatus(ns.stdout), P.parseNumstat(num.stdout));
   }
 
   /**
@@ -713,6 +731,85 @@ class Repository extends EventEmitter {
     const cached = which.length === 1 && which[0] === '--cached';
     const { stdout } = await this.exec(['diff', '--numstat', '-z', '-M', '--no-ext-diff', '--no-textconv', ...(cached ? ['--cached'] : []), '--']);
     return P.parseNumstat(stdout);
+  }
+
+  /**
+   * Where `relPath` of revision `rev` is in the working tree now: a rename since (git's rename
+   * detection between that revision and the working tree), else undefined. Bounded: an old
+   * revision of a huge repository gives up after 15 s.
+   */
+  async currentPathOf(rev, relPath) {
+    checkRevs(rev);
+    const { stdout } = await this.exec(['diff', '-M', '--no-ext-diff', '--no-textconv', '--name-status', '-z', '--diff-filter=R', rev, '--'], { timeout: 15000, maxBytes: 8 * 1024 * 1024 });
+    const hit = P.parseNameStatus(stdout).find((c) => c.origPath === relPath);
+    return hit && hit.path;
+  }
+
+  /** The size in bytes of `relPath` at revision `ref` (undefined when it is not a blob there). */
+  async blobSize(ref, relPath) {
+    ref = this.tree(ref);
+    checkRevs(ref);
+    const spec = ref === INDEX ? `:0:${relPath}` : `${ref}:${relPath}`;
+    const { stdout, exitCode } = await this.exec(['cat-file', '-s', spec], { allowFailure: true });
+    return exitCode === 0 && /^\d+$/.test(stdout.trim()) ? Number(stdout.trim()) : undefined;
+  }
+
+  /**
+   * A folder of this working tree that is really there: inside it, and neither it nor a folder
+   * above it a symlink or a nested repository — looked at now, never from a cache (a checkout
+   * may just have turned a folder into a link).
+   */
+  ownFolder(dir, memo) {
+    const p = this.canonical(dir);
+    if (p === this.root) return true;
+    const rel = path.relative(this.root, p);
+    if (!rel || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return false; // ("..foo" is a name)
+    // `memo`: one call's answers (a list of files shares its folders); never kept beyond it.
+    const seen = [];
+    let ok = true;
+    for (let d = p; d !== this.root && d.length > this.root.length; d = path.dirname(d)) {
+      if (memo && memo.has(d)) {
+        ok = memo.get(d);
+        break;
+      }
+      seen.push(d);
+      if (isGitDirName(path.basename(d))) {
+        ok = false; // git's own folder
+        break;
+      }
+      let st;
+      try {
+        st = fs.lstatSync(d);
+      } catch {
+        continue; // missing: nothing to follow
+      }
+      if (st.isSymbolicLink() || fs.existsSync(path.join(d, '.git'))) {
+        ok = false;
+        break;
+      }
+    }
+    if (memo) for (const d of seen) memo.set(d, ok);
+    return ok;
+  }
+
+  /**
+   * The working-tree file at `relPath` if it is this repository's: no ".." or absolute paths
+   * (git lists tree entries named ".." too), nothing behind a symlinked folder or inside a
+   * nested repository. undefined when it is not; `st` (lstat, the link itself for a symlink)
+   * null when it does not exist.
+   * @returns {{abs: string, st: fs.Stats|null}|undefined}
+   */
+  workingFile(relPath) {
+    if (!safeRelPath(relPath)) return undefined;
+    const abs = this.absolute(relPath);
+    // Its folders must be ours (no symlinked folder, no nested repository); the entry itself may
+    // be anything (a submodule's folder, a symlink): `st` says what.
+    if (!this.ownFolder(path.dirname(abs))) return undefined;
+    let st = null;
+    try {
+      st = fs.lstatSync(abs);
+    } catch { /* missing */ }
+    return { abs, st };
   }
 
   /** The new blob id of each file changed between two revisions (a fingerprint of its content). */
@@ -793,12 +890,13 @@ class Repository extends EventEmitter {
   }
 
   /**
-   * Fingerprints of files in another worktree (their current content, `git hash-object`), for
-   * "viewed" marks; files that are not there (deleted) or not regular files are left out.
+   * Fingerprints of files in this working tree or another worktree (their current content, `git
+   * hash-object`), for "viewed" marks; files that are not there (deleted) or not regular files
+   * are left out.
    * @returns {Promise<Map<string, string>>}
    */
   async worktreeFileIds(worktreePath, paths) {
-    if (!(await this.ownsWorktree(worktreePath))) throw new Error(`${worktreePath} is not a worktree of ${this.name}.`);
+    if (worktreePath !== this.root && !(await this.ownsWorktree(worktreePath))) throw new Error(`${worktreePath} is not a worktree of ${this.name}.`);
     // Fingerprints by path, size, mtime and inode: an unchanged file is not hashed again (the
     // Worktrees view asks every 10 seconds).
     const cache = this.fileIdCache || (this.fileIdCache = new Map());
@@ -806,15 +904,25 @@ class Repository extends EventEmitter {
     if (cache.size > 60000) for (const k of [...cache.keys()].slice(0, cache.size - 50000)) cache.delete(k);
     const out = new Map();
     const todo = [];
+    const own = worktreePath === this.root;
+    // At most 500 MB read per call (new files only: the rest come from the cache); beyond that
+    // the files simply have no fingerprint this time (no mark), rather than a timeout for all.
+    let budget = 500 * 1024 * 1024;
+    const folders = new Map();
     for (const p of paths) {
-      if (p.endsWith('/') || p.includes('\n')) continue;
+      if (p.endsWith('/') || p.includes('\n') || !safeRelPath(p)) continue;
+      const abs = path.join(worktreePath, ...p.split('/'));
+      // This working tree: never through a symlinked folder or into a nested repository.
+      // (Another worktree's paths come from its own git status; only their hashes come out.)
+      if (own && !this.ownFolder(path.dirname(abs), folders)) continue;
       let st;
       try {
-        st = fs.lstatSync(path.join(worktreePath, ...p.split('/')));
+        st = fs.lstatSync(abs);
       } catch {
         continue; // deleted
       }
-      if (!st.isFile()) continue;
+      // Regular files up to 50 MB (a growing download or log is not read again and again).
+      if (!st.isFile() || st.size > 50 * 1024 * 1024) continue;
       // ctime too: a rewrite with the old mtime put back (touch -r, cp -p) still changes it.
       const key = `${worktreePath}\0${p}\0${st.size}\0${st.mtimeMs}\0${st.ctimeMs}\0${st.ino}`;
       if (cache.has(key)) {
@@ -822,13 +930,16 @@ class Repository extends EventEmitter {
         cache.delete(key); // used again: last out
         cache.set(key, id);
         out.set(p, id);
-      } else todo.push({ p, key });
+      } else if ((budget -= st.size) >= 0) todo.push({ p, key });
     }
-    // hash-object --stdin-paths reads C-quoted lines: a name starting with " goes on its own.
-    const quotedLike = todo.filter((t) => t.p.startsWith('"'));
-    todo.splice(0, todo.length, ...todo.filter((t) => !t.p.startsWith('"')));
+    // hash-object --stdin-paths reads C-quoted lines and drops a CR at a line's end: a name
+    // starting with " or holding a CR goes on its own ("z\r" must never be read as "z").
+    const alone = (p) => p.startsWith('"') || p.includes('\r');
+    const quotedLike = todo.filter((t) => alone(t.p));
+    todo.splice(0, todo.length, ...todo.filter((t) => !alone(t.p)));
     for (const t of quotedLike) {
-      const r = await git(['hash-object', '--no-filters', '--', t.p], { cwd: worktreePath, env: { GIT_OPTIONAL_LOCKS: '0' }, allowFailure: true });
+      // A file that cannot be read in time just has no fingerprint (the others still do).
+      const r = await git(['hash-object', '--no-filters', '--', t.p], { cwd: worktreePath, env: { GIT_OPTIONAL_LOCKS: '0' }, allowFailure: true, timeout: 30000 }).catch(() => ({ exitCode: 1, stdout: '' }));
       const id = r.stdout.trim();
       if (r.exitCode === 0 && /^[0-9a-f]{40,64}$/.test(id)) {
         cache.set(t.key, id);
@@ -837,7 +948,7 @@ class Repository extends EventEmitter {
     }
     const hash = async (list) => {
       // Paths on stdin (never options); --no-filters: the bytes as they are, a fingerprint only.
-      const { stdout } = await git(['hash-object', '--no-filters', '--stdin-paths'], { cwd: worktreePath, input: `${list.map((t) => t.p).join('\n')}\n`, env: { GIT_OPTIONAL_LOCKS: '0' } });
+      const { stdout } = await git(['hash-object', '--no-filters', '--stdin-paths'], { cwd: worktreePath, input: `${list.map((t) => t.p).join('\n')}\n`, env: { GIT_OPTIONAL_LOCKS: '0' }, timeout: 30000 });
       const ids = stdout.trim().split('\n');
       list.forEach((t, k) => {
         if (!/^[0-9a-f]{40,64}$/.test(ids[k] || '')) return;
@@ -849,8 +960,9 @@ class Repository extends EventEmitter {
       try {
         await hash(todo);
       } catch {
-        // A file went away (or became unreadable) meanwhile: one by one, skipping those.
-        for (const t of todo) await hash([t]).catch(() => {});
+        // A file went away (or became unreadable) meanwhile: one by one, skipping those (a few
+        // hundred at most: the rest get their fingerprint on the next look).
+        for (const t of todo.slice(0, 200)) await hash([t]).catch(() => {});
       }
     }
     return out;
@@ -862,7 +974,8 @@ class Repository extends EventEmitter {
     checkRevs(sha);
     const commit = await this.getCommit(sha);
     const parent = commit.parents[0] || this.emptyTree;
-    const files = await this.diffFiles(parent, sha);
+    // With blob ids: a change keeps its viewed mark when the commit is amended or rebased.
+    const files = await this.diffFiles(parent, sha, { blobs: true });
     return { commit, parent: commit.parents[0] || null, files };
   }
 
@@ -2653,22 +2766,24 @@ class Repository extends EventEmitter {
     const p = this.canonical(absPath);
     if (p === this.root) return true;
     const rel = path.relative(this.root, p);
-    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    if (!rel || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return false; // ("..foo" is a name)
     if (!this.boundaryCache) this.boundaryCache = new Map();
     for (let dir = p; dir !== this.root && dir.length > this.root.length; dir = path.dirname(dir)) {
-      let nested = this.boundaryCache.get(dir);
-      if (nested === undefined) {
+      let b = this.boundaryCache.get(dir);
+      if (b === undefined) {
         // A symlinked folder is not part of this working tree (git stores the link, not what is
         // behind it), and what it points to is not ours either; never follow it to a .git.
+        // Both facts are kept: the path asked about may itself be a link (it is then judged by
+        // what it is), but a later path under it must still see the link.
         let link = false;
         try {
-          link = dir !== p && fs.lstatSync(dir).isSymbolicLink();
+          link = fs.lstatSync(dir).isSymbolicLink();
         } catch { /* missing */ }
-        nested = link || fs.existsSync(path.join(dir, '.git'));
+        b = { link, git: !link && fs.existsSync(path.join(dir, '.git')) };
         if (this.boundaryCache.size > 20000) this.boundaryCache.clear();
-        this.boundaryCache.set(dir, nested);
+        this.boundaryCache.set(dir, b);
       }
-      if (nested) return false;
+      if ((dir !== p && b.link) || b.git) return false;
     }
     return true;
   }
@@ -2711,6 +2826,25 @@ class Repository extends EventEmitter {
  */
 function lit(p) {
   return `:(literal)${p}`;
+}
+
+/**
+ * A repository-relative path that stays inside: not absolute, no drive letter, no ".." part,
+ * nothing in git's own folder, no NUL. (A tab is a legal file name character for git; page
+ * input is stricter, see the graph's pagePath.)
+ */
+function safeRelPath(p) {
+  return typeof p === 'string' && !!p && p.length < 4096 && !p.startsWith('/') && !/^[A-Za-z]:/.test(p) && !p.includes('\u0000')
+    && !p.split(/[\\/]/).some((part) => part === '..' || isGitDirName(part));
+}
+
+/**
+ * ".git" as Windows and macOS may also spell it (".GIT", ".git.", "GIT~1", NTFS streams such as
+ * ".git::$INDEX_ALLOCATION", as git's own check reads them): git's folder, never working-tree content.
+ */
+function isGitDirName(part) {
+  const p = part.toLowerCase().replace(/:.*$/, '').replace(/[. ]+$/, '');
+  return p === '.git' || p === 'git~1';
 }
 
 function mergeStats(changes, numstat) {
@@ -2872,4 +3006,4 @@ function shellArg(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
-module.exports = { checkRevs, checkRemotes, Repository, INDEX, WORKTREE, EMPTY_TREE, PR_REF_PREFIX, parseRebaseConfig };
+module.exports = { checkRevs, checkRemotes, Repository, INDEX, WORKTREE, EMPTY_TREE, PR_REF_PREFIX, parseRebaseConfig, safeRelPath, isGitDirName };

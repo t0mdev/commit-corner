@@ -1,7 +1,7 @@
 {
   "name": "commit-corner",
   "displayName": "Commit Corner",
-  "description": "A visual Git client for VS Code: commit graph with staging, worktree and pull request review (GitHub.com), multi-commit diffs, line staging, blame, interactive rebase, stashes and worktrees. No runtime dependencies, no telemetry; network access is git itself plus, optionally, GitHub sign-in and the GitHub API for pull request details.",
+  "description": "A visual Git client for VS Code: commit graph with staging, worktree and pull request review (GitHub.com), multi-commit diffs, files bold until viewed, line staging, blame, interactive rebase, stashes and worktrees. No runtime dependencies, no telemetry; network access is git itself plus, optionally, GitHub sign-in and the GitHub API for pull request details.",
   "version": "1.1.0",
   "publisher": "t0mdev",
   "license": "MIT",
@@ -452,7 +452,7 @@
         "command": "commitCorner.openFileAtCommit",
         "title": "Open File at This Revision",
         "category": "Commit Corner",
-        "icon": "$(go-to-file)"
+        "icon": "$(file)"
       },
       {
         "command": "commitCorner.compareFileWithWorkingTree",
@@ -1130,7 +1130,8 @@
       {
         "command": "commitCorner.switchRepository",
         "title": "Switch Repository…",
-        "category": "Commit Corner"
+        "category": "Commit Corner",
+        "icon": "$(repo)"
       },
       {
         "command": "commitCorner.cancelGit",
@@ -1396,6 +1397,142 @@
         "title": "Worktrees",
         "category": "Commit Corner",
         "icon": "$(list-tree)"
+      },
+      {
+        "command": "commitCorner.openWorkingFile",
+        "title": "Open Working File",
+        "category": "Commit Corner",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "commitCorner.compareFileWithBase",
+        "title": "Compare with Base Branch",
+        "category": "Commit Corner",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "commitCorner.compareFileWithRefPick",
+        "title": "Compare with Branch, Tag or Commit…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.copyFilePath",
+        "title": "Copy Relative Path",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.revealFileInExplorer",
+        "title": "Reveal in Explorer View",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.markCommitViewed",
+        "title": "Mark All as Viewed",
+        "category": "Commit Corner",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "commitCorner.markCommitUnviewed",
+        "title": "Clear Viewed Marks",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.nextUnviewedFile",
+        "title": "Next Unviewed File",
+        "category": "Commit Corner",
+        "icon": "$(arrow-circle-down)"
+      },
+      {
+        "command": "commitCorner.graph.file.openChanges",
+        "title": "Open Changes",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.file.openWorking",
+        "title": "Open Working File",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.file.atRevision",
+        "title": "Open File at This Revision",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.file.compareWorking",
+        "title": "Compare with Working File",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.file.compareBase",
+        "title": "Compare with Base Branch",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.file.compareRef",
+        "title": "Compare with Branch, Tag or Commit…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.file.markViewed",
+        "title": "Mark as Viewed",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.file.markUnviewed",
+        "title": "Mark as Not Viewed",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.file.nextUnviewed",
+        "title": "Next Unviewed File",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.file.copyPath",
+        "title": "Copy Relative Path",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.file.reveal",
+        "title": "Reveal in Explorer View",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.markViewed",
+        "title": "Mark All as Viewed",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.markUnviewed",
+        "title": "Clear Viewed Marks",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.switchRepository",
+        "title": "Switch Repository…",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graphView.collapseAll",
+        "title": "Collapse All Commits",
+        "category": "Commit Corner",
+        "icon": "$(collapse-all)"
+      },
+      {
+        "command": "commitCorner.sidebar.pickView",
+        "title": "Sidebar: Switch View…",
+        "category": "Commit Corner",
+        "icon": "$(menu)"
+      },
+      {
+        "command": "commitCorner.markCommitFileViewed",
+        "title": "Mark as Viewed",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.markCommitFileUnviewed",
+        "title": "Mark as Not Viewed",
+        "category": "Commit Corner"
       }
     ],
     "submenus": [
@@ -1426,7 +1563,7 @@
       {
         "id": "commitCorner.sidebar.switch",
         "label": "Switch View",
-        "icon": "$(layers)"
+        "icon": "$(menu)"
       }
     ],
     "menus": {
@@ -2358,6 +2495,110 @@
         {
           "command": "commitCorner.sidebar.to.worktrees",
           "when": "false"
+        },
+        {
+          "command": "commitCorner.compareFileWithBase",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.compareFileWithRefPick",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.copyFilePath",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.revealFileInExplorer",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.markCommitViewed",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.markCommitUnviewed",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.file.openChanges",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.file.openWorking",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.file.atRevision",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.file.compareWorking",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.file.compareBase",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.file.compareRef",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.file.markViewed",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.file.markUnviewed",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.file.nextUnviewed",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.file.copyPath",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.file.reveal",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.markViewed",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.markUnviewed",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.switchRepository",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.openWorkingFile",
+          "when": "commitCorner.hasRepository && resourceScheme == commitcorner"
+        },
+        {
+          "command": "commitCorner.nextUnviewedFile",
+          "when": "commitCorner.hasRepository"
+        },
+        {
+          "command": "commitCorner.graphView.collapseAll",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.sidebar.pickView",
+          "when": "config.commitCorner.sidebar.oneViewAtATime"
+        },
+        {
+          "command": "commitCorner.markCommitFileViewed",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.markCommitFileUnviewed",
+          "when": "false"
         }
       ],
       "scm/title": [
@@ -2952,6 +3193,16 @@
           "command": "commitCorner.graph.refresh",
           "when": "activeWebviewPanelId == commitCorner.graph",
           "group": "navigation"
+        },
+        {
+          "command": "commitCorner.openWorkingFile",
+          "when": "commitCorner.hasRepository && resourceScheme == commitcorner",
+          "group": "navigation@-90"
+        },
+        {
+          "command": "commitCorner.nextUnviewedFile",
+          "when": "commitCorner.hasRepository && commitCorner.activeEditorIsCommitFile && config.commitCorner.markUnviewedFiles",
+          "group": "navigation@-89"
         }
       ],
       "editor/title/context": [
@@ -3018,12 +3269,7 @@
         {
           "command": "commitCorner.showGraph",
           "when": "view == commitCorner.branches",
-          "group": "navigation@3"
-        },
-        {
-          "command": "commitCorner.switchRepository",
-          "when": "view == commitCorner.branches && commitCorner.multipleRepositories",
-          "group": "navigation@4"
+          "group": "1@0"
         },
         {
           "command": "commitCorner.compareRefs",
@@ -3203,7 +3449,17 @@
         {
           "submenu": "commitCorner.sidebar.switch",
           "when": "view =~ /^commitCorner\\.(graphView|branches|pullRequests|compare|fileHistory|worktrees)$/ && config.commitCorner.sidebar.oneViewAtATime",
-          "group": "navigation@90"
+          "group": "navigation@0"
+        },
+        {
+          "command": "commitCorner.switchRepository",
+          "when": "view =~ /^commitCorner\\.(graphView|branches|pullRequests|compare|fileHistory|worktrees)$/ && commitCorner.multipleRepositories",
+          "group": "navigation@0.5"
+        },
+        {
+          "command": "commitCorner.graphView.collapseAll",
+          "when": "view == commitCorner.graphView",
+          "group": "navigation@1.5"
         }
       ],
       "view/item/context": [
@@ -3368,11 +3624,6 @@
           "group": "inline@1"
         },
         {
-          "command": "commitCorner.openFileAtCommit",
-          "when": "viewItem =~ /^commit:file$/ && !listMultiSelection",
-          "group": "inline@1"
-        },
-        {
           "command": "commitCorner.compareFileWithWorkingTree",
           "when": "viewItem =~ /^commit:file$/ && !listMultiSelection",
           "group": "inline@2"
@@ -3488,28 +3739,23 @@
           "group": "9_copy@3"
         },
         {
-          "command": "commitCorner.openFileAtCommit",
-          "when": "viewItem =~ /^file$/ && !listMultiSelection",
-          "group": "inline@1"
-        },
-        {
           "command": "commitCorner.compareFileWithWorkingTree",
-          "when": "viewItem =~ /^file$/ && !listMultiSelection",
+          "when": "viewItem =~ /^file(:commit(:new)?)?$/ && !listMultiSelection",
           "group": "inline@2"
         },
         {
           "command": "commitCorner.openFileAtCommit",
-          "when": "viewItem =~ /^file$/ && !listMultiSelection",
+          "when": "viewItem =~ /^file(:commit(:new)?)?$/ && !listMultiSelection",
           "group": "1@1"
         },
         {
           "command": "commitCorner.compareFileWithWorkingTree",
-          "when": "viewItem =~ /^file$/ && !listMultiSelection",
+          "when": "viewItem =~ /^file(:commit(:new)?)?$/ && !listMultiSelection",
           "group": "1@2"
         },
         {
           "command": "commitCorner.restoreFileFromCommit",
-          "when": "viewItem =~ /^file$/ && !listMultiSelection",
+          "when": "viewItem =~ /^file(:commit(:new)?)?$/ && !listMultiSelection",
           "group": "2@1"
         },
         {
@@ -3754,8 +4000,58 @@
         },
         {
           "command": "commitCorner.toggleViewed",
-          "when": "view == commitCorner.pullRequests && viewItem =~ /^file/ && !listMultiSelection",
+          "when": "view == commitCorner.pullRequests && viewItem =~ /^file(:other)?$/ && !listMultiSelection",
           "group": "0_review@0"
+        },
+        {
+          "command": "commitCorner.openWorkingFile",
+          "when": "viewItem =~ /^(commit:file|file|file:other|file:commit(:new)?|stashFile)$/ && !listMultiSelection",
+          "group": "inline@0"
+        },
+        {
+          "command": "commitCorner.openWorkingFile",
+          "when": "viewItem =~ /^(commit:file|file|file:other|file:commit(:new)?|stashFile)$/ && !listMultiSelection",
+          "group": "1_show@0"
+        },
+        {
+          "command": "commitCorner.compareFileWithBase",
+          "when": "viewItem =~ /^(commit:file|file|file:other|file:commit(:new)?|stashFile)$/ && !listMultiSelection",
+          "group": "3_compareFile@1"
+        },
+        {
+          "command": "commitCorner.compareFileWithRefPick",
+          "when": "viewItem =~ /^(commit:file|file|file:other|file:commit(:new)?|stashFile)$/ && !listMultiSelection",
+          "group": "3_compareFile@2"
+        },
+        {
+          "command": "commitCorner.copyFilePath",
+          "when": "viewItem =~ /^(commit:file|file|file:other|file:commit(:new)?|stashFile)$/ && !listMultiSelection",
+          "group": "9_copy@1"
+        },
+        {
+          "command": "commitCorner.revealFileInExplorer",
+          "when": "viewItem =~ /^(commit:file|file|file:other|file:commit(:new)?|stashFile)$/ && !listMultiSelection",
+          "group": "9_copy@2"
+        },
+        {
+          "command": "commitCorner.markCommitViewed",
+          "when": "viewItem =~ /^commit$/ && config.commitCorner.markUnviewedFiles",
+          "group": "8_viewed@1"
+        },
+        {
+          "command": "commitCorner.markCommitUnviewed",
+          "when": "viewItem =~ /^commit$/ && config.commitCorner.markUnviewedFiles",
+          "group": "8_viewed@2"
+        },
+        {
+          "command": "commitCorner.markCommitFileViewed",
+          "when": "viewItem == file:commit:new && !listMultiSelection",
+          "group": "8_viewed@1"
+        },
+        {
+          "command": "commitCorner.markCommitFileUnviewed",
+          "when": "viewItem == file:commit && !listMultiSelection && config.commitCorner.markUnviewedFiles",
+          "group": "8_viewed@1"
         }
       ],
       "webview/context": [
@@ -3958,6 +4254,71 @@
           "command": "commitCorner.graph.summarize",
           "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && config.commitCorner.ai.enabled",
           "group": "1_show@3"
+        },
+        {
+          "command": "commitCorner.graph.file.openChanges",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'file'",
+          "group": "1_show@1"
+        },
+        {
+          "command": "commitCorner.graph.file.openWorking",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'file'",
+          "group": "1_show@2"
+        },
+        {
+          "command": "commitCorner.graph.file.atRevision",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'file' && !wtFile && !deleted",
+          "group": "1_show@3"
+        },
+        {
+          "command": "commitCorner.graph.file.compareWorking",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'file' && !wtFile",
+          "group": "2_compare@1"
+        },
+        {
+          "command": "commitCorner.graph.file.compareBase",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'file'",
+          "group": "2_compare@2"
+        },
+        {
+          "command": "commitCorner.graph.file.compareRef",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'file'",
+          "group": "2_compare@3"
+        },
+        {
+          "command": "commitCorner.graph.file.markViewed",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'file' && unviewed",
+          "group": "3_viewed@1"
+        },
+        {
+          "command": "commitCorner.graph.file.markUnviewed",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'file' && !unviewed && config.commitCorner.markUnviewedFiles",
+          "group": "3_viewed@1"
+        },
+        {
+          "command": "commitCorner.graph.file.nextUnviewed",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'file' && config.commitCorner.markUnviewedFiles",
+          "group": "3_viewed@2"
+        },
+        {
+          "command": "commitCorner.graph.file.copyPath",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'file'",
+          "group": "9_copy@1"
+        },
+        {
+          "command": "commitCorner.graph.file.reveal",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'file'",
+          "group": "9_copy@2"
+        },
+        {
+          "command": "commitCorner.graph.markViewed",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && config.commitCorner.markUnviewedFiles && !viewedAll",
+          "group": "8_viewed@1"
+        },
+        {
+          "command": "commitCorner.graph.markUnviewed",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && config.commitCorner.markUnviewedFiles && viewedAny",
+          "group": "8_viewed@2"
         }
       ],
       "commitCorner.sidebar.switch": [
@@ -4593,6 +4954,42 @@
         "key": "space",
         "when": "focusedView == commitCorner.pullRequests && !inputFocus",
         "args": "pullRequests"
+      },
+      {
+        "key": "ctrl+alt+g ctrl+alt+shift+n",
+        "mac": "cmd+alt+g cmd+alt+shift+n",
+        "command": "commitCorner.nextUnviewedFile",
+        "when": "commitCorner.hasRepository && commitCorner.activeEditorIsCommitFile"
+      },
+      {
+        "key": "ctrl+alt+g shift+n",
+        "mac": "cmd+alt+g shift+n",
+        "command": "commitCorner.nextUnviewedFile",
+        "when": "commitCorner.hasRepository && commitCorner.activeEditorIsCommitFile"
+      },
+      {
+        "key": "ctrl+alt+g ctrl+alt+shift+o",
+        "mac": "cmd+alt+g cmd+alt+shift+o",
+        "command": "commitCorner.switchRepository",
+        "when": "commitCorner.multipleRepositories"
+      },
+      {
+        "key": "ctrl+alt+g shift+o",
+        "mac": "cmd+alt+g shift+o",
+        "command": "commitCorner.switchRepository",
+        "when": "commitCorner.multipleRepositories"
+      },
+      {
+        "key": "ctrl+alt+g ctrl+alt+shift+w",
+        "mac": "cmd+alt+g cmd+alt+shift+w",
+        "command": "commitCorner.openWorkingFile",
+        "when": "commitCorner.hasRepository && resourceScheme == commitcorner"
+      },
+      {
+        "key": "ctrl+alt+g shift+w",
+        "mac": "cmd+alt+g shift+w",
+        "command": "commitCorner.openWorkingFile",
+        "when": "commitCorner.hasRepository && resourceScheme == commitcorner"
       }
     ],
     "configuration": [
@@ -5010,7 +5407,13 @@
           "commitCorner.sidebar.oneViewAtATime": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Show one Commit Corner view at a time in the sidebar (the Graph by default); switch with the icons in each view's title bar or the Actions hub (`Ctrl+Alt+G Space`). VS Code cannot collapse a view for an extension, so the others are hidden, not collapsed. Off: all six views stack."
+            "markdownDescription": "Show one Commit Corner view at a time in the sidebar (the Graph by default); switch with **☰ Graph** at the top of the Graph, the Switch View menu in each view's title bar or the Actions hub (`Ctrl+Alt+G Space`). VS Code cannot collapse a view for an extension, so the others are hidden, not collapsed. Off: all six views stack."
+          },
+          "commitCorner.markUnviewedFiles": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show files you have not viewed in **bold** (graph) or with a dot (tree views); a commit you started on counts what you have seen (\"3/12\"). Opening a file marks it viewed. Marks survive an amend or rebase that leaves a change as it was; an uncommitted file is bold again when its content changes.",
+            "order": 1
           }
         }
       },

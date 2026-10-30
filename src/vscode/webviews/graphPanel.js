@@ -3,11 +3,12 @@
 const vscode = require('vscode');
 const notify = require('../notify');
 const { GraphLayout } = require('../../git/graph');
-const { EMPTY_TREE, checkRevs } = require('../../git/repository');
+const { EMPTY_TREE, INDEX, checkRevs, safeRelPath } = require('../../git/repository');
 const { webviewHtml } = require('./html');
 const { config, debounce, showError, shortSha, log, validMessageShas, escapeIcons, isSha, closeStaleWebviewTabs } = require('../util');
 const { openDiff, openMultiDiff } = require('../diffs');
 const { showCommit, showCommits, showRange } = require('../commands/historyCommands');
+const viewed = require('../viewed');
 
 const VIEW_TYPE = 'commitCorner.graph';
 /** Commands the details pane may ask for; anything else from the webview is ignored. */
@@ -21,8 +22,8 @@ const WEBVIEW_COMMANDS = new Set([
 const REVEAL_LIMIT = 20000;
 const WORKTREE_SHA = '*';
 
-/** A repository-relative path from a page: nothing absolute, above the repository or with control characters (both separators). */
-const pagePath = (p) => typeof p === 'string' && !!p && p.length < 4096 && !p.startsWith('/') && !/^[A-Za-z]:/.test(p) && !p.split(/[\\/]/).includes('..') && !/[\u0000-\u001f]/.test(p);
+/** A repository-relative path from a page: nothing absolute, above the repository, inside .git or with control characters (both separators). */
+const pagePath = (p) => safeRelPath(p) && !/[\u0000-\u001f]/.test(p);
 
 /** A revision or full ref name git cannot read as an option (no leading "-", no spaces or control bytes). */
 const plainRev = (r) => typeof r === 'string' && !!r && !r.startsWith('-') && !/[\s\u0000-\u001f\u007f]/.test(r);
@@ -104,7 +105,18 @@ class GraphPanel {
       vscode.window.onDidChangeWindowState((s) => {
         if (this.compact && !s.focused && this.panel.visible) this.markLookedAway();
       }),
+      // Viewed marks change (a file opened here, in a tree, in a diff): bold goes, counts follow.
+      viewed.commitMarks().onDidChange((e) => this.sendViewed(e)),
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('commitCorner.markUnviewedFiles')) this.post({ type: 'viewedSetting', on: viewed.marksUnviewed() });
+        if (e.affectsConfiguration('commitCorner.sidebar.oneViewAtATime')) this.post({ type: 'oneView', on: config().get('sidebar.oneViewAtATime', true) });
+      }),
+      // A second repository opened (or closed): the toolbar's repository switch appears.
+      ctx.manager.onDidOpen(() => this.post({ type: 'repoCount', multi: ctx.manager.repositories.length > 1 })),
+      ctx.manager.onDidClose(() => this.post({ type: 'repoCount', multi: ctx.manager.repositories.length > 1 })),
     ];
+    /** sha -> files (with mark keys) of commits recently listed: their "3/12" follows mark changes. */
+    this.filesCache = new Map();
     // Other worktrees (an agent's) change without any event here: while the graph is shown,
     // look at their uncommitted work every 10 seconds (as the Worktrees view does).
     const wipTimer = setInterval(() => {
@@ -120,6 +132,7 @@ class GraphPanel {
   setRepo(repo) {
     if (!repo) return;
     this.repo = repo;
+    this.filesCache.clear();
     this.wtOpen = false; // the page asks for the uncommitted files again if it shows them
     if (this.genCts) this.genCts.cancel(); // a message being written was for the other repository
     this.selection = [];
@@ -445,6 +458,7 @@ class GraphPanel {
         type: 'data',
         repoName: repo.name,
         repoRoot: repo.root,
+        multiRepo: this.ctx.manager.repositories.length > 1,
         head: state && state.head,
         rows,
         maxWidth: layout.maxWidth,
@@ -460,7 +474,7 @@ class GraphPanel {
         keepScroll: !!opts.keepScroll,
         reveal: opts.reveal || this.pendingReveal,
         selection: this.selection,
-        settings: { compact: this.compact, surface: this.surface, dateOrder: !this.compact && config().get('graph.order', 'topological') === 'date', showAuthor: config().get('graph.showAuthor', true), showDate: config().get('graph.showDate', true), showSha: config().get('graph.showSha', true), showChanges: config().get('graph.showChanges', true), dateFormat: config().get('dateFormat', 'relative') },
+        settings: { compact: this.compact, surface: this.surface, dateOrder: !this.compact && config().get('graph.order', 'topological') === 'date', showAuthor: config().get('graph.showAuthor', true), showDate: config().get('graph.showDate', true), showSha: config().get('graph.showSha', true), showChanges: config().get('graph.showChanges', true), dateFormat: config().get('dateFormat', 'relative'), markUnviewed: viewed.marksUnviewed(), oneView: config().get('sidebar.oneViewAtATime', true) },
       });
       this.pendingReveal = undefined;
       // The sidebar's 7-day summary follows the rows, so it never delays the graph.
@@ -471,6 +485,10 @@ class GraphPanel {
       }
       // Uncommitted work in the other worktrees (an agent's), shown on their branch tips.
       this.sendWorktreeWip(token).catch((e) => log().warn(`Worktree changes: ${e.message}`));
+      // What B compares a file with, for the tooltips.
+      require('../commands/fileCommands').compareBase(repo).then((name) => {
+        if (token === this.loadToken) this.post({ type: 'compareBase', name: name || '' });
+      }, () => {});
     } catch (e) {
       if (e && e.code === 'Cancelled') return;
       if (token === this.loadToken) this.post({ type: 'error', message: e.message });
@@ -542,6 +560,22 @@ class GraphPanel {
       case 'openFile':
         await this.openFile(m);
         break;
+      case 'fileAction':
+        await this.fileAction(m.action, this.fileNode(m));
+        break;
+      case 'allViewed':
+        vscode.window.setStatusBarMessage(m.uncommitted === true ? 'All uncommitted files are viewed' : 'All files of this commit are viewed', 3000);
+        break;
+      case 'viewedCounts':
+        if (Array.isArray(m.shas)) await this.sendViewedCounts(m.shas.slice(0, 400));
+        break;
+      case 'switchRepo':
+        await this.switchRepository();
+        break;
+      case 'switchView':
+        // The sidebar's own view switcher (the title bar's shows only on hover).
+        await vscode.commands.executeCommand('commitCorner.sidebar.pickView');
+        break;
       case 'openCommit':
         if (m.sha === WORKTREE_SHA) await vscode.commands.executeCommand('workbench.view.scm');
         else {
@@ -579,6 +613,7 @@ class GraphPanel {
         try {
           const stats = await repo.commitStats(shas);
           this.post({ type: 'stats', stats: Object.fromEntries([...stats].map(([sha, st]) => [sha, [st.files, st.added, st.deleted]])) });
+          this.sendViewedCounts(shas).catch((e) => log().warn(`Graph viewed counts: ${e.message}`));
         } catch (e) {
           log().warn(`Graph stats: ${e.message}`);
           this.post({ type: 'stats', stats: {}, failed: shas });
@@ -832,17 +867,18 @@ class GraphPanel {
           return st && !st.binary ? { ...f, added: st.added, deleted: st.deleted } : f;
         };
         const scm = this.ctx.scm && this.ctx.scm.get(repo);
-        post({ scmMessage: scm ? scm.message : undefined, files: [
+        const files = [
           ...s.conflicts.map((e) => ({ status: '!', path: e.path, group: 'merge' })),
           ...s.staged.map((e) => withStats({ status: e.kind === 'renamed' ? 'R' : e.x, path: e.path, origPath: e.origPath, group: 'staged' }, stagedStats)),
           ...s.unstaged.map((e) => withStats({ status: e.y, path: e.path, group: 'unstaged' }, unstagedStats)),
           ...s.untracked.map((e) => ({ status: 'U', path: e.path, group: 'untracked' })),
-        ] });
+        ];
+        post({ scmMessage: scm ? scm.message : undefined, files: await this.withWorktreeMarks(repo, files) });
         return;
       }
       if (typeof sha !== 'string' || !/^[0-9a-f]{40,64}$/.test(sha)) return;
       const { parent, files } = await repo.getCommitFiles(sha);
-      post({ parent, files });
+      post({ parent, files: this.withMarks(sha, files) });
     } catch (e) {
       log().warn(`Graph files of ${sha}: ${e.message}`);
       post({ files: undefined, error: `Could not list the files: ${e.message}` });
@@ -957,7 +993,7 @@ class GraphPanel {
       }
       if (real.length === 1) {
         const [{ commit, parent, files }, signature] = await Promise.all([repo.getCommitFiles(real[0]), repo.getSignature(real[0]).catch(() => undefined)]);
-        post({ type: 'details', kind: 'commit', shas: real, commit, parent, files, signature, summary: changeSummary(files), me: await this.userEmail() });
+        post({ type: 'details', kind: 'commit', shas: real, commit, parent, files: this.withMarks(real[0], files), signature, summary: changeSummary(files), me: await this.userEmail() });
       } else if (real.length > 1) {
         const { commits, files, exact, failed, approximate } = await repo.getMultiCommitChanges(real, { signal: controller.signal });
         post({ type: 'details', kind: 'multi', shas: real, commits: commits.map((c) => c.commit), files, exact, failed, approximate, summary: changeSummary(files) });
@@ -981,19 +1017,19 @@ class GraphPanel {
     if (!['worktree', 'commit', 'multi'].includes(m.kind)) return;
     if (m.kind === 'multi' && !(Array.isArray(m.shas) && m.shas.length)) return;
     const keepFocus = m.keepFocus === true;
+    // The editor graph opens diffs beside itself: it stays, with its keyboard (Space, N).
+    const viewColumn = this.compact ? undefined : vscode.ViewColumn.Beside;
     if (m.kind === 'worktree') {
-      await vscode.commands.executeCommand('commitCorner.openResource', { repoRoot: repo.root, path: f.path, origPath: f.origPath, group: f.group, status: f.status, preserveFocus: keepFocus });
+      await vscode.commands.executeCommand('commitCorner.openResource', { repoRoot: repo.root, path: f.path, origPath: f.origPath, group: f.group, status: f.status, preserveFocus: keepFocus, viewColumn });
+      // Viewed as it is now: changed again, it is unviewed again.
+      const known = this.cachedFile(WORKTREE_SHA, f.path, f.group);
+      if (known.vk) viewed.commitMarks().set([known.vk], true);
       return;
     }
     if (m.kind === 'commit') {
-      await openDiff(repo, {
-        path: f.path,
-        leftRef: f.status === 'A' ? null : m.parent || EMPTY_TREE,
-        leftPath: f.origPath || f.path,
-        rightRef: f.status === 'D' ? null : m.sha,
-        title: `${f.path.split('/').pop()} (${shortSha(m.sha)})`,
-        preserveFocus: keepFocus,
-      });
+      const { openCommitFileDiff, markOpened } = require('../commands/fileCommands');
+      await openCommitFileDiff(repo, m.sha, m.parent, f, { preserveFocus: keepFocus, viewColumn });
+      await markOpened(repo, m.sha, this.cachedFile(m.sha, f.path));
       return;
     }
     if (m.kind === 'multi') {
@@ -1004,8 +1040,145 @@ class GraphPanel {
         rightRef: f.afterRef,
         rightPath: f.afterPath,
         title: `${f.path.split('/').pop()} (${m.shas.length} commits)`,
+        viewColumn,
       });
     }
+  }
+
+  /**
+   * A commit's files for the page, with their viewed-mark keys (vk) and which are not opened yet
+   * (unviewed). The blob ids the marks key on stay here (filesCache), never round-trip the page.
+   */
+  withMarks(sha, files) {
+    const on = viewed.marksUnviewed();
+    const keyed = files.map((f) => ({ ...f, vk: viewed.ChangeMarks.key(sha, f) }));
+    this.filesCache.delete(sha);
+    this.filesCache.set(sha, keyed);
+    // The 300 commits listed last (the uncommitted files stay: their marks need them).
+    if (this.filesCache.size > 300) this.filesCache.delete([...this.filesCache.keys()].find((k) => k !== WORKTREE_SHA));
+    return keyed.map(({ oldBlob, newBlob, ...f }) => ({ ...f, unviewed: on && !viewed.commitMarks().has(f.vk) ? true : undefined }));
+  }
+
+  /** File `relPath` of commit `sha` (or the uncommitted ones, by group) as last listed, else just its path. */
+  cachedFile(sha, relPath, group) {
+    const files = this.filesCache.get(sha);
+    return (files && files.find((f) => f.path === relPath && (group === undefined || f.group === group))) || { path: relPath };
+  }
+
+  /**
+   * The uncommitted files with viewed marks: each keyed on its content now (the index's blob when
+   * staged, the working file's otherwise; a deleted file on "deleted"), so a file you looked at
+   * and then changed is unviewed again. Skipped for very large change sets.
+   */
+  async withWorktreeMarks(repo, files) {
+    if (!viewed.marksUnviewed() || files.length > 2000) {
+      this.filesCache.delete(WORKTREE_SHA);
+      return files;
+    }
+    // No commit yet: the index against the empty tree.
+    const head = repo.state && repo.state.head && repo.state.head.sha ? 'HEAD' : EMPTY_TREE;
+    const staged = files.some((f) => f.group === 'staged') ? await repo.diffFiles(head, INDEX, { blobs: true }).catch(() => []) : [];
+    const index = new Map(staged.map((f) => [f.path, f.status === 'D' ? 'deleted' : f.newBlob]));
+    const work = await repo.worktreeFileIds(repo.root, files.filter((f) => f.group !== 'staged').map((f) => f.path)).catch(() => new Map());
+    const zero = '0'.repeat(40);
+    const keyed = files.map((f) => {
+      let id = f.group === 'staged' ? index.get(f.path) : work.get(f.path);
+      if (!id && (f.status === 'D' || f.status === '!')) id = zero; // nothing to hash: deleted (or a deletion conflict)
+      const vk = id === 'deleted' ? viewed.ChangeMarks.worktreeKey(f.group, f.path, zero) : viewed.ChangeMarks.worktreeKey(f.group, f.path, id);
+      return vk ? { ...f, vk } : f;
+    });
+    this.filesCache.set(WORKTREE_SHA, keyed);
+    const marks = viewed.commitMarks();
+    return keyed.map((f) => (f.vk && !marks.has(f.vk) ? { ...f, unviewed: true } : f));
+  }
+
+  /** Marks changed: which of the page's files are viewed now, and the counts of affected commits. */
+  sendViewed({ keys, sha: marked }) {
+    const marks = viewed.commitMarks();
+    const counts = {};
+    for (const [sha, files] of this.filesCache) {
+      if (sha !== marked && !files.some((f) => keys.has(f.vk))) continue;
+      const marked2 = files.filter((f) => f.vk); // what can be marked (as the page counts)
+      counts[sha] = [marked2.filter((f) => marks.has(f.vk)).length, marked2.length];
+    }
+    this.post({ type: 'viewed', viewed: [...keys].filter((k) => marks.has(k)), unviewed: [...keys].filter((k) => !marks.has(k)), counts, on: viewed.marksUnviewed() });
+  }
+
+  /** "3/12" for the rows on screen whose commits you started on (their files listed when needed). */
+  async sendViewedCounts(shas) {
+    if (!viewed.marksUnviewed()) return;
+    const repo = this.repo;
+    const marks = viewed.commitMarks();
+    const todo = shas.filter((s) => isSha(s) && s.length >= 40 && marks.touched(s)).slice(0, 50);
+    if (!todo.length) return;
+    const counts = {};
+    for (const sha of todo) {
+      let files = this.filesCache.get(sha);
+      if (!files) files = this.withMarks(sha, (await repo.getCommitFiles(sha)).files);
+      counts[sha] = [files.filter((f) => marks.has(f.vk)).length, files.length];
+    }
+    if (this.repo === repo) this.post({ type: 'viewed', viewed: [], unviewed: [], counts, on: true });
+  }
+
+  /**
+   * A file row of the page (a message or a context menu's data) as the node the file commands
+   * take: checked like everything from the page. sha: its commit ('*' or none: uncommitted).
+   */
+  fileNode(m) {
+    const f = m && (m.file || m);
+    if (!f || typeof f !== 'object' || !pagePath(f.path)) return undefined;
+    if (f.origPath !== undefined && f.origPath !== null && !pagePath(f.origPath)) return undefined;
+    if (f.status !== undefined && !(typeof f.status === 'string' && /^[ACDMRTUX!?]$/.test(f.status))) return undefined;
+    const sha = isSha(m.sha) && m.sha.length >= 40 ? m.sha : undefined;
+    const node = { repoRoot: this.repo.root, path: f.path, origPath: f.origPath || undefined, status: f.status };
+    if (['merge', 'staged', 'unstaged', 'untracked'].includes(f.group)) node.group = f.group;
+    if (sha) {
+      const known = this.cachedFile(sha, f.path);
+      Object.assign(node, { sha, commitViewed: sha, oldBlob: known.oldBlob, newBlob: known.newBlob });
+      if (isSha(m.parent)) node.parent = m.parent;
+    }
+    return node;
+  }
+
+  /** What a file row's buttons, keys and context menu do. */
+  async fileAction(action, node) {
+    if (!node) return;
+    // The editor graph: what opens goes beside it (the graph and its keyboard stay).
+    if (!this.compact) node.viewColumn = vscode.ViewColumn.Beside;
+    const run = (id, arg = node) => vscode.commands.executeCommand(id, arg);
+    switch (action) {
+      case 'openChanges':
+        // As a click does (beside the editor graph, and marked viewed).
+        if (node.sha) await this.openFile({ kind: 'commit', sha: node.sha, parent: node.parent, file: node });
+        else await this.openFile({ kind: 'worktree', file: node });
+        break;
+      case 'openWorking': await run('commitCorner.openWorkingFile'); break;
+      case 'atRevision': if (node.sha) await run('commitCorner.openFileAtCommit'); break;
+      case 'compareWorking': if (node.sha) await run('commitCorner.compareFileWithWorkingTree'); break;
+      case 'compareBase': await run('commitCorner.compareFileWithBase'); break;
+      case 'compareRef': await run('commitCorner.compareFileWithRefPick'); break;
+      case 'markViewed':
+      case 'markUnviewed':
+        if (!node.sha) {
+          const known = this.cachedFile(WORKTREE_SHA, node.path, node.group);
+          if (known.vk) viewed.commitMarks().set([known.vk], action === 'markViewed');
+          break;
+        }
+        await require('../commands/fileCommands').markOpened(this.repo, node.sha, node, action === 'markViewed');
+        break;
+      case 'nextUnviewed': this.post({ type: 'nextUnviewed', sha: node.sha || WORKTREE_SHA, path: node.path, group: node.group }); break;
+      case 'copyPath': await run('commitCorner.copyFilePath'); break;
+      case 'reveal': await run('commitCorner.revealFileInExplorer'); break;
+      default: break;
+    }
+  }
+
+  /** The repository this graph shows, picked from the open ones (most recently used first). */
+  async switchRepository() {
+    const repo = await require('../pickers').pickRepository(this.ctx.manager, this.repo);
+    if (!repo || repo === this.repo) return;
+    this.ctx.manager.setActive(repo);
+    if (!this.compact) this.setRepo(repo); // the sidebar follows the active repository by itself
   }
 
   /** Normalize the argument of a webview context menu command into a node. */
@@ -1188,6 +1361,20 @@ function register(ctx) {
   delegate('commitCorner.graph.reword', 'commitCorner.rewordCommit');
   delegate('commitCorner.graph.drop', 'commitCorner.dropCommit');
 
+  // A file line's context menu (its data names the file and its commit; checked by fileNode).
+  for (const action of ['openChanges', 'openWorking', 'atRevision', 'compareWorking', 'compareBase', 'compareRef', 'markViewed', 'markUnviewed', 'nextUnviewed', 'copyPath', 'reveal']) {
+    cmd(`commitCorner.graph.file.${action}`, async (arg) => {
+      const panel = GraphPanel.forContext(arg);
+      if (panel) await panel.fileAction(action, panel.fileNode(arg));
+    });
+  }
+  delegate('commitCorner.graph.markViewed', 'commitCorner.markCommitViewed');
+  delegate('commitCorner.graph.markUnviewed', 'commitCorner.markCommitUnviewed');
+  cmd('commitCorner.graph.switchRepository', async (arg) => {
+    const panel = GraphPanel.forContext(arg);
+    if (panel) await panel.switchRepository();
+  });
+
   cmd('commitCorner.graph.openSelection', async (node) => {
     const panel = GraphPanel.forContext(node);
     if (!panel || !node) return;
@@ -1259,6 +1446,7 @@ function register(ctx) {
     await g.load();
   }));
   cmd('commitCorner.graphView.sinceLastLook', sidebarDo((g) => g.showChangesSinceSeen()));
+  cmd('commitCorner.graphView.collapseAll', sidebarDo((g) => g.post({ type: 'collapseAll' })));
   cmd('commitCorner.graphView.search', sidebarDo((g) => {
     g.panel.reveal();
     g.post({ type: 'focusSearch' });

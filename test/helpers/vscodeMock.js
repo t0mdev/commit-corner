@@ -255,6 +255,8 @@ function createVscode() {
   const lmModels = [];
   const executed = [];
   const configValues = new Map();
+  /** File decoration providers registered (to ask them what they show). */
+  const decorationProviders = [];
   const workspaceConfigValues = new Map();
   const ui = {
     /** Queued answers consumed by showQuickPick/showInputBox/show*Message, in order. */
@@ -374,7 +376,10 @@ function createVscode() {
         return new Disposable();
       },
       registerCustomEditorProvider: () => new Disposable(),
-      registerFileDecorationProvider: () => new Disposable(),
+      registerFileDecorationProvider: (p) => {
+        decorationProviders.push(p);
+        return new Disposable();
+      },
       async showQuickPick(items, opts) {
         const list = await items;
         const a = answer('quickPick', undefined);
@@ -408,6 +413,10 @@ function createVscode() {
               accept.fire();
               return undefined;
             }, 0);
+          },
+          /** As if the user pressed Enter. */
+          accept() {
+            accept.fire();
           },
           dispose() {},
         };
@@ -520,6 +529,7 @@ function createVscode() {
     sourceControls,
     statusItems,
     configValues,
+    decorationProviders,
     workspaceConfigValues,
     workspaceFolders,
     lmModels,

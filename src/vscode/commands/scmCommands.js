@@ -5,7 +5,7 @@ const notify = require('../notify');
 const fs = require('fs');
 const { INDEX, WORKTREE, Repository } = require('../../git/repository');
 const { ErrorCodes, GitError } = require('../../git/exec');
-const { openDiff, openAtRevision } = require('../diffs');
+const { openDiff, openAtRevision, uriAt } = require('../diffs');
 const { toGitUri, SCHEME, fromGitUri } = require('../uri');
 const { config, confirm, withProgress, log, escapeIcons } = require('../util');
 const { pendingRewrite } = require('../rewrites');
@@ -103,13 +103,14 @@ function register(ctx) {
     const repo = manager.getRepository(r.repoRoot);
     if (!repo) return;
     const { group, status } = r;
-    if (group === 'merge') {
-      if (config().get('openConflictsIn', 'file') === 'mergeEditor') await openMergeEditor(repo, r.path);
-      else await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(repo.absolute(r.path)), { preserveFocus: !!r.preserveFocus });
-      return;
-    }
-    if (group === 'untracked') {
-      await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(repo.absolute(r.path)), { preserveFocus: !!r.preserveFocus });
+    const opts = { preserveFocus: !!r.preserveFocus, ...(r.viewColumn ? { viewColumn: r.viewColumn } : {}) };
+    if (group === 'merge' || group === 'untracked') {
+      // The file itself: only one of this working tree (never behind a symlinked folder); a
+      // symlink or device as git sees it.
+      const w = repo.workingFile(r.path);
+      if (!w) return;
+      if (group === 'merge' && config().get('openConflictsIn', 'file') === 'mergeEditor' && (!w.st || w.st.isFile())) await openMergeEditor(repo, r.path);
+      else await vscode.commands.executeCommand('vscode.open', w.st && !w.st.isFile() ? uriAt(repo, WORKTREE, r.path) : vscode.Uri.file(w.abs), opts);
       return;
     }
     if (group === 'staged') {
@@ -120,6 +121,7 @@ function register(ctx) {
         rightRef: status === 'D' ? null : INDEX,
         title: `${base(r.path)} (Staged)`,
         preserveFocus: !!r.preserveFocus,
+        viewColumn: r.viewColumn,
       });
       return;
     }
@@ -129,6 +131,7 @@ function register(ctx) {
       rightRef: status === 'D' ? null : WORKTREE,
       title: `${base(r.path)} (Working Tree)`,
       preserveFocus: !!r.preserveFocus,
+      viewColumn: r.viewColumn,
     });
   });
 
@@ -158,7 +161,7 @@ function register(ctx) {
     for (const [repo, list] of byRepo(resources)) {
       const skip = new Set();
       for (const r of list.filter((x) => statusOf(repo, x.path).conflict)) {
-        if (await hasConflictMarkers(repo.absolute(r.path))) {
+        if (await hasConflictMarkers(repo, r.path)) {
           const ok = await confirm(`"${r.path}" still contains conflict markers. Stage it anyway?`, 'Stage');
           if (!ok) skip.add(r.path); // the other files are still staged
         }
@@ -573,26 +576,37 @@ async function acceptSide(manager, args, side) {
 }
 
 async function openMergeEditor(repo, relPath) {
+  // Its result is written to the working file: only a regular file of this repository (a
+  // conflicted symlink could point anywhere), else the file as git sees it.
+  const w = repo.workingFile(relPath);
+  if (!w) return;
+  if (w.st && !w.st.isFile()) {
+    await vscode.commands.executeCommand('vscode.open', uriAt(repo, WORKTREE, relPath));
+    return;
+  }
   const input = (ref, title) => ({ uri: toGitUri(repo.root, relPath, ref), title });
   try {
     await vscode.commands.executeCommand('_open.mergeEditor', {
       base: toGitUri(repo.root, relPath, ':1'),
       input1: input(':2', 'Current (ours)'),
       input2: input(':3', 'Incoming (theirs)'),
-      output: vscode.Uri.file(repo.absolute(relPath)),
+      output: vscode.Uri.file(w.abs),
     });
   } catch (e) {
     // `_open.mergeEditor` is internal to VS Code and may change: say so instead of silently
     // falling back to the file with its conflict markers.
     log().warn(`Merge editor unavailable (${e && e.message}); opening ${relPath} with its conflict markers instead`);
     vscode.window.setStatusBarMessage('Commit Corner: the 3-way merge editor could not be opened; showing the conflict markers (see the log)', 6000);
-    await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(repo.absolute(relPath)));
+    await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(w.abs));
   }
 }
 
-async function hasConflictMarkers(file) {
+/** Whether a conflicted file still has markers: a regular file of this repository only, up to 50 MB. */
+async function hasConflictMarkers(repo, relPath) {
+  const w = repo.workingFile(relPath);
+  if (!w || !w.st || !w.st.isFile() || w.st.size > 50 * 1024 * 1024) return false;
   try {
-    const text = await fs.promises.readFile(file, 'utf8');
+    const text = String(await repo.show(WORKTREE, relPath) || '');
     return /^<{7}( |$)|^>{7}( |$)/m.test(text);
   } catch {
     return false;
@@ -641,4 +655,4 @@ function dirOf(p) {
   return i > 0 ? p.slice(0, i) : '';
 }
 
-module.exports = { register, resolveResources, openMergeEditor };
+module.exports = { register, resolveResources, openMergeEditor, hasConflictMarkers };

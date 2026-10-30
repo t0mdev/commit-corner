@@ -16,6 +16,8 @@ const { mapRangesToFrom, eolOf, withEol, DiffTooLargeError } = require('../../gi
  * history, comparing a file with other revisions, GitHub links, reflog.
  */
 
+const isFullSha = (s) => typeof s === 'string' && /^[0-9a-f]{40,64}$/.test(s);
+
 /** Resolve (repo, relative path) from a URI argument or the active editor. */
 function fileTarget(manager, uri) {
   if (!(uri instanceof vscode.Uri)) {
@@ -172,19 +174,15 @@ function register(ctx) {
       rightRef: node.status === 'D' ? null : node.rightRef || node.sha,
       title: node.title,
       preserveFocus: !!node.preserveFocus,
+      commit: isFullSha(node.viewedSha) ? node.viewedSha : undefined,
     });
+    // A file of one commit: opened, it is no longer bold (here and in the graph).
+    if (isFullSha(node.viewedSha)) await require('./fileCommands').markOpened(repo, node.viewedSha, { path: node.path, oldBlob: node.oldBlob, newBlob: node.newBlob });
   });
 
   cmd('commitCorner.openFileAtCommit', async (node) => {
     const repo = manager.getRepository(node.repoRoot);
     if (repo) await openAtRevision(repo, node.status === 'D' ? `${node.sha}^` : node.sha, node.status === 'D' ? node.origPath || node.path : node.path, { preview: false });
-  });
-
-  cmd('commitCorner.compareFileWithWorkingTree', async (node) => {
-    const repo = manager.getRepository(node.repoRoot);
-    if (!repo) return;
-    const current = node.currentPath || node.path;
-    await openDiff(repo, { path: current, leftRef: node.sha, leftPath: node.path, rightRef: WORKTREE, rightPath: current });
   });
 
   cmd('commitCorner.restoreFileFromCommit', async (node) => {

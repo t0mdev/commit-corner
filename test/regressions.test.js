@@ -1384,7 +1384,8 @@ test('a committed symlink to another repository never makes git run there', { sk
   r.git('commit', '-q', '-m', 'link');
   const { WORKTREE } = require('../src/git/repository');
   assert.equal(await repo.isOwnSubmodule(path.join(r.dir, 'lnk')), false);
-  assert.equal(await repo.show(WORKTREE, 'lnk'), null);
+  // Shown as git stores it (the link's text), never followed.
+  assert.equal(String(await repo.show(WORKTREE, 'lnk')), elsewhere.dir);
   // An embedded repository that is not a recorded submodule is not run git in either.
   const embedded = createRepo();
   t.after(() => embedded.cleanup());
@@ -1411,7 +1412,7 @@ test('a real submodule is still recognised (and diffed as "Subproject commit")',
 test('graph pages cannot name revisions, paths or clipboard text freely', async () => {
   const { GraphPanel } = requireWithVscode('../src/vscode/webviews/graphPanel');
   const calls = [];
-  const fake = { repo: { root: '/repo', absolute: (p) => `/repo/${p}` } };
+  const fake = { repo: { root: '/repo', absolute: (p) => `/repo/${p}` }, cachedFile: (sha, p) => ({ path: p }) };
   const vscode = requireWithVscode('vscode');
   const saved = vscode.commands.executeCommand;
   vscode.commands.executeCommand = async (...a) => calls.push(a);

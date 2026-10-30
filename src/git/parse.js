@@ -250,6 +250,31 @@ function parseNameStatus(text) {
 }
 
 /**
+ * Parse `diff --raw -z --no-abbrev` like parseNameStatus, plus each side's blob id (all zeros
+ * where a side is missing): what a change is, whatever commit it is in (viewed marks).
+ */
+function parseRaw(text) {
+  const parts = text.split('\0');
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    const m = /^:\d+ \d+ ([0-9a-f]+) ([0-9a-f]+) ([ACDMRTUXB])(\d*)$/.exec(parts[i]);
+    if (!m) continue;
+    const [, oldBlob, newBlob, status, score] = m;
+    if (status === 'R' || status === 'C') {
+      const origPath = parts[++i];
+      const path = parts[++i];
+      if (!path || !origPath) break; // cut off
+      out.push({ status, origPath, path, score: Number(score) || undefined, oldBlob, newBlob });
+    } else {
+      const path = parts[++i];
+      if (!path) break; // cut off
+      out.push({ status, path, oldBlob, newBlob });
+    }
+  }
+  return out;
+}
+
+/**
  * Parse `diff --raw -z --no-abbrev`: the new blob id of every changed file, by (new) path;
  * deleted files have none. Content fingerprints, e.g. for "viewed" marks.
  * @returns {Map<string, string>}
@@ -576,6 +601,7 @@ module.exports = {
   refFromFullName,
   parseStatus,
   parseNameStatus,
+  parseRaw,
   parseRawBlobs,
   parseNumstat,
   parseRefs,

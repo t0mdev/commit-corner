@@ -811,3 +811,631 @@ test('one file larger than the budget is cut, not left out', () => {
     assert.equal(fitted.cut, 1);
   }
 });
+
+// ------------------------------------------------------------------ viewed marks of commit files
+
+test('diff --raw is read like --name-status, with both blob ids', () => {
+  const z = (...p) => `${p.join('\0')}\0`;
+  const a = '1'.repeat(40);
+  const b = '2'.repeat(40);
+  const zero = '0'.repeat(40);
+  const out = P.parseRaw(z(`:100644 100644 ${a} ${b} M`, 'src/a.js', `:000000 100644 ${zero} ${b} A`, 'new file.txt', `:100644 000000 ${a} ${zero} D`, 'gone.md', `:100644 100644 ${a} ${b} R087`, 'old/name.js', 'new/name.js'));
+  assert.deepEqual(out, [
+    { status: 'M', path: 'src/a.js', oldBlob: a, newBlob: b },
+    { status: 'A', path: 'new file.txt', oldBlob: zero, newBlob: b },
+    { status: 'D', path: 'gone.md', oldBlob: a, newBlob: zero },
+    { status: 'R', origPath: 'old/name.js', path: 'new/name.js', score: 87, oldBlob: a, newBlob: b },
+  ]);
+});
+
+test('a viewed file of a commit stays viewed when the commit is amended without touching it', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'a.txt': '1\n', 'b.txt': '1\n' });
+  const first = r.commit('agent work', { 'a.txt': '2\n', 'b.txt': '2\n' });
+  const viewed = require('../src/vscode/viewed');
+  const m = memento();
+  viewed.init(m);
+  t.after(() => viewed.commitMarks().dispose());
+  const files1 = (await repo.getCommitFiles(first)).files;
+  assert.ok(files1.every((f) => /^[0-9a-f]{40}$/.test(f.oldBlob) && /^[0-9a-f]{40}$/.test(f.newBlob)), 'blob ids come with the files');
+  const changed = [];
+  const sub = viewed.commitMarks().onDidChange((e) => changed.push([...e.keys]));
+  viewed.markCommitFiles(first, [files1.find((f) => f.path === 'a.txt')]);
+  sub.dispose();
+  assert.equal(changed.length, 1, 'one change event');
+  assert.equal(viewed.commitFileUnviewed(first, files1.find((f) => f.path === 'a.txt')), false);
+  assert.equal(viewed.commitFileUnviewed(first, files1.find((f) => f.path === 'b.txt')), true);
+  assert.ok(viewed.commitMarks().touched(first));
+  // The agent amends: b.txt changes again, a.txt's change is the same.
+  r.write('b.txt', '3\n');
+  r.git('commit', '-q', '-a', '--amend', '-m', 'agent work');
+  const second = r.git('rev-parse', 'HEAD');
+  assert.notEqual(second, first);
+  const files2 = (await repo.getCommitFiles(second)).files;
+  assert.equal(viewed.commitFileViewed(second, files2.find((f) => f.path === 'a.txt')), true, 'same change: still viewed');
+  assert.equal(viewed.commitFileViewed(second, files2.find((f) => f.path === 'b.txt')), false, 'changed again: not viewed');
+  assert.deepEqual(viewed.commitCount(second, files2), { viewed: 1, total: 2 });
+  // Written to workspace state shortly after (or when the extension stops).
+  viewed.commitMarks().dispose();
+  const saved = m.data.get('viewedChanges');
+  assert.equal(saved.keys.length, 1);
+  assert.deepEqual(saved.commits, [first]);
+  const again = new viewed.ChangeMarks(m);
+  assert.ok(again.has(viewed.ChangeMarks.key(second, files2.find((f) => f.path === 'a.txt'))), 'remembered across a restart');
+  again.dispose();
+});
+
+test('the setting off: no file is bold', (t) => {
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  t.after(() => viewed.commitMarks().dispose());
+  mock.configValues.set('markUnviewedFiles', false);
+  try {
+    assert.equal(viewed.commitFileUnviewed('a'.repeat(40), { path: 'x' }), false);
+  } finally {
+    mock.configValues.delete('markUnviewedFiles');
+  }
+  assert.equal(viewed.commitFileUnviewed('a'.repeat(40), { path: 'x' }), true);
+});
+
+test('Next Unviewed File goes through a commit\'s files in the order the graph shows them', () => {
+  const { treeOrder } = require('../src/vscode/commands/fileCommands');
+  const files = ['README.md', 'src/z.js', 'src/a/b.js', 'a.txt', 'src/a.js', 'docs/x.md'].map((p) => ({ path: p }));
+  assert.deepEqual(treeOrder(files).map((f) => f.path), ['docs/x.md', 'src/a/b.js', 'src/a.js', 'src/z.js', 'a.txt', 'README.md']);
+});
+
+test('file rows from the graph page are checked before they become command arguments', () => {
+  const { GraphPanel } = require('../src/vscode/webviews/graphPanel');
+  const fake = { repo: { root: '/repo' } };
+  const node = (m) => GraphPanel.prototype.fileNode.call(fake, m);
+  const sha = 'a'.repeat(40);
+  assert.equal(node({ sha, file: { path: '../etc/passwd' } }), undefined);
+  assert.equal(node({ sha, file: { path: '/etc/passwd' } }), undefined);
+  assert.equal(node({ sha, file: { path: 'a.txt', origPath: 'x/../../y' } }), undefined);
+  assert.equal(node({ sha, file: { path: 'a.txt', status: '$(rm)' } }), undefined);
+  // Blob ids come from the host's own list of the commit's files, never from the page.
+  fake.cachedFile = (s, p) => (p === 'src/a.txt' ? { path: p, oldBlob: 'd'.repeat(40), newBlob: 'c'.repeat(40) } : { path: p });
+  const ok = node({ sha, parent: 'b'.repeat(40), file: { path: 'src/a.txt', status: 'M', oldBlob: '--output=x', newBlob: 'e'.repeat(40) } });
+  assert.equal(ok.repoRoot, '/repo', 'the repository is the panel\'s, never the page\'s');
+  assert.equal(ok.path, 'src/a.txt');
+  assert.equal(ok.sha, sha);
+  assert.equal(ok.oldBlob, 'd'.repeat(40));
+  assert.equal(ok.newBlob, 'c'.repeat(40));
+  // The uncommitted changes: no commit, so no revision and no blob ids.
+  const wt = node({ sha: '*', file: { path: 'b.txt', status: 'U', group: 'untracked' } });
+  assert.equal(wt.sha, undefined);
+  assert.equal(wt.oldBlob, undefined);
+  assert.equal(wt.group, 'untracked');
+  assert.equal(node({ sha: '*', file: { path: 'b.txt', group: 'evil' } }).group, undefined);
+});
+
+test('Open Working File lands on the same line through later edits, also with CRLF working files', async (t) => {
+  const { r, repo } = await setup(t);
+  const lines = (n) => Array.from({ length: n }, (_, k) => `line ${k + 1}`);
+  const sha = r.commit('base', { 'f.txt': `${lines(10).join('\n')}\n` });
+  const { mapToWorkingLine } = require('../src/vscode/commands/fileCommands');
+  // Three lines added above line 5 (0-based 4) since that commit.
+  const now = ['new a', 'new b', 'new c', ...lines(10)];
+  r.write('f.txt', `${now.join('\n')}\n`);
+  assert.equal(await mapToWorkingLine(repo, sha, 'f.txt', 'f.txt', 4), 7);
+  r.write('f.txt', `${now.join('\r\n')}\r\n`); // core.autocrlf on Windows
+  assert.equal(await mapToWorkingLine(repo, sha, 'f.txt', 'f.txt', 4), 7, 'line endings are not changes');
+});
+
+test('working files outside the repository, or behind a symlink to a device, are never read', { skip: process.platform === 'win32' }, async (t) => {
+  const { r, repo } = await setup(t);
+  const sha = r.commit('base', { 'f.txt': 'x\n' });
+  assert.equal(repo.workingFile('../outside.txt'), undefined, '".." (git lists tree entries named so)');
+  assert.equal(repo.workingFile('/etc/passwd'), undefined);
+  assert.ok(repo.workingFile('f.txt').st.isFile());
+  assert.equal(repo.workingFile('gone.txt').st, null);
+  fs.symlinkSync('/dev/zero', path.join(r.dir, 'zero'));
+  const { mapToWorkingLine, workingPathOf } = require('../src/vscode/commands/fileCommands');
+  // Would read forever if it followed the link: the line stays as it is.
+  assert.equal(await mapToWorkingLine(repo, sha, 'f.txt', 'zero', 3), 3);
+  assert.equal(await workingPathOf(repo, sha, '../outside.txt'), undefined);
+  const { WORKTREE } = require('../src/git/repository');
+  assert.equal(String(await repo.show(WORKTREE, 'zero')), '/dev/zero', 'a symlink is its target\'s name, as git stores it');
+});
+
+test('the working path follows a rename since the revision', async (t) => {
+  const { r, repo } = await setup(t);
+  const old = r.commit('first', { 'lib/util.js': 'one\ntwo\nthree\n' });
+  r.commit('move', { 'lib/util.js': null, 'src/helpers.js': 'one\ntwo\nthree\n' });
+  assert.equal(await repo.currentPathOf(old, 'lib/util.js'), 'src/helpers.js');
+  assert.equal(await repo.currentPathOf(old, 'nope.js'), undefined);
+  const { workingPathOf } = require('../src/vscode/commands/fileCommands');
+  const w = await workingPathOf(repo, old, 'lib/util.js');
+  assert.equal(w.rel, 'src/helpers.js');
+  assert.equal(w.renamed, true);
+  assert.equal(await workingPathOf(repo, old, 'nope.js'), undefined);
+});
+
+test('viewed marks: the least recently marked go first, opening again keeps one, a huge commit cannot push out the rest', (t) => {
+  const { ChangeMarks, markCommitFiles, commitMarks, init } = require('../src/vscode/viewed');
+  init(memento());
+  t.after(() => commitMarks().dispose());
+  const m = commitMarks();
+  const sha = (k) => String(k).repeat(40).slice(0, 40);
+  const files = (k) => Array.from({ length: 1000 }, (_, n) => ({ path: `c${k}/f${n}` }));
+  // A commit of 5000 files marks 1000 (a tenth of what is remembered).
+  markCommitFiles(sha('a'), Array.from({ length: 5000 }, (_, n) => ({ path: `huge${n}` })));
+  assert.equal(m.keys.size, 1000);
+  for (let k = 1; k <= 9; k++) markCommitFiles(sha(k), files(k)); // full: 10000
+  assert.equal(m.keys.size, 10000);
+  const oldest = ChangeMarks.key(sha('a'), { path: 'huge1' });
+  const reopened = ChangeMarks.key(sha('a'), { path: 'huge0' });
+  markCommitFiles(sha('a'), [{ path: 'huge0' }]); // opened again: newest now
+  markCommitFiles(sha('b'), [{ path: 'one more' }]);
+  assert.equal(m.keys.size, 10000);
+  assert.equal(m.has(oldest), false, 'the least recently marked is forgotten');
+  assert.equal(m.has(reopened), true, 'the one opened again is kept');
+  // An uncommitted file's mark follows its content.
+  assert.notEqual(ChangeMarks.worktreeKey('unstaged', 'a.txt', '1'.repeat(40)), ChangeMarks.worktreeKey('unstaged', 'a.txt', '2'.repeat(40)));
+  assert.notEqual(ChangeMarks.worktreeKey('staged', 'a.txt', '1'.repeat(40)), ChangeMarks.worktreeKey('unstaged', 'a.txt', '1'.repeat(40)));
+  assert.equal(ChangeMarks.worktreeKey('unstaged', 'a.txt', undefined), undefined);
+});
+
+test('diff --raw: a header without its path, or other lines, are skipped', () => {
+  const a = '1'.repeat(40);
+  assert.deepEqual(P.parseRaw(`garbage\0:100644 100644 ${a} ${a} M\0`), []);
+  assert.deepEqual(P.parseRaw(`warning: x\0:100644 100644 ${a} ${a} M\0ok.txt\0`), [{ status: 'M', path: 'ok.txt', oldBlob: a, newBlob: a }]);
+});
+
+test('Switch Repository lists the current one first and preselects the one used before it', async (t) => {
+  const { pickRepository } = require('../src/vscode/pickers');
+  const mk = (name) => ({ name, root: `/r/${name}`, state: { head: { branch: 'main', ahead: 1, behind: 0 }, staged: [], unstaged: [{}], untracked: [], conflicts: [] } });
+  const [a, b, c] = [mk('a'), mk('b'), mk('c')];
+  const manager = { repositories: [a, b, c], recentRoots: () => ['/r/c', '/r/b', '/r/a'] };
+  let seen;
+  const saved = mock.vscode.window.createQuickPick;
+  mock.vscode.window.createQuickPick = () => {
+    const qp = saved();
+    qp.show = () => {
+      seen = { labels: qp.items.map((i) => i.label), active: qp.activeItems[0].label, description: qp.items[0].description };
+      qp.selectedItems = [];
+      qp.activeItems = [qp.activeItems[0]];
+      setTimeout(() => qp.accept(), 0);
+    };
+    return qp;
+  };
+  t.after(() => (mock.vscode.window.createQuickPick = saved));
+  const picked = await pickRepository(manager, a);
+  assert.deepEqual(seen.labels, ['$(check) a', '$(repo) c', '$(repo) b']);
+  assert.equal(seen.active, '$(repo) c', 'Enter goes back to the last one');
+  assert.match(seen.description, /main.*\$\(diff\) 1.*\$\(arrow-up\) 1/);
+  assert.equal(picked, c);
+});
+
+test('a diff\'s working side never reaches behind a symlinked folder, and a link shows as its text', { skip: process.platform === 'win32' }, async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'f.txt': 'x\n' });
+  const outside = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cc-outside-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(outside, 'secret'), 'SECRET\n');
+  fs.symlinkSync(outside, path.join(r.dir, 'd'));
+  fs.symlinkSync('/dev/zero', path.join(r.dir, 'zl'));
+  const { uriAt } = require('../src/vscode/diffs');
+  const { WORKTREE } = require('../src/git/repository');
+  assert.notEqual(uriAt(repo, WORKTREE, 'd/secret').scheme, 'file', 'not the file behind the link');
+  assert.equal(await repo.show(WORKTREE, 'd/secret'), null);
+  assert.equal(uriAt(repo, WORKTREE, 'zl').scheme, 'commitcorner', 'the link, as git sees it');
+  assert.equal(uriAt(repo, WORKTREE, 'f.txt').scheme, 'file');
+  const ids = await repo.worktreeFileIds(repo.root, ['d/secret', 'zl', 'f.txt', '../x']);
+  assert.deepEqual([...ids.keys()], ['f.txt'], 'only this repository\'s regular files are fingerprinted');
+});
+
+test('only files a commit really has can be marked viewed', async (t) => {
+  const { r, repo } = await setup(t);
+  const sha = r.commit('base', { 'f.txt': 'x\n' });
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  t.after(() => viewed.commitMarks().dispose());
+  const { markOpened } = require('../src/vscode/commands/fileCommands');
+  await markOpened(repo, sha, { path: 'made-up.txt' });
+  assert.equal(viewed.commitMarks().keys.size, 0);
+  await markOpened(repo, sha, { path: 'f.txt' });
+  assert.equal(viewed.commitMarks().keys.size, 1);
+});
+
+// ------------------------------------------------------------------ file rows: base, next, compare
+
+test('Compare with Base: the branch last picked while it exists, else the default branch; nothing option-like', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'f.txt': '1\n' });
+  r.git('branch', 'feature');
+  const { compareBase, rememberBase } = require('../src/vscode/commands/fileCommands');
+  const m = memento();
+  assert.equal(await compareBase(repo, m), 'main', 'no remote: the local main');
+  await rememberBase(repo, 'feature', m);
+  assert.equal(await compareBase(repo, m), 'feature');
+  r.git('branch', '-D', 'feature');
+  assert.equal(await compareBase(repo, m), 'main', 'gone: the default again');
+  await m.update('compareBase', { [repo.root]: '--output=/tmp/x' });
+  assert.equal(await compareBase(repo, m), 'main');
+  // At most 50 repositories are remembered.
+  for (let k = 0; k < 55; k++) await rememberBase({ root: `/r${k}` }, 'main', m);
+  assert.equal(Object.keys(m.data.get('compareBase')).length, 50);
+});
+
+test('Next Unviewed File goes round to the start, finds a renamed file by its old name, and ends when all are viewed', (t) => {
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  t.after(() => viewed.commitMarks().dispose());
+  const { nextUnviewedOf } = require('../src/vscode/commands/fileCommands');
+  const sha = 'a'.repeat(40);
+  const files = [{ path: 'b.txt' }, { path: 'src/new.js', origPath: 'lib/old.js', status: 'R' }, { path: 'a.txt' }];
+  // Order: src/new.js, a.txt, b.txt.
+  assert.equal(nextUnviewedOf(sha, files, 'a.txt').path, 'b.txt');
+  assert.equal(nextUnviewedOf(sha, files, 'b.txt').path, 'src/new.js', 'round to the start');
+  assert.equal(nextUnviewedOf(sha, files, 'lib/old.js').path, 'a.txt', 'the diff of a rename shows the old name on one side');
+  assert.equal(nextUnviewedOf(sha, files, 'not/listed').path, 'src/new.js');
+  viewed.markCommitFiles(sha, [files[2], files[0]]);
+  assert.equal(nextUnviewedOf(sha, files, 'src/new.js'), undefined, 'the one shown is not next');
+  viewed.markCommitFiles(sha, [files[1]]);
+  assert.equal(nextUnviewedOf(sha, files, 'a.txt'), undefined);
+});
+
+test('uncommitted files: marks follow their content (staged: the index, else the working file), also before the first commit', async (t) => {
+  const { r, repo } = await setup(t);
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  t.after(() => viewed.commitMarks().dispose());
+  const { GraphPanel } = require('../src/vscode/webviews/graphPanel');
+  const panel = { filesCache: new Map() };
+  const marks = (files) => GraphPanel.prototype.withWorktreeMarks.call(panel, repo, files);
+  // No commit yet: a staged file still gets its mark.
+  r.write('s.txt', 'staged\n');
+  r.git('add', 's.txt');
+  await repo.refreshState();
+  let [s] = await marks([{ status: 'A', path: 's.txt', group: 'staged' }]);
+  assert.ok(s.vk && s.unviewed, 'unborn HEAD: marked by its index blob');
+  r.commit('base', { 'a.txt': '1\n', 'gone.txt': 'x\n' });
+  await repo.refreshState();
+  r.write('a.txt', '2\n');
+  r.write('s2.txt', 'two\n');
+  r.git('add', 's2.txt');
+  r.rm('gone.txt');
+  const list = () => [
+    { status: 'A', path: 's2.txt', group: 'staged' },
+    { status: 'M', path: 'a.txt', group: 'unstaged' },
+    { status: 'D', path: 'gone.txt', group: 'unstaged' },
+  ];
+  const first = await marks(list());
+  assert.ok(first.every((f) => f.vk && f.unviewed), 'every file has a mark, none viewed');
+  assert.equal(first.some((f) => f.oldBlob || f.newBlob), false, 'no blob ids go to the page');
+  viewed.commitMarks().set(first.map((f) => f.vk), true);
+  assert.ok((await marks(list())).every((f) => !f.unviewed), 'viewed as they are');
+  // The working file changes: only it is unviewed again (the staged copy is the index's).
+  r.write('a.txt', '3, longer now\n'); // another size too: a coarse mtime cannot hide it
+  r.write('s2.txt', 'two, edited after staging\n');
+  const after = await marks(list());
+  assert.deepEqual(after.filter((f) => f.unviewed).map((f) => f.path), ['a.txt']);
+  // Off: no marks at all.
+  mock.configValues.set('markUnviewedFiles', false);
+  try {
+    assert.ok((await marks(list())).every((f) => !f.vk));
+  } finally {
+    mock.configValues.delete('markUnviewedFiles');
+  }
+});
+
+test('the graph is told which files became viewed and the counts of the commits it lists', (t) => {
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  t.after(() => viewed.commitMarks().dispose());
+  const { GraphPanel } = require('../src/vscode/webviews/graphPanel');
+  const posted = [];
+  const sha = 'a'.repeat(40);
+  const other = 'b'.repeat(40);
+  const panel = { filesCache: new Map(), post: (m) => posted.push(m) };
+  const page = GraphPanel.prototype.withMarks.call(panel, sha, [{ path: 'x', oldBlob: '1'.repeat(40), newBlob: '2'.repeat(40) }, { path: 'y', oldBlob: '1'.repeat(40), newBlob: '3'.repeat(40) }]);
+  GraphPanel.prototype.withMarks.call(panel, other, [{ path: 'z', oldBlob: '4'.repeat(40), newBlob: '5'.repeat(40) }]);
+  panel.filesCache.set('*', [{ path: 'u', vk: 'k1' }, { path: 'dir/' }]); // a folder: no mark
+  const sub = viewed.commitMarks().onDidChange((e) => GraphPanel.prototype.sendViewed.call(panel, e));
+  t.after(() => sub.dispose());
+  viewed.markCommitFiles(sha, [{ path: 'x', oldBlob: '1'.repeat(40), newBlob: '2'.repeat(40) }]);
+  const m = posted.pop();
+  assert.deepEqual(m.viewed, [page[0].vk]);
+  assert.deepEqual(m.counts, { [sha]: [1, 2] }, 'only the commit that holds the change');
+  viewed.commitMarks().set(['k1'], true);
+  assert.deepEqual(posted.pop().counts, { '*': [1, 1] }, 'counted like the page: files that can be marked');
+});
+
+test('tree views: a commit\'s file not viewed yet has a dot, and the setting off removes it', (t) => {
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  const before = mock.decorationProviders.length;
+  const d = viewed.registerDecorations();
+  t.after(() => {
+    d.dispose();
+    viewed.commitMarks().dispose();
+  });
+  const provider = mock.decorationProviders[before];
+  const uri = (q) => mock.vscode.Uri.file('/r/a.txt').with({ fragment: 'commit-corner-history', query: q });
+  assert.equal(provider.provideFileDecoration(uri('vk=abc')).badge, '●');
+  assert.equal(provider.provideFileDecoration(mock.vscode.Uri.file('/r/a.txt').with({ query: 'vk=abc' })), undefined, 'the Explorer\'s files: never, whatever their query');
+  viewed.commitMarks().set(['abc'], true);
+  assert.equal(provider.provideFileDecoration(uri('vk=abc')), undefined, 'viewed: no dot');
+  mock.configValues.set('markUnviewedFiles', false);
+  try {
+    assert.equal(provider.provideFileDecoration(uri('vk=new')), undefined);
+  } finally {
+    mock.configValues.delete('markUnviewedFiles');
+  }
+});
+
+test('Compare with Base: a file renamed in that commit is compared with its old name there; a deleted one as it was before', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'old.txt': 'same\n', 'gone.txt': 'g\n' });
+  const sha = r.commit('rename and delete', { 'old.txt': null, 'new.txt': 'same\n', 'gone.txt': null });
+  const { compareNodeWith } = require('../src/vscode/commands/fileCommands');
+  const calls = [];
+  const saved = mock.vscode.commands.executeCommand;
+  mock.vscode.commands.executeCommand = async (...a) => calls.push(a);
+  t.after(() => (mock.vscode.commands.executeCommand = saved));
+  const q = (u) => JSON.parse(u.query);
+  await compareNodeWith(repo, { repoRoot: repo.root, sha, path: 'new.txt', origPath: 'old.txt', status: 'R' }, 'main~1');
+  let [, left, right] = calls.pop();
+  assert.equal(q(left).path, 'old.txt');
+  assert.equal(q(right).path, 'new.txt');
+  assert.equal(q(right).ref, sha);
+  await compareNodeWith(repo, { repoRoot: repo.root, sha, path: 'gone.txt', status: 'D' }, 'main~1');
+  [, left, right] = calls.pop();
+  assert.equal(q(right).ref, `${sha}^`, 'the version before it was deleted');
+  assert.equal(await repo.blobSize(':', 'new.txt'), 5, 'the index has sizes too');
+});
+
+test('a folder turned into a symlink is never followed, whatever was looked up before', { skip: process.platform === 'win32' }, async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'lnk/a.txt': 'a\n', 'lnk/sub/b.txt': 'b\n' });
+  const outside = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cc-outside-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(outside, 'sub'));
+  fs.writeFileSync(path.join(outside, 'sub', 'b.txt'), 'SECRET\n');
+  const { WORKTREE } = require('../src/git/repository');
+  // Looked at while it was a folder (cached), then replaced by a link to the outside.
+  assert.equal(String(await repo.show(WORKTREE, 'lnk/sub/b.txt')), 'b\n');
+  fs.rmSync(path.join(r.dir, 'lnk'), { recursive: true });
+  fs.symlinkSync(outside, path.join(r.dir, 'lnk'));
+  assert.equal(await repo.show(WORKTREE, 'lnk/sub/b.txt'), null);
+  // One level asked first (the link itself), then a path under it.
+  repo.contains(path.join(r.dir, 'lnk'));
+  assert.equal(repo.contains(path.join(r.dir, 'lnk', 'sub')), false);
+  assert.equal(await repo.show(WORKTREE, 'lnk/sub/b.txt'), null);
+  assert.deepEqual([...(await repo.worktreeFileIds(repo.root, ['lnk/sub/b.txt'])).keys()], []);
+});
+
+test('the working path says what is there (a file, or a link that is shown as its text)', { skip: process.platform === 'win32' }, async (t) => {
+  const { r, repo } = await setup(t);
+  const sha = r.commit('base', { 'f.txt': 'x\n' });
+  fs.symlinkSync('/etc/hostname', path.join(r.dir, 'l'));
+  const { workingPathOf } = require('../src/vscode/commands/fileCommands');
+  assert.ok((await workingPathOf(repo, sha, 'f.txt')).st.isFile());
+  assert.ok((await workingPathOf(repo, undefined, 'l')).st.isSymbolicLink());
+});
+
+test('git\'s own folder is never working-tree content, however it is spelled', { skip: process.platform === 'win32' }, async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'f.txt': 'x\n', 'deep/a/b.txt': 'b\n' });
+  const { safeRelPath } = require('../src/git/repository');
+  for (const p of ['.git/config', '.GIT/config', '.git./config', 'GIT~1/config', 'sub/.git/HEAD']) assert.equal(safeRelPath(p), false, p);
+  assert.equal(safeRelPath('.github/workflows/ci.yml'), true);
+  assert.equal(repo.workingFile('.git/config'), undefined);
+  // A committed link into .git: shown as the link, not opened.
+  fs.symlinkSync('.git/config', path.join(r.dir, 'cfg'));
+  assert.equal(repo.ownFolder(path.join(r.dir, '.git')), false);
+  // Many files share their folders: one look per folder, the same answers.
+  const memo = new Map();
+  assert.equal(repo.ownFolder(path.join(r.dir, 'deep', 'a'), memo), true);
+  assert.ok(memo.has(path.join(r.dir, 'deep')));
+  assert.equal(repo.ownFolder(path.join(r.dir, 'deep', 'a'), memo), true);
+});
+
+test('a FIFO or a file swapped for a link is not read', { skip: process.platform === 'win32' }, async (t) => {
+  const { r, repo } = await setup(t);
+  const sha = r.commit('base', { 'f.txt': 'x\n' });
+  require('child_process').execFileSync('mkfifo', [path.join(r.dir, 'pipe')]);
+  const { WORKTREE } = require('../src/git/repository');
+  assert.equal(await repo.show(WORKTREE, 'pipe'), null, 'a FIFO has no content (and does not block)');
+  const { mapToWorkingLine } = require('../src/vscode/commands/fileCommands');
+  assert.equal(await mapToWorkingLine(repo, sha, 'f.txt', 'pipe', 2), 2);
+});
+
+test('an amended commit whose changes were all viewed before still counts as started', (t) => {
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  t.after(() => viewed.commitMarks().dispose());
+  const { GraphPanel } = require('../src/vscode/webviews/graphPanel');
+  const a = 'a'.repeat(40);
+  const b = 'b'.repeat(40);
+  const change = { path: 'x', oldBlob: '1'.repeat(40), newBlob: '2'.repeat(40) };
+  viewed.markCommitFiles(a, [change]);
+  const posted = [];
+  const panel = { filesCache: new Map(), post: (m) => posted.push(m) };
+  const page = GraphPanel.prototype.withMarks.call(panel, b, [change]);
+  assert.equal(page[0].unviewed, undefined, 'the same change: viewed in the amended commit too');
+  assert.equal(page[0].oldBlob, undefined, 'blob ids stay on the host');
+  const events = [];
+  const sub = viewed.commitMarks().onDidChange((e) => {
+    events.push(e);
+    GraphPanel.prototype.sendViewed.call(panel, e);
+  });
+  t.after(() => sub.dispose());
+  viewed.markCommitFiles(b, [change]); // opened in the amended commit: nothing new to mark
+  assert.equal(events.length, 1, 'still announced');
+  assert.ok(viewed.commitMarks().touched(b));
+  assert.deepEqual(posted.pop().counts, { [b]: [1, 1] }, 'its row gets its count');
+});
+
+test('the remembered commits and the graph\'s file lists are bounded (the uncommitted list is kept)', (t) => {
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  t.after(() => viewed.commitMarks().dispose());
+  const sha = (k) => k.toString(16).padStart(40, '0');
+  for (let k = 0; k < 520; k++) viewed.markCommitFiles(sha(k), [{ path: 'f' }]);
+  assert.equal(viewed.commitMarks().commits.size, 500);
+  assert.equal(viewed.commitMarks().touched(sha(0)), false, 'the oldest commit is forgotten');
+  assert.ok(viewed.commitMarks().touched(sha(519)));
+  const { GraphPanel } = require('../src/vscode/webviews/graphPanel');
+  const panel = { filesCache: new Map([['*', [{ path: 'u', vk: 'k' }]]]) };
+  for (let k = 0; k < 310; k++) GraphPanel.prototype.withMarks.call(panel, sha(k), [{ path: 'f' }]);
+  assert.equal(panel.filesCache.size, 300);
+  assert.ok(panel.filesCache.has('*'), 'the uncommitted files stay');
+  assert.ok(panel.filesCache.has(sha(309)));
+});
+
+test('the file commands: Next Unviewed File, Mark All as Viewed / Clear, Compare with Base', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'a.txt': '1\n', 'b.txt': '1\n' });
+  const sha = r.commit('change', { 'a.txt': '2\n', 'b.txt': '2\n', 'c/d.txt': 'd\n' });
+  r.git('branch', 'feature', 'main~1');
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  t.after(() => viewed.commitMarks().dispose());
+  const cmds = {};
+  const state = memento();
+  require('../src/vscode/commands/fileCommands').register({ manager: { getRepository: () => repo }, command: (id, fn) => (cmds[id] = fn), extContext: { workspaceState: state } });
+  const calls = [];
+  const status = [];
+  const saved = { exec: mock.vscode.commands.executeCommand, status: mock.vscode.window.setStatusBarMessage };
+  mock.vscode.commands.executeCommand = async (...a) => calls.push(a);
+  mock.vscode.window.setStatusBarMessage = (text) => status.push(text);
+  t.after(() => {
+    mock.vscode.commands.executeCommand = saved.exec;
+    mock.vscode.window.setStatusBarMessage = saved.status;
+  });
+  const q = (u) => JSON.parse(u.query);
+  // The graph's order: folders first (c/d.txt), then a.txt, b.txt.
+  await cmds['commitCorner.nextUnviewedFile']({ repoRoot: repo.root, sha, path: 'a.txt' });
+  let [, , right] = calls.pop();
+  assert.equal(q(right).path, 'b.txt');
+  assert.equal(q(right).commit, sha, 'tagged with its commit (the next N knows where it is)');
+  await cmds['commitCorner.nextUnviewedFile']({ repoRoot: repo.root, sha, path: 'b.txt' });
+  [, , right] = calls.pop();
+  assert.equal(q(right).path, 'c/d.txt', 'round to the start');
+  await cmds['commitCorner.nextUnviewedFile']({ repoRoot: repo.root, sha, path: 'c/d.txt' });
+  [, , right] = calls.pop();
+  assert.equal(q(right).path, 'a.txt');
+  calls.length = 0;
+  await cmds['commitCorner.nextUnviewedFile']({ repoRoot: repo.root, sha, path: 'a.txt' });
+  assert.equal(calls.length, 0);
+  assert.match(status.pop(), /All 3 files .* are viewed/);
+  // Clear, then Mark All.
+  const files = (await repo.getCommitFiles(sha)).files;
+  await cmds['commitCorner.markCommitUnviewed']({ repoRoot: repo.root, sha });
+  assert.deepEqual(viewed.commitCount(sha, files), { viewed: 0, total: 3 });
+  await cmds['commitCorner.markCommitViewed']({ repoRoot: repo.root, sha, shas: [sha, 'not a sha'] });
+  assert.deepEqual(viewed.commitCount(sha, files), { viewed: 3, total: 3 });
+  // Compare with Base: the remembered branch, as the left side.
+  await state.update('compareBase', { [repo.root]: 'feature' });
+  await cmds['commitCorner.compareFileWithBase']({ repoRoot: repo.root, sha, path: 'a.txt', status: 'M' });
+  const [cmd, left, right2] = calls.pop();
+  assert.equal(cmd, 'vscode.diff');
+  assert.equal(q(left).ref, 'feature');
+  assert.equal(q(right2).ref, sha);
+});
+
+test('legal names stay usable: a folder named "..foo", a tab in a name; NTFS spellings of .git are not', { skip: process.platform === 'win32' }, async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { '..foo/x.txt': 'x\n', 'a\tb.txt': 'tab\n' });
+  const { WORKTREE, safeRelPath } = require('../src/git/repository');
+  assert.ok(repo.workingFile('..foo/x.txt').st.isFile());
+  assert.equal(String(await repo.show(WORKTREE, '..foo/x.txt')), 'x\n');
+  assert.ok(repo.workingFile('a\tb.txt').st.isFile());
+  const { uriAt } = require('../src/vscode/diffs');
+  assert.equal(uriAt(repo, WORKTREE, 'a\tb.txt').scheme, 'file');
+  for (const p of ['.git::$INDEX_ALLOCATION/config', '.git:foo', 'x/.GIT::$DATA']) assert.equal(safeRelPath(p), false, p);
+  // Page input stays stricter: no control characters at all.
+  const { pagePath } = require('../src/vscode/webviews/graphPanel');
+  assert.equal(pagePath('a\tb.txt'), false);
+  assert.equal(pagePath('..foo/x.txt'), true);
+});
+
+test('the merge editor writes only to a regular file of the repository', { skip: process.platform === 'win32' }, async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'f.txt': 'x\n' });
+  fs.symlinkSync('/etc/hostname', path.join(r.dir, 'lnk'));
+  const { openMergeEditor } = require('../src/vscode/commands/scmCommands');
+  const calls = [];
+  const saved = mock.vscode.commands.executeCommand;
+  mock.vscode.commands.executeCommand = async (...a) => calls.push(a);
+  t.after(() => (mock.vscode.commands.executeCommand = saved));
+  await openMergeEditor(repo, 'f.txt');
+  assert.equal(calls.pop()[1].output.fsPath, path.join(r.dir, 'f.txt'));
+  await openMergeEditor(repo, 'lnk');
+  const [cmd, uri] = calls.pop();
+  assert.equal(cmd, 'vscode.open');
+  assert.equal(uri.scheme, 'commitcorner', 'a symlink: shown as its link, never written through');
+  await openMergeEditor(repo, '.git/config');
+  assert.equal(calls.length, 0);
+});
+
+test('conflict markers are looked for in regular files of the repository only', { skip: process.platform === 'win32' }, async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'f.txt': 'x\n' });
+  const { hasConflictMarkers } = require('../src/vscode/commands/scmCommands');
+  r.write('c.txt', 'a\n<<<<<<< HEAD\nb\n=======\nc\n>>>>>>> other\n');
+  assert.equal(await hasConflictMarkers(repo, 'c.txt'), true);
+  fs.symlinkSync(path.join(r.dir, 'c.txt'), path.join(r.dir, 'lnk'));
+  assert.equal(await hasConflictMarkers(repo, 'lnk'), false, 'a link is not read through');
+  require('child_process').execFileSync('mkfifo', [path.join(r.dir, 'pipe')]);
+  assert.equal(await hasConflictMarkers(repo, 'pipe'), false, 'a FIFO is not read (and does not block)');
+  assert.equal(await hasConflictMarkers(repo, '.git/config'), false);
+});
+
+test('reading a working file never follows a link or blocks on a FIFO, even if it changed since it was looked at', { skip: process.platform === 'win32' }, async (t) => {
+  const { r } = await setup(t);
+  r.write('f.txt', 'x\n');
+  const { readAtMost } = require('../src/vscode/commands/fileCommands');
+  assert.equal(String(await readAtMost(path.join(r.dir, 'f.txt'), 10)), 'x\n');
+  assert.equal(await readAtMost(path.join(r.dir, 'f.txt'), 1), undefined, 'longer than the limit');
+  fs.symlinkSync(path.join(r.dir, 'f.txt'), path.join(r.dir, 'lnk'));
+  await assert.rejects(readAtMost(path.join(r.dir, 'lnk'), 10), 'opened without following the link');
+  require('child_process').execFileSync('mkfifo', [path.join(r.dir, 'pipe')]);
+  assert.equal(await readAtMost(path.join(r.dir, 'pipe'), 10), undefined, 'a FIFO: nothing read, no wait');
+  // show(WORKTREE) with its lstat seeing a regular file that is a link by the time it is opened.
+  const { WORKTREE, Repository } = require('../src/git/repository');
+  const repo = await Repository.open(r.dir);
+  t.after(() => repo.dispose());
+  const lstat = fs.promises.lstat;
+  fs.promises.lstat = async (p) => (p.endsWith('lnk') ? lstat(path.join(r.dir, 'f.txt')) : lstat(p));
+  t.after(() => (fs.promises.lstat = lstat));
+  assert.equal(await repo.show(WORKTREE, 'lnk'), null, 'opened without following: nothing (the target\'s text would mean it followed)');
+});
+
+test('a file staged and then changed again: the staged copy keeps its mark, the working copy has its own', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'a.txt': '1\n' });
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  t.after(() => viewed.commitMarks().dispose());
+  r.write('a.txt', 'staged\n');
+  r.git('add', 'a.txt');
+  r.write('a.txt', 'staged, then changed again\n');
+  await repo.refreshState();
+  const { GraphPanel } = require('../src/vscode/webviews/graphPanel');
+  const panel = { filesCache: new Map() };
+  const list = [{ status: 'M', path: 'a.txt', group: 'staged' }, { status: 'M', path: 'a.txt', group: 'unstaged' }];
+  const [staged, work] = await GraphPanel.prototype.withWorktreeMarks.call(panel, repo, list);
+  assert.equal(staged.vk, viewed.ChangeMarks.worktreeKey('staged', 'a.txt', r.git('rev-parse', ':a.txt')), 'the index\'s copy');
+  assert.equal(work.vk, viewed.ChangeMarks.worktreeKey('unstaged', 'a.txt', r.git('hash-object', 'a.txt')), 'the working file');
+});
+
+test('a folder already known not to be ours is not looked at again in the same call', (t) => {
+  const repo = { root: '/r', displayRoot: '/r', canonical: (p) => p };
+  const { Repository } = require('../src/git/repository');
+  const memo = new Map([['/r/bad', false]]);
+  assert.equal(Repository.prototype.ownFolder.call(repo, '/r/bad/sub', memo), false);
+  assert.equal(memo.get('/r/bad/sub'), false);
+});
+
+test('a file name ending in CR is fingerprinted as itself, never as the name without it', { skip: process.platform === 'win32' }, async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'f.txt': 'x\n' });
+  fs.writeFileSync(path.join(r.dir, 'z'), 'the other file\n');
+  fs.writeFileSync(path.join(r.dir, 'z\r'), 'mine\n');
+  const ids = await repo.worktreeFileIds(repo.root, ['z\r', 'f.txt']);
+  assert.equal(ids.get('z\r'), r.git('hash-object', '--no-filters', '--', 'z\r'));
+  assert.notEqual(ids.get('z\r'), r.git('hash-object', '--no-filters', '--', 'z'), 'so a link "z" (to /dev/zero, say) is never what is read');
+});

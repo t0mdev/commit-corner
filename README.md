@@ -71,9 +71,14 @@ staging. The keyboard stays where it was after each action, and the list
 follows changes made elsewhere (Source Control, a terminal) while it is open.
 
 **One view at a time.** The sidebar shows one Commit Corner view, filling
-it — the Graph by default. The **Switch View** dropdown (the layers icon in each
-view's title bar) and the Actions hub (`Ctrl+Alt+G Space`) switch to Repository, Pull Requests,
-Compare, File History or Worktrees; `Ctrl+Alt+G V` goes back to the Graph.
+it — the Graph by default. **☰ Graph** at the top of the Graph, the **Switch
+View** dropdown (the menu icon, first in each view's title bar) and the Actions
+hub (`Ctrl+Alt+G Space`) switch to Repository, Pull Requests, Compare, File
+History or Worktrees; `Ctrl+Alt+G V` goes back to the Graph. (VS Code shows a
+view's title-bar icons only while the mouse is over the view; its setting
+`workbench.view.alwaysShowHeaderActions` keeps them visible.) **Collapse All
+Commits** in the Graph's title bar (and the editor graph's toolbar) closes every expanded
+commit.
 VS Code does not let an extension collapse a view, so the others are hidden,
 not collapsed. *Sidebar: Show All Views (Stacked)* in the Graph's `…` menu
 (setting `commitCorner.sidebar.oneViewAtATime`) stacks all six instead.
@@ -101,6 +106,28 @@ new tags (open them in the graph).
 - **Expand a commit** in place (`▸`, or `→`) to look inside it: its files as
   a folder tree under the row, as in the sidebar; the details pane below
   stays for the full message and actions.
+- **Any file row** (an expanded commit's, the details pane's, the uncommitted
+  ones): `O` or the file button opens the **working file** — at the line you
+  were looking at when that revision's diff is open, mapped through the edits
+  since, and under its new name when it was renamed; `W` compares it with the
+  working file, `B` with the **base branch** (the one you last picked with
+  `Shift+B`, else origin's default branch such as `origin/main`, or a local
+  `main`/`master`), `Shift+B`
+  picks a branch, tag or commit. The right-click
+  menu adds Open File at This Revision, Copy Relative Path and Reveal in
+  Explorer View.
+- **Viewed marks**: a commit's files — and the uncommitted ones — are
+  **bold** until you open them, and a commit you started on says how many you
+  have seen (`3/12`, ✓ when done). `N` goes to the next bold file and opens it
+  (in a diff: *Next Unviewed File*, `Ctrl+Alt+G Shift+N`); `V` or the
+  right-click menu's *Mark as Not Viewed* makes an opened file bold again (to
+  come back to it later), and a commit's menu marks all of its files. A
+  commit's mark belongs to the change, not the commit: when an agent amends or
+  rebases, the files whose change stayed the same stay viewed. An uncommitted
+  file is bold again as soon as its content changes. Unlike the *Viewed*
+  checkboxes of a worktree's or pull request's review lists, which you tick
+  yourself, these are set when you open a file. On by default; off with
+  `commitCorner.markUnviewedFiles`.
 - Uncommitted changes are a row like a commit: its summary, a click opens
   Source Control, `▸`/`→` opens the staging area (see *Staging in the graph*
   above). Folders in expanded file trees collapse and expand (click, or
@@ -190,6 +217,11 @@ new tags (open them in the graph).
   (`commitCorner.treeStats` turns them off).
   Their tooltips add the full date, SHA, files changed, refs, the message and
   links: Show Changes, Show in Graph, Copy SHA, Open on GitHub.
+- File rows (a commit's, a comparison's, a pull request's) have **Open Working
+  File** and **Compare with Working File** inline, and Compare with Base Branch,
+  Compare with Branch, Tag or Commit…, Copy Relative Path and Reveal in Explorer
+  View in their menu. A commit's files you have not viewed have a dot (●), and
+  Mark as Viewed / Mark as Not Viewed in their menu; the commit says `3/12 viewed` once it has been expanded.
 
 ### Branches and remotes
 - **Repository** view: local branches with ahead/behind and upstream, remote
@@ -347,6 +379,11 @@ newest commit.
 ### Repositories
 - Initialize or clone a repository, update submodules, several repositories
   per workspace (nested ones included), workspaces opened through symlinks.
+- With several repositories, **Switch Repository** is in every view's title
+  bar, on the repository name in the editor graph's toolbar and on
+  `Ctrl+Alt+G Shift+O`. The repositories you used last come first, each with
+  its branch, uncommitted changes and ↑ahead ↓behind; the one you used before
+  is preselected, so `Enter` switches back.
 - A repository found *above* a workspace folder (a dotfiles repo in `$HOME`)
   is only opened after asking (`commitCorner.openRepositoryInParentFolders`).
   Repositories git refuses for "dubious ownership" get an explanation and the
@@ -532,6 +569,9 @@ with `Ctrl+Alt` still held (`Ctrl+Alt+G Ctrl+Alt+S`, `Ctrl+Alt+G Ctrl+Alt+Shift+
 | `T` | Repository Activity |
 | `Z` / `Shift+Z` | Stash / pop a stash |
 | `N` | Create pull request |
+| `Shift+N` | Next unviewed file of the commit (in a diff opened from a commit's files) |
+| `Shift+W` | Open the working file at the same line (in a revision or diff) |
+| `Shift+O` | Switch repository (several open) |
 
 **Graph** (focused when it opens; `?` shows this list):
 - `↑ ↓ PgUp PgDn Home End` move; `Shift` extends the selection; `Ctrl+↑/↓`
@@ -547,6 +587,10 @@ with `Ctrl+Alt` still held (`Ctrl+Alt+G Ctrl+Alt+S`, `Ctrl+Alt+G Ctrl+Alt+Shift+
 - `Ctrl+F` searches (mode "Go to SHA / ref" jumps anywhere in the history);
   `↓` or `Esc` goes from the search box to the results; `Esc` in the list
   clears the search.
+- On a file: `Enter` opens its diff, `Space` previews it, `O` opens the
+  working file, `W` / `B` / `Shift+B` compare it with the working file / the
+  base branch / a branch, tag or commit you pick, `N` goes to the next unviewed file, `V`
+  toggles its viewed mark.
 - `Tab` moves into the details pane (`↑`/`↓` between files, `Enter` opens,
   parent SHAs are buttons, `Esc` anywhere in it returns to the list); focus
   stays in the pane when it refreshes.
@@ -573,7 +617,7 @@ never hit a different file than the one you are looking at.
 
 All settings live under `commitCorner.*`; see the Settings UI for
 descriptions. The main ones are `smartCommit`, `pullRebase`,
-`autoFetchMinutes`, `dateFormat`, `fileLayout`, `graph.pageSize`,
+`autoFetchMinutes`, `dateFormat`, `fileLayout`, `markUnviewedFiles`, `graph.pageSize`,
 `graph.showChanges`, `treeStats`, `avatars`, `githubAuthentication`,
 `refreshWhenUnfocused` (views keep up, throttled, while VS Code is in the
 background, e.g. while an agent works in a terminal), `blame.currentLine` and

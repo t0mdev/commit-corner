@@ -45,7 +45,53 @@ class TreeProvider {
       return [new MessageNode(`Error: ${e.message}`, 'error')];
     }
     this.fillStats(children || []);
+    this.trackCommitFiles(children || []);
     return withTimeSeparators(children || []);
+  }
+
+  /**
+   * Files of commits (not opened yet: a dot) and their commits ("3/12 viewed"): redrawn when a
+   * mark changes, here or in the graph, or the setting does. One entry per commit file and per
+   * commit (the newest node of each), dropped on a full refresh.
+   */
+  trackCommitFiles(nodes) {
+    const files = [];
+    const walk = (list) => {
+      for (const n of list) {
+        if (n instanceof FileNode && n.commitViewed) files.push(n);
+        else if (n instanceof FolderNode) walk(n.children);
+      }
+    };
+    walk(nodes);
+    if (!files.length) return;
+    if (!this.commitFiles) {
+      /** mark key -> (node id -> node) */
+      this.commitFiles = new Map();
+      this.viewedSub = viewed.commitMarks().onDidChange((e) => {
+        const hit = new Set();
+        for (const k of e.keys) for (const n of (this.commitFiles.get(k) || new Map()).values()) hit.add(n);
+        if (e.sha) for (const m of this.commitFiles.values()) for (const n of m.values()) if (n instanceof CommitNode && n.sha === e.sha) hit.add(n);
+        if (hit.size) this._onDidChangeTreeData.fire([...hit]);
+      });
+      this.settingSub = vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('commitCorner.markUnviewedFiles')) this.refresh();
+      });
+    }
+    const counted = [];
+    for (const n of files) {
+      const key = viewed.ChangeMarks.key(n.commitViewed, n.change);
+      if (!this.commitFiles.has(key)) this.commitFiles.set(key, new Map());
+      const m = this.commitFiles.get(key);
+      m.set(`f:${n.commitViewed}:${n.path}`, n);
+      const c = n.parent;
+      if (c instanceof CommitNode) {
+        // Its count needs the files it now knows: drawn again once (when any is viewed).
+        if (!c.countShown && viewed.commitCount(c.sha, c.files || []).viewed) counted.push(c);
+        c.countShown = true;
+        m.set(c, c);
+      }
+    }
+    if (counted.length) setTimeout(() => this._onDidChangeTreeData.fire([...new Set(counted)]), 0);
   }
 
   /**
@@ -91,11 +137,16 @@ class TreeProvider {
   }
 
   refresh(node) {
-    if (!node) this.statsEpoch++;
+    if (!node) {
+      this.statsEpoch++;
+      if (this.commitFiles) this.commitFiles.clear();
+    }
     this._onDidChangeTreeData.fire(node);
   }
 
   dispose() {
+    if (this.viewedSub) this.viewedSub.dispose();
+    if (this.settingSub) this.settingSub.dispose();
     this._onDidChangeTreeData.dispose();
   }
 }
@@ -276,6 +327,12 @@ class CommitNode {
     const age = config().get('dateFormat', 'relative') === 'relative' ? tinyAge(when) : formatDate(when);
     const item = new vscode.TreeItem(`${age}  ${c.subject || '(no message)'}`, collapsible);
     const parts = [];
+    // Once its files are listed and one was opened: how many of them you have seen (first, so
+    // a narrow sidebar does not cut it off).
+    if (this.files && viewed.marksUnviewed()) {
+      const n = viewed.commitCount(this.sha, this.files);
+      if (n.viewed) parts.push(n.viewed === n.total ? '✓ viewed' : `${n.viewed}/${n.total} viewed`);
+    }
     const stats = statsText(c.stats);
     if (stats) parts.push(stats);
     // The avatar replaces the commit/merge icon, so a merge says so in words.
@@ -294,15 +351,20 @@ class CommitNode {
       item.command = {
         command: 'commitCorner.openCommitFile',
         title: 'Open Changes',
-        arguments: [{ repoRoot: this.repoRoot, sha: c.sha, parent: c.parents[0] || EMPTY_TREE, path: ch.path, origPath: ch.origPath, status: ch.status, title: `${path.posix.basename(ch.path)} (${shortSha(c.sha)}) ${c.subject}` }],
+        arguments: [{ repoRoot: this.repoRoot, sha: c.sha, parent: c.parents[0] || EMPTY_TREE, path: ch.path, origPath: ch.origPath, status: ch.status, title: `${path.posix.basename(ch.path)} (${shortSha(c.sha)}) ${c.subject}`, viewedSha: c.sha }],
       };
     }
     return item;
   }
 
   async getChildren() {
-    const { parent, files } = await this.repo.getCommitFiles(this.sha);
-    return fileNodes(this.repo, files, { leftRef: parent || EMPTY_TREE, rightRef: this.sha, sha: this.sha, parent: this });
+    // Kept: a viewed mark redraws this row (its count), which asks for the files again.
+    if (!this.children) {
+      const { parent, files } = await this.repo.getCommitFiles(this.sha);
+      this.files = files;
+      this.children = fileNodes(this.repo, files, { leftRef: parent || EMPTY_TREE, rightRef: this.sha, sha: this.sha, parent: this, commitViewed: this.sha, contextValue: 'file:commit' });
+    }
+    return this.children;
   }
 }
 
@@ -329,17 +391,22 @@ class FileNode {
     this.parent = refs.parent;
     /** What its diff tab says it is from ("#21"); otherwise the two revisions. */
     this.diffLabel = refs.diffLabel;
+    /** A file of this commit: bold until you open it (see viewed.commitFileUnviewed). */
+    this.commitViewed = refs.commitViewed;
   }
 
   /** The URIs its diff shows (to tell whether that diff is the editor you are looking at). */
   openUris() {
     const { uriAt } = require('../diffs');
     const leftRef = this.status === 'A' ? null : this.leftRef || EMPTY_TREE; // (this.parent is the tree node above, not a commit)
-    return [uriAt(this.repo, leftRef, this.leftPath), uriAt(this.repo, this.status === 'D' ? null : this.rightRef || this.sha, this.rightPath)].map(String);
+    // A commit's file opens tagged with its commit (Next Unviewed File knows where it is).
+    const extra = this.commitViewed ? { commit: this.commitViewed } : undefined;
+    return [uriAt(this.repo, leftRef, this.leftPath, extra), uriAt(this.repo, this.status === 'D' ? null : this.rightRef || this.sha, this.rightPath, extra)].map(String);
   }
 
   getTreeItem() {
     const name = path.posix.basename(this.path);
+    const unviewed = !!this.commitViewed && viewed.commitFileUnviewed(this.commitViewed, this.change);
     const item = new vscode.TreeItem(name, vscode.TreeItemCollapsibleState.None);
     const dir = path.posix.dirname(this.path);
     const stats = this.change.added !== undefined && this.change.added !== null ? `+${this.change.added} −${this.change.deleted}` : this.change.binary ? 'binary' : '';
@@ -347,16 +414,18 @@ class FileNode {
     item.description = [dir === '.' || this.inTree ? '' : dir, stats].filter(Boolean).join('  ');
     // The fragment keeps the file icon/theme but stops the working file's current
     // Explorer decorations (M, U, …) from showing on a historical entry.
-    item.resourceUri = vscode.Uri.file(this.repo.absolute(this.path)).with({ fragment: 'commit-corner-history' });
+    // A commit's file carries its viewed-mark key: not opened yet, it gets a dot (viewed.js).
+    item.resourceUri = vscode.Uri.file(this.repo.absolute(this.path)).with({ fragment: 'commit-corner-history', query: this.commitViewed ? `vk=${viewed.ChangeMarks.key(this.commitViewed, this.change)}` : '' });
     item.iconPath = statusIcon(this.status);
-    item.tooltip = `${STATUS_LABELS[this.status] || this.status}: ${this.origPath ? `${this.origPath} → ` : ''}${this.path}`;
-    item.contextValue = this.contextValue;
+    item.tooltip = `${STATUS_LABELS[this.status] || this.status}: ${this.origPath ? `${this.origPath} → ` : ''}${this.path}${unviewed ? '\n● Not viewed (the dot goes when you open it)' : ''}`;
+    // A commit's file not viewed yet: its menu offers Mark as Viewed (else Mark as Not Viewed).
+    item.contextValue = unviewed ? `${this.contextValue}:new` : this.contextValue;
     if (this.viewed) item.checkboxState = viewed.checkbox(viewed.get(), this.viewed.scope, this.path, this.viewed.fingerprint);
     item.command = {
       command: 'commitCorner.openCommitFile',
       title: 'Open Changes',
       // In a list you check off (Viewed), the keyboard stays in the list: Enter shows, Space ticks.
-      arguments: [{ repoRoot: this.repoRoot, sha: this.sha, path: this.rightPath, origPath: this.leftPath, status: this.status, leftRef: this.leftRef, rightRef: this.rightRef, preserveFocus: !!this.viewed,
+      arguments: [{ repoRoot: this.repoRoot, sha: this.sha, path: this.rightPath, origPath: this.leftPath, status: this.status, leftRef: this.leftRef, rightRef: this.rightRef, preserveFocus: !!this.viewed, viewedSha: this.commitViewed, oldBlob: this.change.oldBlob, newBlob: this.change.newBlob,
         title: this.diffLabel ? `${name} (${this.diffLabel}, ${(STATUS_LABELS[this.status] || 'changed').toLowerCase()})` : undefined }],
     };
     return item;

@@ -71,6 +71,52 @@ async function pickRef(repo, o = {}) {
   return result;
 }
 
+/**
+ * One of the open repositories: the one shown first and marked, then the others you used most
+ * recently; each with its branch, uncommitted changes and ahead/behind, so you see where
+ * something happened.
+ * @param {import('./model').RepositoryManager} manager
+ * @param {import('../git/repository').Repository|undefined} current
+ */
+async function pickRepository(manager, current) {
+  const repos = manager.repositories;
+  if (!repos.length) return undefined;
+  const recent = manager.recentRoots();
+  const rank = (r) => (r === current ? -1 : recent.includes(r.root) ? recent.indexOf(r.root) : recent.length);
+  const sorted = repos.slice().sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  const items = sorted.map((r) => {
+    const st = r.state;
+    const head = st && st.head;
+    const bits = [];
+    if (head) bits.push(`$(git-branch) ${escapeIcons(head.branch || (head.sha ? shortSha(head.sha) : '?'))}`);
+    const changes = st ? st.staged.length + st.unstaged.length + st.untracked.length + st.conflicts.length : 0;
+    if (changes) bits.push(`$(diff) ${changes}`);
+    if (head && head.ahead) bits.push(`$(arrow-up) ${head.ahead}`);
+    if (head && head.behind) bits.push(`$(arrow-down) ${head.behind}`);
+    if (st && st.operation) bits.push(`$(warning) ${st.operation.kind}`);
+    return {
+      label: `${r === current ? '$(check)' : '$(repo)'} ${escapeIcons(r.name)}`,
+      description: bits.join('  '),
+      detail: escapeIcons(r.root),
+      repo: r,
+    };
+  });
+  // The one you used before this is preselected: Enter goes back to it (as Alt+Tab does).
+  const qp = vscode.window.createQuickPick();
+  qp.items = items;
+  qp.placeholder = 'Repository shown in Commit Corner (most recently used first)';
+  qp.matchOnDetail = true;
+  const previous = items.find((i) => i.repo !== current);
+  if (previous) qp.activeItems = [previous];
+  const pick = await new Promise((resolve) => {
+    qp.onDidAccept(() => resolve(qp.selectedItems[0] || qp.activeItems[0]));
+    qp.onDidHide(() => resolve(undefined));
+    qp.show();
+  });
+  qp.dispose();
+  return pick && pick.repo;
+}
+
 async function pickRemote(repo, placeHolder = 'Select a remote') {
   const remotes = await repo.getRemotes();
   if (!remotes.length) {
@@ -120,4 +166,4 @@ async function inputBranchName(prompt, value, o = {}) {
   });
 }
 
-module.exports = { pickRef, pickRemote, pickCommit, inputBranchName };
+module.exports = { pickRef, pickRemote, pickCommit, inputBranchName, pickRepository };

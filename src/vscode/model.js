@@ -489,6 +489,7 @@ class RepositoryManager {
     const uri = editor && editor.document.uri;
     let changed = false;
     let isIndex = false;
+    let commitFile = false; // a diff opened from a commit's files (Next Unviewed File)
     if (uri && uri.scheme === 'file') {
       const repo = this.getRepositoryForUri(uri);
       const s = repo && repo.state;
@@ -498,11 +499,14 @@ class RepositoryManager {
       }
     } else if (uri && uri.scheme === 'commitcorner') {
       try {
-        isIndex = JSON.parse(uri.query).ref === ':';
+        const q = JSON.parse(uri.query);
+        isIndex = q.ref === ':';
+        commitFile = typeof q.commit === 'string';
       } catch { /* not ours */ }
     }
     vscode.commands.executeCommand('setContext', 'commitCorner.activeFileChanged', changed);
     vscode.commands.executeCommand('setContext', 'commitCorner.activeEditorIsIndex', isIndex);
+    vscode.commands.executeCommand('setContext', 'commitCorner.activeEditorIsCommitFile', commitFile);
     vscode.commands.executeCommand('setContext', 'commitCorner.builtInGitOff', !require('./scm').builtInGitEnabled());
   }
 
@@ -523,7 +527,18 @@ class RepositoryManager {
   setActive(repo) {
     if (this.active === repo) return;
     this.active = repo;
+    if (repo && this.memento) {
+      // Most recently used first in Switch Repository.
+      const recent = [repo.root, ...this.recentRoots().filter((r) => r !== repo.root)].slice(0, 30);
+      this.memento.update('recentRepositories', recent).then(undefined, () => {});
+    }
     this._onDidChangeActive.fire(repo);
+  }
+
+  /** Roots of the repositories you showed lately, the latest first. */
+  recentRoots() {
+    const v = this.memento && this.memento.get('recentRepositories');
+    return Array.isArray(v) ? v.filter((r) => typeof r === 'string') : [];
   }
 
   /**
