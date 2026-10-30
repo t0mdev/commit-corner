@@ -19,8 +19,9 @@ change summaries. Plain JavaScript, no runtime dependencies, no telemetry.
    keyboard in the list, `Space` ticks it off as *Viewed*; a file the agent changes again
    unticks itself.
 3. **Comment** — the **+** in an editor's gutter adds a review comment on that line (in the
-   agent's files or in a commit's diff). **Copy Review for the Agent** puts all of them together
-   — file, line, the code as it is now, your comment — to paste into the agent's chat.
+   agent's files or in a commit's diff). **Copy Review for the Agent** (`Ctrl+Alt+G Shift+C`)
+   puts all of them together — file, line, the code as it is now, your comment — to paste
+   into the agent's chat.
 4. **Summarize** — the sparkle button on that row (or on a pull request, or selected commits) asks your
    language model what changed, **what looks risky** and which files to read first.
 
@@ -416,16 +417,20 @@ newest commit.
   Summarize (sparkle) and Open All Changes as inline buttons.
 - **Review comments for the agent.** The **+** in the gutter of a worktree's
   files (or the repository's) and of a commit's diff adds a comment on that
-  line; reply, edit and delete in the comment itself. A comment keeps the text
-  of its lines: when the agent changes the file above it, it moves with them;
-  when it changes those lines, the comment says so. The worktree's row in the
-  Worktrees view gets **Review for the agent** with every comment (click one to
-  go there) and two buttons: **Copy Review for the Agent** (one Markdown text:
-  what to do, then each comment with its file, lines and current code — paste
-  it into the agent's chat) and **Save Review to the Worktree** (the same as
-  `.review-comments.md` in its folder, ignored by git; tell the agent to read
-  it). Delete All Review Comments in its menu. Settings:
-  `commitCorner.review.comments`, `commitCorner.review.fileName`.
+  line (by keyboard: VS Code's *Comments: Add Comment on Current Selection*);
+  reply, edit and delete in the comment itself, which takes Markdown. A
+  comment on an agent's commit belongs to that agent's worktree. A comment
+  keeps the text of its lines and their neighbours: it moves with edits above
+  it, and when those lines themselves change, it says so. The worktree's row
+  in the Worktrees view shows the count (`💬 2`) and gets **Agent review** with
+  every comment (click one to go there) and two buttons: **Copy Review for the
+  Agent** (`Ctrl+Alt+G Shift+C`; one Markdown text: what to do, then each
+  comment with its file, lines and current code — paste it into the agent's
+  chat) and **Save Review to the Worktree** (the same as `.review-comments.md`
+  in its folder, ignored by git; **Copy Instruction** then gives you the line
+  to tell the agent). A file of that name that is not an earlier review is
+  never overwritten. Delete All Review Comments in its menu. Settings:
+  `commitCorner.review.comments`, `commitCorner.review.fileName` (user setting).
 - Stashes are a group in the Repository view (`Delete` drops the focused one).
 - **Worktrees overview** (`Ctrl+Alt+G W`, or the dashboard button on the
   Worktrees view): one card per worktree with branch, path, staged / changed /
@@ -587,6 +592,7 @@ with `Ctrl+Alt` still held (`Ctrl+Alt+G Ctrl+Alt+S`, `Ctrl+Alt+G Ctrl+Alt+Shift+
 | `Shift+N` | Next unviewed file of the commit (in a diff opened from a commit's files) |
 | `Shift+W` | Open the working file at the same line (in a revision or diff) |
 | `Shift+O` | Switch repository (several open) |
+| `Shift+C` | Copy the review comments for the agent |
 
 **Graph** (focused when it opens; `?` shows this list):
 - `↑ ↓ PgUp PgDn Home End` move; `Shift` extends the selection; `Ctrl+↑/↓`

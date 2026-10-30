@@ -5168,6 +5168,18 @@
         "mac": "cmd+alt+g shift+w",
         "command": "commitCorner.openWorkingFile",
         "when": "commitCorner.hasRepository && resourceScheme == commitcorner"
+      },
+      {
+        "key": "ctrl+alt+g ctrl+alt+shift+c",
+        "mac": "cmd+alt+g cmd+alt+shift+c",
+        "command": "commitCorner.review.copy",
+        "when": "commitCorner.hasReviewComments"
+      },
+      {
+        "key": "ctrl+alt+g shift+c",
+        "mac": "cmd+alt+g shift+c",
+        "command": "commitCorner.review.copy",
+        "when": "commitCorner.hasReviewComments"
       }
     ],
     "configuration": [
@@ -5596,14 +5608,15 @@
           "commitCorner.review.comments": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Comment on lines of an agent's work for the agent: the **+** in the gutter of its worktree's files and of a commit's diff. **Copy Review for the Agent** (comment title bar, Worktrees view) puts them together as one text to paste into its chat.",
+            "markdownDescription": "Comment on lines of an agent's work for the agent: the **+** in the gutter of its worktree's files and of a commit's diff (or *Comments: Add Comment on Current Selection*). **Copy Review for the Agent** (on a comment, on **Agent review** in the Worktrees view, `Ctrl+Alt+G Shift+C`) puts them together as one text to paste into its chat.",
             "order": 2
           },
           "commitCorner.review.fileName": {
             "type": "string",
             "default": ".review-comments.md",
-            "markdownDescription": "The file **Save Review to the Worktree** writes in the agent's worktree (a plain name; git is told to ignore it there).",
-            "order": 3
+            "markdownDescription": "The file **Save Review to the Worktree** writes in the agent's worktree: a plain name (git is told to ignore it there). A file of that name that is not an earlier review is never overwritten. A user setting (a workspace cannot change it).",
+            "order": 3,
+            "scope": "application"
           }
         }
       },

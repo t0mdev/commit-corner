@@ -161,14 +161,14 @@ suite('Commit Corner in VS Code', () => {
     await vscode.commands.executeCommand('commitCorner.review.add', { thread, text: 'Say "2" here.' });
     const saved = store.forRoot(root());
     assert.strictEqual(saved.length, 1);
-    assert.strictEqual(thread.comments[0].body, 'Say "2" here.');
+    assert.strictEqual(thread.comments[0].body.value, 'Say "2" here.');
     // Two lines typed above it: the thread moves with "two".
     const edit = new vscode.WorkspaceEdit();
     edit.insert(doc.uri, new vscode.Position(0, 0), 'a\nb\n');
     await vscode.workspace.applyEdit(edit);
     await until(() => thread.range.start.line === 3, 'the thread to follow its line');
     await vscode.commands.executeCommand('commitCorner.review.copy', { reviewRoot: root() });
-    assert.match(await vscode.env.clipboard.readText(), /`review-me\.txt`, line 4\n\n```\n4  two\n```\n\nSay "2" here\./);
+    assert.match(await vscode.env.clipboard.readText(), /`review-me\.txt`, line 4\n\n```txt\n4  two\n```\n\n> Say "2" here\./);
     await vscode.commands.executeCommand('commitCorner.review.deleteThread', thread);
     assert.strictEqual(store.forRoot(root()).length, 0);
     await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');

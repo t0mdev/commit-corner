@@ -68,7 +68,7 @@ class WorktreeChangesNode {
     const item = new vscode.TreeItem(`Changes vs ${this.base}`, open ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
     // Short (a narrow sidebar cuts the end): "3 files", then "1/3 viewed", "all 3 viewed".
     item.description = !seen ? `${n} file${n === 1 ? '' : 's'}` : seen === n ? (n === 1 ? 'viewed' : `all ${n} viewed`) : `${seen}/${n} viewed`;
-    item.tooltip = `What ${this.worktree.branch || path.basename(this.worktreePath)} changed since it left ${this.base} (${shortSha(this.mergeBase)}), committed and uncommitted. Check files off as you review them; a file that changes again unchecks itself.`;
+    item.tooltip = `What ${this.worktree.branch || path.basename(this.worktreePath)} changed since it left ${this.base} (${shortSha(this.mergeBase)}), committed and uncommitted. Check files off as you review them; a file that changes again unchecks itself. The + in a file's gutter adds a review comment for the agent.`;
     item.iconPath = new vscode.ThemeIcon(seen === n ? 'pass' : 'git-compare');
     item.contextValue = 'viewedGroup:worktree';
     item.id = `worktreeChanges:${this.worktreePath}`;
@@ -124,16 +124,24 @@ class WorktreeFileNode {
  * gutter), ready to copy into the agent's chat or save in its worktree.
  */
 class ReviewCommentsNode {
-  constructor(parent, threads) {
+  constructor(parent) {
+    this.parent = parent;
     this.worktreePath = parent.worktreePath;
-    this.threads = threads;
+    if (parent.provider) parent.provider.reviewNodes.set(path.resolve(this.worktreePath), this);
+  }
+
+  /** Read when drawn: a moved comment redraws this row alone, not the worktrees (and their git calls). */
+  get threads() {
+    const review = require('../review').get();
+    return review ? review.forRoot(path.resolve(this.worktreePath)) : [];
   }
 
   getTreeItem() {
     const n = this.threads.length;
-    const item = new vscode.TreeItem('Review for the agent', vscode.TreeItemCollapsibleState.Expanded);
+    this.shown = n; // the count its worktree's row shows too
+    const item = new vscode.TreeItem('Agent review', vscode.TreeItemCollapsibleState.Expanded);
     item.description = `${n} comment${n === 1 ? '' : 's'}`;
-    item.tooltip = 'Your comments on this worktree\'s files and commits. Copy them for the agent\'s chat, or save them as a file in its worktree.';
+    item.tooltip = 'Your review comments on this worktree\'s files and commits (the + in an editor\'s gutter). Copy them for the agent\'s chat, or save them as a file in its worktree.';
     item.iconPath = new vscode.ThemeIcon('comment-discussion');
     item.contextValue = 'reviewComments';
     item.id = `review:${this.worktreePath}`;
@@ -185,6 +193,10 @@ class WorktreeNode {
     // What is going on first (uncommitted work), then where it stands: a narrow sidebar cuts the end.
     const parts = [];
     if (wt.changes) parts.push(dirty ? `● ${dirty} change${dirty === 1 ? '' : 's'}` : '✓ clean');
+    // Review comments waiting to go to the agent: seen without opening the row.
+    const review = require('../review').get();
+    const comments = review ? review.forRoot(path.resolve(wt.path)).length : 0;
+    if (comments) parts.push(`💬 ${comments}`);
     if (wt.ahead || wt.behind) parts.push(`${wt.ahead ? `↑${wt.ahead}` : ''}${wt.behind ? `↓${wt.behind}` : ''}`);
     else if (wt.base && (wt.baseAhead || wt.baseBehind)) parts.push(`${wt.baseAhead ? `↑${wt.baseAhead}` : ''}${wt.baseBehind ? `↓${wt.baseBehind}` : ''} vs ${wt.base}`);
     parts.push(path.basename(wt.path));
@@ -234,7 +246,7 @@ class WorktreeNode {
     }
     const review = require('../review').get();
     const comments = review ? review.forRoot(path.resolve(wt.path)) : [];
-    if (comments.length) out.push(new ReviewCommentsNode(this, comments));
+    if (comments.length) out.push(new ReviewCommentsNode(this));
     if (wt.changes) out.push(new MessageNode(`Working tree: ${changesText(wt.changes)}`, wt.changes.conflicts ? 'warning' : changesText(wt.changes) === 'clean' ? 'check' : 'diff'));
     if (wt.upstream) out.push(new MessageNode(`${wt.upstream}: ${wt.ahead || 0} ahead, ${wt.behind || 0} behind`, 'cloud'));
     else if (wt.branch && wt.base) out.push(new MessageNode(`No upstream · ${wt.baseAhead || 0} ahead of ${wt.base}, ${wt.baseBehind || 0} behind`, 'git-compare'));
@@ -255,6 +267,8 @@ class WorktreesView extends TreeProvider {
     this.manager = manager;
     /** worktree paths whose "Changes vs …" row is expanded */
     this.openChanges = new Set();
+    /** worktree root -> its "Agent review" row (redrawn alone when a comment moves) */
+    this.reviewNodes = new Map();
     this.view = require('../util').registerTreeView('commitCorner.worktrees', vscode.window.createTreeView('commitCorner.worktrees', { treeDataProvider: this, manageCheckboxStateManually: true }));
     const refresh = debounce(() => this.refresh(), 1500);
     this.disposables = [
@@ -275,8 +289,13 @@ class WorktreesView extends TreeProvider {
         if (e.visible) this.refresh();
       }),
       changed.event(() => this.refresh()),
-      // Review comments written or deleted: their rows under the worktrees.
-      ...(require('../review').get() ? [require('../review').get().onDidChange(() => this.refresh())] : []),
+      // Review comments: a comment that moved (or was edited) redraws its worktree's review row;
+      // one added or deleted, the worktrees (their counts), a moment later.
+      ...(require('../review').get() ? [require('../review').get().onDidChange((e) => {
+        const node = this.reviewNodes.get(e.root);
+        if (node && !this.reviewCountChanged(node)) this._onDidChangeTreeData.fire(node);
+        else refresh();
+      })] : []),
       viewed.watchCheckboxes(this.view, this),
       // Which "Changes vs …" rows are open (a redraw must not close the one you are reviewing).
       this.view.onDidExpandElement((e) => {
@@ -294,7 +313,13 @@ class WorktreesView extends TreeProvider {
     this.disposables.push({ dispose: () => clearInterval(timer) });
   }
 
+  /** Whether a review row's count differs from what its worktree row shows (that needs the worktrees redrawn). */
+  reviewCountChanged(node) {
+    return node.shown !== undefined && node.shown !== node.threads.length;
+  }
+
   async getRoots() {
+    this.reviewNodes.clear();
     const repo = this.manager.active;
     if (!repo) return [];
     // "This window" is the worktree open in this window, whichever repository is active.
