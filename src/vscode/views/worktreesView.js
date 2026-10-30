@@ -119,6 +119,56 @@ class WorktreeFileNode {
   }
 }
 
+/**
+ * "Review for the agent": the comments you wrote on a worktree's work (the + in an editor's
+ * gutter), ready to copy into the agent's chat or save in its worktree.
+ */
+class ReviewCommentsNode {
+  constructor(parent, threads) {
+    this.worktreePath = parent.worktreePath;
+    this.threads = threads;
+  }
+
+  getTreeItem() {
+    const n = this.threads.length;
+    const item = new vscode.TreeItem('Review for the agent', vscode.TreeItemCollapsibleState.Expanded);
+    item.description = `${n} comment${n === 1 ? '' : 's'}`;
+    item.tooltip = 'Your comments on this worktree\'s files and commits. Copy them for the agent\'s chat, or save them as a file in its worktree.';
+    item.iconPath = new vscode.ThemeIcon('comment-discussion');
+    item.contextValue = 'reviewComments';
+    item.id = `review:${this.worktreePath}`;
+    return item;
+  }
+
+  getChildren() {
+    return [...this.threads].sort((a, b) => a.path.localeCompare(b.path, 'en') || a.start - b.start).map((t) => new ReviewThreadNode(this, t));
+  }
+}
+
+/** One comment (thread) on a line: opens its file there. */
+class ReviewThreadNode {
+  constructor(parent, t) {
+    this.parent = parent;
+    this.reviewThread = t.id;
+    this.thread = t;
+  }
+
+  getTreeItem() {
+    const t = this.thread;
+    const first = t.comments[0].body.split(/\r?\n/)[0];
+    const item = new vscode.TreeItem(`${path.posix.basename(t.path)}:${t.start + 1}`, vscode.TreeItemCollapsibleState.None);
+    item.description = first.length > 80 ? `${first.slice(0, 79)}…` : first;
+    const md = new vscode.MarkdownString();
+    md.appendText(`${t.path}, line ${t.start + 1}${t.ref ? ` in ${shortSha(t.ref)}` : ''}${t.outdated ? ' (these lines have changed)' : ''}\n\n`);
+    for (const c of t.comments) md.appendText(`${c.body}\n\n`);
+    item.tooltip = md;
+    item.iconPath = new vscode.ThemeIcon(t.outdated ? 'warning' : 'comment');
+    item.contextValue = 'reviewThread';
+    item.command = { command: 'commitCorner.review.open', title: 'Open', arguments: [{ reviewThread: t.id }] };
+    return item;
+  }
+}
+
 class WorktreeNode {
   constructor(repo, wt, provider) {
     this.provider = provider;
@@ -182,6 +232,9 @@ class WorktreeNode {
         log().info(`Worktree changes of ${wt.path}: ${e.message}`);
       }
     }
+    const review = require('../review').get();
+    const comments = review ? review.forRoot(path.resolve(wt.path)) : [];
+    if (comments.length) out.push(new ReviewCommentsNode(this, comments));
     if (wt.changes) out.push(new MessageNode(`Working tree: ${changesText(wt.changes)}`, wt.changes.conflicts ? 'warning' : changesText(wt.changes) === 'clean' ? 'check' : 'diff'));
     if (wt.upstream) out.push(new MessageNode(`${wt.upstream}: ${wt.ahead || 0} ahead, ${wt.behind || 0} behind`, 'cloud'));
     else if (wt.branch && wt.base) out.push(new MessageNode(`No upstream · ${wt.baseAhead || 0} ahead of ${wt.base}, ${wt.baseBehind || 0} behind`, 'git-compare'));
@@ -222,6 +275,8 @@ class WorktreesView extends TreeProvider {
         if (e.visible) this.refresh();
       }),
       changed.event(() => this.refresh()),
+      // Review comments written or deleted: their rows under the worktrees.
+      ...(require('../review').get() ? [require('../review').get().onDidChange(() => this.refresh())] : []),
       viewed.watchCheckboxes(this.view, this),
       // Which "Changes vs …" rows are open (a redraw must not close the one you are reviewing).
       this.view.onDidExpandElement((e) => {

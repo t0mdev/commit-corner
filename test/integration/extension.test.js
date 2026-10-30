@@ -148,6 +148,33 @@ suite('Commit Corner in VS Code', () => {
     await api.manager.refresh(repo);
   });
 
+  test('a review comment on a line: the gutter offers it, the thread follows its line, the review is copied', async () => {
+    const file = path.join(root(), 'review-me.txt');
+    fs.writeFileSync(file, 'one\ntwo\nthree\n');
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+    await vscode.window.showTextDocument(doc);
+    const { store, controller } = api.review;
+    const ranges = await controller.commentingRangeProvider.provideCommentingRanges(doc, new vscode.CancellationTokenSource().token);
+    assert.strictEqual(ranges.length, 1, 'the + is offered in the gutter');
+    // What VS Code does for the +: a thread on the line, then Add Comment with the text.
+    const thread = controller.createCommentThread(doc.uri, new vscode.Range(1, 0, 1, 0), []);
+    await vscode.commands.executeCommand('commitCorner.review.add', { thread, text: 'Say "2" here.' });
+    const saved = store.forRoot(root());
+    assert.strictEqual(saved.length, 1);
+    assert.strictEqual(thread.comments[0].body, 'Say "2" here.');
+    // Two lines typed above it: the thread moves with "two".
+    const edit = new vscode.WorkspaceEdit();
+    edit.insert(doc.uri, new vscode.Position(0, 0), 'a\nb\n');
+    await vscode.workspace.applyEdit(edit);
+    await until(() => thread.range.start.line === 3, 'the thread to follow its line');
+    await vscode.commands.executeCommand('commitCorner.review.copy', { reviewRoot: root() });
+    assert.match(await vscode.env.clipboard.readText(), /`review-me\.txt`, line 4\n\n```\n4  two\n```\n\nSay "2" here\./);
+    await vscode.commands.executeCommand('commitCorner.review.deleteThread', thread);
+    assert.strictEqual(store.forRoot(root()).length, 0);
+    await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+    fs.rmSync(file);
+  });
+
   test('editing the staged (index) side of a diff changes only the index', async () => {
     const repo = api.manager.repositories[0];
     fs.writeFileSync(path.join(root(), 'b.txt'), 'b\nworking tree\n');

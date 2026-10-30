@@ -75,7 +75,7 @@ const notCommands = new Set([
   ...pkg.contributes.views.commitCorner.map((v) => v.id),
   // VS Code's own per-view commands (focus, open, hide).
   ...[...pkg.contributes.views.commitCorner].flatMap((v) => ['focus', 'open', 'removeView', 'toggleVisibility'].map((c) => `${v.id}.${c}`)),
-  'commitCorner.graph', 'commitCorner.worktreesOverview', 'commitCorner.activity', 'commitCorner.summary', 'commitCorner.graphView', 'commitCorner.rebase', 'commitCorner.rebaseTodo', 'commitCorner.branch', 'commitCorner.sync', 'commitCorner.operation', 'commitCorner.blame', 'commitCorner.busy',
+  'commitCorner.graph', 'commitCorner.worktreesOverview', 'commitCorner.activity', 'commitCorner.summary', 'commitCorner.graphView', 'commitCorner.rebase', 'commitCorner.rebaseTodo', 'commitCorner.branch', 'commitCorner.sync', 'commitCorner.operation', 'commitCorner.blame', 'commitCorner.busy', 'commitCorner.review',
   ...[].concat(pkg.contributes.configuration).flatMap((c) => Object.keys(c.properties)),
   ...contextKeys,
 ]);

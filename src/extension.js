@@ -85,6 +85,7 @@ async function activate(extContext) {
   require('./vscode/commands/branchCommands').register(ctx);
   require('./vscode/commands/historyCommands').register(ctx);
   require('./vscode/commands/fileCommands').register(ctx);
+  const review = require('./vscode/review').register(ctx);
   require('./vscode/commands/repoCommands').register(ctx);
   require('./vscode/commands/navigationCommands').register(ctx);
   require('./vscode/commands/actionsHub').register(ctx);
@@ -138,7 +139,7 @@ async function activate(extContext) {
   manager.updateContextKeys();
   log().info(`Activated with ${manager.repositories.length} repositor${manager.repositories.length === 1 ? 'y' : 'ies'}`);
   if (manager.repositories.length) offerReplacingBuiltInGit(extContext).catch((e) => log().warn(e.message));
-  return { manager, registeredCommands: ctx.registered, scm: ctx.scm };
+  return { manager, registeredCommands: ctx.registered, scm: ctx.scm, review };
 }
 
 /**

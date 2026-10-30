@@ -1533,6 +1533,67 @@
         "command": "commitCorner.markCommitFileUnviewed",
         "title": "Mark as Not Viewed",
         "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.review.add",
+        "title": "Add Comment",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.review.reply",
+        "title": "Reply",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.review.deleteThread",
+        "title": "Delete Comment Thread",
+        "category": "Commit Corner",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "commitCorner.review.editComment",
+        "title": "Edit",
+        "category": "Commit Corner",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "commitCorner.review.deleteComment",
+        "title": "Delete",
+        "category": "Commit Corner",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "commitCorner.review.saveComment",
+        "title": "Save",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.review.cancelEdit",
+        "title": "Cancel",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.review.copy",
+        "title": "Copy Review for the Agent",
+        "category": "Commit Corner",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "commitCorner.review.save",
+        "title": "Save Review to the Worktree",
+        "category": "Commit Corner",
+        "icon": "$(save)"
+      },
+      {
+        "command": "commitCorner.review.clear",
+        "title": "Delete All Review Comments…",
+        "category": "Commit Corner",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "commitCorner.review.open",
+        "title": "Open Review Comment",
+        "category": "Commit Corner"
       }
     ],
     "submenus": [
@@ -2599,6 +2660,50 @@
         {
           "command": "commitCorner.markCommitFileUnviewed",
           "when": "false"
+        },
+        {
+          "command": "commitCorner.review.add",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.review.reply",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.review.deleteThread",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.review.editComment",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.review.deleteComment",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.review.saveComment",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.review.cancelEdit",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.review.open",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.review.copy",
+          "when": "commitCorner.hasReviewComments"
+        },
+        {
+          "command": "commitCorner.review.save",
+          "when": "commitCorner.hasReviewComments"
+        },
+        {
+          "command": "commitCorner.review.clear",
+          "when": "commitCorner.hasReviewComments"
         }
       ],
       "scm/title": [
@@ -4052,6 +4157,31 @@
           "command": "commitCorner.markCommitFileUnviewed",
           "when": "viewItem == file:commit && !listMultiSelection && config.commitCorner.markUnviewedFiles",
           "group": "8_viewed@1"
+        },
+        {
+          "command": "commitCorner.review.copy",
+          "when": "view == commitCorner.worktrees && viewItem == reviewComments",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.review.save",
+          "when": "view == commitCorner.worktrees && viewItem == reviewComments",
+          "group": "inline@2"
+        },
+        {
+          "command": "commitCorner.review.copy",
+          "when": "view == commitCorner.worktrees && viewItem == reviewComments",
+          "group": "1_review@1"
+        },
+        {
+          "command": "commitCorner.review.save",
+          "when": "view == commitCorner.worktrees && viewItem == reviewComments",
+          "group": "1_review@2"
+        },
+        {
+          "command": "commitCorner.review.clear",
+          "when": "view == commitCorner.worktrees && viewItem == reviewComments",
+          "group": "2_clear@1"
         }
       ],
       "webview/context": [
@@ -4351,6 +4481,54 @@
           "command": "commitCorner.sidebar.to.worktrees",
           "when": "view != commitCorner.worktrees",
           "group": "1_views@5"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "commitCorner.review.add",
+          "when": "commentController == commitCorner.review && commentThreadIsEmpty",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.review.reply",
+          "when": "commentController == commitCorner.review && !commentThreadIsEmpty",
+          "group": "inline@1"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "commitCorner.review.copy",
+          "when": "commentController == commitCorner.review && !commentThreadIsEmpty",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.review.deleteThread",
+          "when": "commentController == commitCorner.review && !commentThreadIsEmpty",
+          "group": "inline@2"
+        }
+      ],
+      "comments/comment/title": [
+        {
+          "command": "commitCorner.review.editComment",
+          "when": "commentController == commitCorner.review && comment == reviewComment",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.review.deleteComment",
+          "when": "commentController == commitCorner.review && comment == reviewComment",
+          "group": "inline@2"
+        }
+      ],
+      "comments/comment/context": [
+        {
+          "command": "commitCorner.review.saveComment",
+          "when": "commentController == commitCorner.review",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.review.cancelEdit",
+          "when": "commentController == commitCorner.review",
+          "group": "inline@2"
         }
       ]
     },
@@ -5414,6 +5592,18 @@
             "default": true,
             "markdownDescription": "Show files you have not viewed in **bold** (graph) or with a dot (tree views); a commit you started on counts what you have seen (\"3/12\"). Opening a file marks it viewed. Marks survive an amend or rebase that leaves a change as it was; an uncommitted file is bold again when its content changes.",
             "order": 1
+          },
+          "commitCorner.review.comments": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Comment on lines of an agent's work for the agent: the **+** in the gutter of its worktree's files and of a commit's diff. **Copy Review for the Agent** (comment title bar, Worktrees view) puts them together as one text to paste into its chat.",
+            "order": 2
+          },
+          "commitCorner.review.fileName": {
+            "type": "string",
+            "default": ".review-comments.md",
+            "markdownDescription": "The file **Save Review to the Worktree** writes in the agent's worktree (a plain name; git is told to ignore it there).",
+            "order": 3
           }
         }
       },

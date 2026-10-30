@@ -257,6 +257,8 @@ function createVscode() {
   const configValues = new Map();
   /** File decoration providers registered (to ask them what they show). */
   const decorationProviders = [];
+  /** Comment controllers created (review comments). */
+  const commentControllers = [];
   const workspaceConfigValues = new Map();
   const ui = {
     /** Queued answers consumed by showQuickPick/showInputBox/show*Message, in order. */
@@ -278,6 +280,7 @@ function createVscode() {
     onDidChangeWorkspaceFolders: new EventEmitter(),
     onDidChangeTextDocument: new EventEmitter(),
     onDidCloseTextDocument: new EventEmitter(),
+    onDidOpenTextDocument: new EventEmitter(),
     onDidSaveTextDocument: new EventEmitter(),
     onDidChangeConfiguration: new EventEmitter(),
   };
@@ -305,6 +308,30 @@ function createVscode() {
     FileSystemError,
     TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
     TreeItemCheckboxState: { Unchecked: 0, Checked: 1 },
+    CommentMode: { Editing: 0, Preview: 1 },
+    CommentThreadCollapsibleState: { Collapsed: 0, Expanded: 1 },
+    // Comment controllers keep their threads (created by the extension, or by "+" via newThread).
+    comments: {
+      createCommentController(id, label) {
+        const controller = {
+          id,
+          label,
+          threads: [],
+          createCommentThread(uri, range, comments) {
+            const thread = { uri, range, comments, disposed: false, dispose() { this.disposed = true; } };
+            controller.threads.push(thread);
+            return thread;
+          },
+          /** What VS Code does when you click "+" on a line: a new, empty thread there. */
+          newThread(uri, range) {
+            return controller.createCommentThread(uri, range, []);
+          },
+          dispose() {},
+        };
+        commentControllers.push(controller);
+        return controller;
+      },
+    },
     CancellationTokenSource,
     LanguageModelError,
     LanguageModelChatMessage: { User: (content) => ({ role: 'user', content }) },
@@ -530,6 +557,7 @@ function createVscode() {
     statusItems,
     configValues,
     decorationProviders,
+    commentControllers,
     workspaceConfigValues,
     workspaceFolders,
     lmModels,
