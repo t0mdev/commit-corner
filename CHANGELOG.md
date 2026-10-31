@@ -10,7 +10,7 @@
 - Each review comment has a `…` menu: **Copy Review for the Agent**, **Save Review to the Worktree** and, in its own group, **Delete All Review Comments…**. They act on that comment's worktree, without asking which. Delete All asks first and says how many comments (and replies) in which files go.
 - While you edit a comment, Copy and Save tell you to save (or cancel) it first: the review takes the saved text. With no comments (or review comments turned off), Copy, Save and Delete All say so; their worktree picker says what it is for.
 - The Actions hub (`Ctrl+Alt+G Space`) has a Review group: next unviewed file, open working file, copy, save, delete all.
-- The interactive rebase editor no longer takes the key after `Ctrl+Alt+G` as its own (`Ctrl+Alt+G S` marked the commit "squash", `Ctrl+Alt+G Ctrl+Alt+Enter` started the rebase); in the graph, that key no longer lands in the commit message box even after a pause.
+- The interactive rebase editor no longer takes the key after `Ctrl+Alt+G` as its own (`Ctrl+Alt+G S` marked the commit "squash", `Ctrl+Alt+G Ctrl+Alt+Enter` started the rebase); in the graph it no longer lands in the commit message box, even when it comes a few seconds later; the worktrees overview, activity and summary pages leave it to VS Code too (`Ctrl+Alt+G Enter` opened a worktree card, `Ctrl+Alt+G Escape` stopped a summary).
 
 ## 1.3.0
 

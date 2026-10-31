@@ -58,12 +58,22 @@ test('a chord lasts as long as VS Code waits (5 s) and ends when the window lose
 });
 
 test("a held second key stays VS Code's while it repeats; a page's own copy of a key is no key press", () => {
-  const { keys, press, release } = load();
+  const { keys, press, release, blur } = load();
+  press('g', { ctrl: true, alt: true });
+  press('Space');
+  blur();
+  assert.ok(!keys.has(press('Space', { repeat: true })), 'after the window lost focus');
   press('g', { ctrl: true, alt: true });
   assert.ok(keys.has(press('Enter', { ctrl: true, alt: true })));
   assert.ok(keys.has(press('Enter', { ctrl: true, alt: true, repeat: true })), 'its repeats too');
+  assert.ok(!keys.has(press('ArrowDown', { repeat: true })), "another key's repeats are the page's");
   release('Enter');
   assert.ok(!keys.has(press('Enter', { ctrl: true, alt: true, repeat: true })), 'once released, keys are the page\'s again');
+  // Its keyup went to VS Code (the key opened something else): back here, a held key is the page's.
+  press('g', { ctrl: true, alt: true });
+  press('ArrowRight');
+  assert.ok(!keys.has(press('ArrowRight')), 'a fresh press ends it');
+  assert.ok(!keys.has(press('ArrowRight', { repeat: true })));
   // A script's copy of Ctrl+Alt+G (the graph hands keys on to its list) neither starts nor ends a chord.
   press('g', { ctrl: true, alt: true });
   press('g', { ctrl: true, alt: true, script: true });

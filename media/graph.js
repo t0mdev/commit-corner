@@ -2115,7 +2115,7 @@
     // disappeared) every list key goes to the list.
     if (document.activeElement === document.body && !['Shift', 'Control', 'Alt', 'Meta', 'Tab'].includes(e.key)) {
       scroller.focus();
-      // Ctrl+Alt+G (a chord's start) is VS Code's: the list gets no copy of it.
+      // Ctrl/Cmd+Alt keys (VS Code's chords start with one) get no copy: the list has none.
       if ((e.ctrlKey || e.metaKey) && e.altKey) return;
       scroller.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, bubbles: true, cancelable: true }));
       e.preventDefault();

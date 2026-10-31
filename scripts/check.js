@@ -92,12 +92,14 @@ for (const id of ['commitCorner.review.copy', 'commitCorner.review.save', 'commi
 for (const f of jsFiles.filter((p) => p.includes(`${path.sep}media${path.sep}`) && !p.endsWith('icons.js'))) {
   const text = fs.readFileSync(f, 'utf8');
   if (/addEventListener\('keydown'/.test(text) && !/const chordKeys = ui\.chordGuard\(\);/.test(text)) problems.push(`${path.relative(root, f)}: handles keys without ui.chordGuard()`);
+  if (/\.onkey(down|press)\s*=/.test(text)) problems.push(`${path.relative(root, f)}: key handlers go through addEventListener (checked for the chord guard here)`);
   const guarded = new Set([...text.matchAll(/function (\w+)\((\w+)[^)]*\) \{\n(?:\s*\/\/.*\n)*\s*if \([^\n]*chordKeys\.has\(\2\)/g)].map((m) => m[1]));
-  for (const m of text.matchAll(/addEventListener\('keydown', \((\w+)\) => (\{\n(?:\s*\/\/.*\n)*\s*(.*)|(.*))/g)) {
-    const first = m[3] || m[4] || '';
+  for (const m of text.matchAll(/addEventListener\('keydown', ([^\n]*)/g)) {
     const line = text.slice(0, m.index).split('\n').length;
-    const ok = first.includes(`chordKeys.has(${m[1]})`) || [...guarded].some((fn) => first.includes(`${fn}(${m[1]}`)) || /dispatchEvent/.test(first);
-    if (!ok && !/chordGuard/.test(text.slice(Math.max(0, m.index - 300), m.index))) problems.push(`${path.relative(root, f)}:${line}: a keydown handler that does not leave the key after Ctrl+Alt+G to VS Code (check chordKeys.has(${m[1]}) first)`);
+    const arrow = /^\((\w+)\) => (?:\{\n(?:\s*\/\/.*\n)*\s*(.*)|(.*))/.exec(text.slice(m.index + "addEventListener('keydown', ".length));
+    const first = arrow && (arrow[2] || arrow[3] || '');
+    const ok = arrow && (first.includes(`chordKeys.has(${arrow[1]})`) || [...guarded].some((fn) => first.includes(`${fn}(${arrow[1]}`)));
+    if (!ok) problems.push(`${path.relative(root, f)}:${line}: a keydown handler that does not leave the key after Ctrl+Alt+G to VS Code (an arrow function checking chordKeys.has(…) first)`);
   }
 }
 
@@ -136,6 +138,9 @@ for (const f of jsFiles.filter((p) => p.includes(`${path.sep}media${path.sep}`) 
   const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
   const table = readme.slice(readme.indexOf('| Then | Action |')).split('\n\n')[0].split('\n').slice(2);
   const named = { '←': 'left', '→': 'right' };
+  // Complete: the walkthrough says "the full list is in the README".
+  const listed = new Set(table.flatMap((row) => [...(/^\| (.+?) \|/.exec(row) || ['', ''])[1].matchAll(/`([^`]+)`/g)].map((k) => `ctrl+alt+g ${(named[k[1]] || k[1]).toLowerCase()}`)));
+  for (const kb of kbs) if (/^ctrl\+alt\+g (?!ctrl\+alt\+)/.test(kb.key) && !listed.has(kb.key)) problems.push(`README.md shortcut table: ${kb.key} (${titleOf.get(kb.command)}) is missing`);
   for (const row of table) {
     const [, keyCell, action] = /^\| (.+?) \| (.+) \|$/.exec(row) || [];
     if (!keyCell) continue;

@@ -940,4 +940,4 @@ async function excludeFile(repo, name) {
   }
 }
 
-module.exports = { register, get, same, ReviewStore, valid, insideRoot, excludeFile, writeReview, checkTarget, fileNameOk, shortNames };
+module.exports = { register, get, same, ReviewStore, valid, insideRoot, excludeFile, writeReview, checkTarget, fileNameOk, shortNames, plain };

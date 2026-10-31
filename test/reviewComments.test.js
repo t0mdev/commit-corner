@@ -592,6 +592,11 @@ test("a deleted comment's (or thread's) menu does nothing, never another worktre
   }
 });
 
+test('repository text in one-line messages: no control, bidi or invisible characters, no icons', () => {
+  const { plain } = require('../src/vscode/review');
+  assert.equal(plain('evil\u202egnp.js\nx\u0085y\u200bz\u2066\u2028\ufeff$(alert)'), 'evil gnp.js x y z   \\$(alert)');
+});
+
 test('Delete All names files by their shortest distinct ending', () => {
   const { shortNames } = require('../src/vscode/review');
   assert.deepEqual(shortNames(['src/index.js', 'test/index.js', 'a/b/c.txt', 'README.md']), ['src/index.js', 'test/index.js', 'c.txt', 'README.md']);
