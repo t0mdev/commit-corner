@@ -409,7 +409,8 @@ function register(ctx) {
           }
           t.outdated = found === undefined;
           // Gone: kept where the edit took them (an undo brings them back there).
-          start = t.outdated ? Math.min(here, Math.max(0, Math.min(first, count - 1))) : found;
+          // (`first` is a line of the text before the edit: moved into today's by the changes above the thread.)
+          start = t.outdated ? Math.max(0, Math.min(here + Math.min(0, first - t.start), count - 1)) : found;
         }
       }
       if (start === t.start && was === !!t.outdated) continue; // nothing to tell anyone

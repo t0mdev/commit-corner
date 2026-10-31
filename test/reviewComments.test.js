@@ -344,6 +344,18 @@ test('a comment whose lines are gone: an edit far above only moves it; a paste a
   assert.doesNotMatch(thread.label, /changed/);
 });
 
+test('one edit that adds lines above a comment and changes its line parks it on its own line', async (t) => {
+  const lines = Array.from({ length: 12 }, (_, k) => `const v${k} = ${k};`);
+  const { thread, doc, file } = await commented(t, lines, 6);
+  // As a formatter reports it, in one edit: two lines added at the top, the commented line rewritten.
+  const now = ['// a', '// b', ...lines];
+  now[8] = 'const v6 = 600;';
+  fs.writeFileSync(file.fsPath, now.join('\n'));
+  mock.events.onDidChangeTextDocument.fire({ document: doc, contentChanges: [{ range: new mock.vscode.Range(0, 0, 0, 0), text: '// a\n// b\n' }, { range: new mock.vscode.Range(6, 13, 6, 14), text: '600' }] });
+  assert.equal(thread.range.start.line, 8);
+  assert.match(thread.label, /changed/);
+});
+
 test('a CRLF paste right above a comment, and a reload reported as one change ending at its line, move it as they should', async (t) => {
   const lines = blocks(['a', 'b']);
   const { thread, edit } = await commented(t, lines, 9);
@@ -561,4 +573,13 @@ test('Save refuses a folder that is no longer a worktree of an open repository',
   await cmds['commitCorner.review.save']({ worktreePath: gone });
   assert.equal(fs.readdirSync(gone).length, 0, 'nothing written there');
   assert.match(mock.ui.messages.pop().msg, /not a worktree of an open repository/);
+});
+
+test('a comment\'s row in the Worktrees view shows its first line without Markdown marks', () => {
+  const { ReviewThreadNode } = require('../src/vscode/views/worktreesView');
+  const row = (body) => new ReviewThreadNode({}, { id: 'x', path: 'src/a.js', ref: null, start: 4, end: 4, anchor: [], comments: [{ id: 'c', body, time: 1 }] }).getTreeItem();
+  assert.equal(row('**A** or **B**: see `load()` and [the docs](https://x)').description, 'A or B: see load() and the docs');
+  assert.equal(row('```js\nconst x = 1;\n```\nuse snake_case_name, not 2*3*4').description, 'use snake_case_name, not 2*3*4');
+  assert.equal(row('# Rename _x_ and _y_').description, 'Rename x and y');
+  assert.equal(row('x').label, 'a.js:5');
 });

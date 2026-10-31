@@ -168,12 +168,17 @@ class ReviewThreadNode {
   getTreeItem() {
     const t = this.thread;
     // The first line, as text (no Markdown marks: the comment itself renders them).
-    const first = t.comments[0].body.split(/\r?\n/).find((l) => l.trim() && !/^\s*(```|~~~)/.test(l)) || '';
+    let inCode = false;
+    const first = t.comments[0].body.split(/\r?\n/).find((l) => {
+      if (/^\s*(```|~~~)/.test(l)) inCode = !inCode; // a code block: not a preview
+      else if (!inCode && l.trim()) return true;
+      return false;
+    }) || '';
     const preview = first
       .replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+)/, '') // a heading, quote or list mark at its start
       .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // a link: its text
       .replace(/(`+)([^`]+)\1/g, '$2') // code spans
-      .replace(/(?<![\w*])(\*\*|__|\*|_)(\S(?:.*?\S)?)\1(?![\w*])/g, '$2') // emphasis around words (not snake_case_names, not 2*3*4)
+      .replace(/(?<![\w*])(\*\*|__|\*|_)(\S(?:.*?\S)??)\1(?![\w*])/g, '$2') // emphasis around words (not snake_case_names, not 2*3*4)
       .replace(/\s+/g, ' ').trim();
     const item = new vscode.TreeItem(`${path.posix.basename(t.path)}:${t.start + 1}`, vscode.TreeItemCollapsibleState.None);
     item.description = preview.length > 80 ? `${preview.slice(0, 79)}…` : preview;
@@ -541,4 +546,4 @@ function register(ctx) {
   });
 }
 
-module.exports = { baseOf, WorktreesView, WorktreeNode, register, changesText, onDidChangeWorktrees: changed.event };
+module.exports = { baseOf, WorktreesView, WorktreeNode, ReviewThreadNode, register, changesText, onDidChangeWorktrees: changed.event };
