@@ -353,7 +353,7 @@
       undoRedo(ev.key.toLowerCase() === 'y' || ev.shiftKey);
       return;
     }
-    if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter' && !startBtn.disabled) {
+    if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.repeat && ev.key === 'Enter' && !startBtn.disabled) {
       ev.preventDefault();
       vscode.postMessage({ type: 'start', plan: plan.map(stripUi) });
     }

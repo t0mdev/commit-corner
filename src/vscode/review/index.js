@@ -34,7 +34,7 @@ const same = (a, b) => (process.platform === 'linux' ? a === b : a.normalize('NF
 /** One form for every root (a drive letter in lower case, as VS Code's paths have it). */
 const rootPath = (p) => normalizePath(path.resolve(p));
 /** Repository text (a path, a branch) in a one-line message: no $(icon) syntax, no control characters. */
-const plain = (t) => escapeIcons(String(t).replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' '));
+const plain = (t) => escapeIcons(String(t).replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029\ufeff]/g, ' '));
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const isLine = (l) => l === null || l === undefined || (typeof l === 'string' && l.length <= MAX_LINE);
 
@@ -572,10 +572,10 @@ function register(ctx) {
       return CANCELLED;
     }
     const roots = store.roots();
+    if (roots.length <= 1) return roots[0];
     const here = await activeRoot();
     const mine = here && roots.find((r) => same(r, here));
     if (mine) return mine;
-    if (roots.length <= 1) return roots[0];
     const items = [];
     for (const r of roots) {
       const w = await whose(r);
@@ -589,16 +589,18 @@ function register(ctx) {
   /**
    * The worktree of the active editor's file. For a commit's revision: the one its comments are
    * filed under (an agent's, for its commits), if that is one worktree; else none (you pick).
+   * Without comments on it yet, the one a new comment there would go to.
    */
   async function activeRoot() {
     const ed = vscode.window.activeTextEditor;
     const at = ed && (await locate(ed.document.uri).catch(() => undefined));
     if (!at || !at.ref) return at && at.root;
     const roots = [...store.threads.values()].filter((t) => t.ref === at.ref && same(t.repoRoot, at.repo.root)).map((t) => t.root);
-    return roots.length && roots.every((r) => same(r, roots[0])) ? roots[0] : undefined;
+    if (!roots.length) return ownerOfCommit(at.repo, at.ref, at.root).catch(() => undefined);
+    return roots.every((r) => same(r, roots[0])) ? roots[0] : undefined;
   }
 
-  const noComments = () => notify.info(enabled() ? 'No review comments yet: add them with the + in the gutter of a file (or of a commit\'s diff).' : 'Review comments are turned off (setting commitCorner.review.comments).');
+  const noComments = () => notify.info(enabled() ? 'No review comments (add them with the + in the gutter of a file, or of a commit\'s diff).' : 'Review comments are turned off (setting commitCorner.review.comments).');
 
   /** Whether one of the root's comments is open for editing (its text is not saved yet). */
   const editing = (root) => [...shown.values()].some((set) => [...set].some((th) => {
@@ -736,10 +738,7 @@ function register(ctx) {
       return;
     }
     const review = await build(root);
-    if (!review) {
-      notify.info('No review comments yet.');
-      return;
-    }
+    if (!review) return void noComments();
     // Only a name that may be written (free, or an earlier review) gets ignored; then ignored
     // first (the file and its temporary twin), so git never sees it, even for a moment.
     try {
@@ -786,7 +785,7 @@ function register(ctx) {
     // Counted as everywhere else (a comment with its replies is one), the replies said apart.
     const n = threads.length;
     const replies = threads.reduce((sum, t) => sum + t.comments.length - 1, 0);
-    const files = [...new Set(threads.map((t) => t.path))].map((p) => path.posix.basename(p));
+    const files = shortNames([...new Set(threads.map((t) => t.path))]);
     const where = files.length > 3 ? `${files.slice(0, 3).join(', ')} and ${files.length - 3} more files` : files.join(', ');
     const detail = `In ${plain(where)}${replies ? `, with ${replies} ${replies === 1 ? 'reply' : 'replies'}` : ''}. This cannot be undone: copy or save the review first if the agent still needs it.`;
     if (!(await confirm(`Delete ${n === 1 ? 'the review comment' : `all ${n} review comments`} of ${plain(await nameOf(root))}?`, 'Delete', detail))) return;
@@ -809,6 +808,18 @@ function register(ctx) {
   ctx.extContext.subscriptions.push(store.onDidChange(updateContext));
   updateContext();
   return { store, controller };
+}
+
+/** Each path by its shortest ending no other path shares ("index.js", or "src/index.js" beside "test/index.js"). */
+function shortNames(paths) {
+  return paths.map((p) => {
+    const parts = p.split('/');
+    for (let k = 1; k < parts.length; k++) {
+      const tail = parts.slice(-k).join('/');
+      if (paths.filter((q) => q === tail || q.endsWith(`/${tail}`)).length === 1) return tail;
+    }
+    return p;
+  });
 }
 
 /** A plain file name: no folders, no ".git", nothing Windows treats as a device or trims. */
@@ -929,4 +940,4 @@ async function excludeFile(repo, name) {
   }
 }
 
-module.exports = { register, get, same, ReviewStore, valid, insideRoot, excludeFile, writeReview, checkTarget, fileNameOk };
+module.exports = { register, get, same, ReviewStore, valid, insideRoot, excludeFile, writeReview, checkTarget, fileNameOk, shortNames };

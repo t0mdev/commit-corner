@@ -12,6 +12,8 @@
   window.addEventListener('error', (e) => report(e.message, e.error && e.error.stack));
   window.addEventListener('unhandledrejection', (e) => report(e.reason && e.reason.message ? e.reason.message : e.reason, e.reason && e.reason.stack));
   const ui = window.gaUi;
+  // The key after Ctrl+Alt+G is VS Code's (icons.js), never an action here.
+  const chordKeys = ui.chordGuard();
 
   const el = (tag, cls, text) => {
     const e = document.createElement(tag);
@@ -174,7 +176,7 @@
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !stopBtn.hidden) vscode.postMessage({ type: 'stop' });
+    if (e.key === 'Escape' && !stopBtn.hidden && !chordKeys.has(e)) vscode.postMessage({ type: 'stop' });
   });
 
   window.addEventListener('focus', () => {

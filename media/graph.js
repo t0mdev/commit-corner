@@ -93,6 +93,7 @@
   };
   repoLabel.addEventListener('click', switchRepo);
   repoLabel.addEventListener('keydown', (ev) => {
+    if (chordKeys.has(ev)) return; // the key after Ctrl+Alt+G is VS Code's
     if (ev.key === 'Enter' || ev.key === ' ') {
       ev.preventDefault();
       switchRepo();
@@ -1515,6 +1516,7 @@
     );
     for (const b of bar.querySelectorAll('button')) {
       b.addEventListener('keydown', (ev) => {
+        if (chordKeys.has(ev)) return; // the key after Ctrl+Alt+G is VS Code's
         if (ev.key !== 'Escape') return;
         ev.preventDefault();
         cursor = at();
@@ -2108,10 +2110,13 @@
   });
 
   document.addEventListener('keydown', (e) => {
+    if (chordKeys.has(e)) return; // the key after Ctrl+Alt+G is VS Code's
     // Safety net: with focus on <body> (after VS Code focused the view or tab, or an element
     // disappeared) every list key goes to the list.
     if (document.activeElement === document.body && !['Shift', 'Control', 'Alt', 'Meta', 'Tab'].includes(e.key)) {
       scroller.focus();
+      // Ctrl+Alt+G (a chord's start) is VS Code's: the list gets no copy of it.
+      if ((e.ctrlKey || e.metaKey) && e.altKey) return;
       scroller.dispatchEvent(new KeyboardEvent('keydown', { key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, bubbles: true, cancelable: true }));
       e.preventDefault();
       return;
@@ -2192,6 +2197,7 @@
   }
 
   searchBox.addEventListener('keydown', (e) => {
+    if (chordKeys.has(e)) return; // the key after Ctrl+Alt+G is VS Code's
     // Escape / ↓ go to the results; a further Escape in the list clears the search.
     if (e.key === 'Escape' || e.key === 'ArrowDown') {
       e.preventDefault();
@@ -2334,6 +2340,7 @@
         item.appendChild(acts);
       }
       item.addEventListener('keydown', (e) => {
+        if (chordKeys.has(e)) return; // the key after Ctrl+Alt+G is VS Code's
         if (fsha && fileKey(e, fsha, f, extra.parent, item)) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -2509,6 +2516,7 @@
 
   // Esc anywhere in the details pane goes back to the commit list.
   detailsPane.addEventListener('keydown', (e) => {
+    if (chordKeys.has(e)) return; // the key after Ctrl+Alt+G is VS Code's
     if (e.key !== 'Escape') return;
     e.preventDefault();
     scroller.focus();
@@ -2520,6 +2528,7 @@
   splitter.setAttribute('aria-orientation', 'horizontal');
   splitter.setAttribute('aria-label', 'Resize the details pane (up and down arrows)');
   splitter.addEventListener('keydown', (e) => {
+    if (chordKeys.has(e)) return; // the key after Ctrl+Alt+G is VS Code's
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
     e.preventDefault();
     const h = detailsPane.getBoundingClientRect().height + (e.key === 'ArrowUp' ? 24 : -24);
@@ -2923,6 +2932,7 @@
   }
   help.tabIndex = -1;
   help.addEventListener('keydown', (e) => {
+    if (chordKeys.has(e)) return; // the key after Ctrl+Alt+G is VS Code's
     if (e.key === 'Escape' || e.key === '?') {
       e.preventDefault();
       toggleHelp();

@@ -61,7 +61,8 @@ for (const prop of ['key', 'mac']) {
   for (const kb of kbs.filter((x) => x[prop])) {
     const same = byKey.get(kb[prop]) || [];
     // Two commands on one key clash when their when clauses can hold together: the same, or one always.
-    for (const o of same) if (o.command !== kb.command && (!o.when || !kb.when || o.when === kb.when)) problems.push(`keybinding ${kb[prop]}: both ${o.command} [${o.when || ''}] and ${kb.command} [${kb.when || ''}]`);
+    // (After Ctrl+Alt+G a key always means one thing, whatever the when clauses.)
+    for (const o of same) if (o.command !== kb.command && (!o.when || !kb.when || o.when === kb.when || /^(ctrl|cmd)\+alt\+g /.test(kb[prop]))) problems.push(`keybinding ${kb[prop]}: both ${o.command} [${o.when || ''}] and ${kb.command} [${kb.when || ''}]`);
     byKey.set(kb[prop], [...same, kb]);
   }
   const g = prop === 'key' ? 'ctrl' : 'cmd';
@@ -86,12 +87,28 @@ for (const id of ['commitCorner.review.copy', 'commitCorner.review.save', 'commi
   if (!item || !/comment == reviewComment/.test(item.when || '')) problems.push(`menu comments/comment/title: ${id} belongs in each review comment's … menu`);
 }
 
+// Webview pages: every key handler leaves the key after Ctrl+Alt+G to VS Code (ui.chordGuard in
+// icons.js), checking chordKeys first or handing the event to a function that does.
+for (const f of jsFiles.filter((p) => p.includes(`${path.sep}media${path.sep}`) && !p.endsWith('icons.js'))) {
+  const text = fs.readFileSync(f, 'utf8');
+  if (/addEventListener\('keydown'/.test(text) && !/const chordKeys = ui\.chordGuard\(\);/.test(text)) problems.push(`${path.relative(root, f)}: handles keys without ui.chordGuard()`);
+  const guarded = new Set([...text.matchAll(/function (\w+)\((\w+)[^)]*\) \{\n(?:\s*\/\/.*\n)*\s*if \([^\n]*chordKeys\.has\(\2\)/g)].map((m) => m[1]));
+  for (const m of text.matchAll(/addEventListener\('keydown', \((\w+)\) => (\{\n(?:\s*\/\/.*\n)*\s*(.*)|(.*))/g)) {
+    const first = m[3] || m[4] || '';
+    const line = text.slice(0, m.index).split('\n').length;
+    const ok = first.includes(`chordKeys.has(${m[1]})`) || [...guarded].some((fn) => first.includes(`${fn}(${m[1]}`)) || /dispatchEvent/.test(first);
+    if (!ok && !/chordGuard/.test(text.slice(Math.max(0, m.index - 300), m.index))) problems.push(`${path.relative(root, f)}:${line}: a keydown handler that does not leave the key after Ctrl+Alt+G to VS Code (check chordKeys.has(${m[1]}) first)`);
+  }
+}
+
 // Shortcuts named in the docs run what the text around them says: one word of the bound
 // command's title nearby (a swapped key left in a sentence would name another action).
 {
   const titleOf = new Map(pkg.contributes.commands.map((c) => [c.command, c.title]));
   const stop = new Set(['the', 'and', 'for', 'with', 'from', 'open', 'show', 'file', 'files', 'commit', 'corner', 'current', 'selected']);
-  const words = (s) => s.toLowerCase().replace(/[^a-z]+/g, ' ').split(' ').filter((w) => w.length > 2 && !stop.has(w));
+  const words = (s, all = false) => s.toLowerCase().replace(/[^a-z]+/g, ' ').split(' ').filter((w) => w.length > 2 && (all || !stop.has(w)));
+  // A title's words (all of them when it has only common ones, like "Commit").
+  const titleWords = (c) => (words(titleOf.get(c) || '').length ? words(titleOf.get(c) || '') : words(titleOf.get(c) || '', true));
   // Alike: the same first 5 letters, or a whole short word ("checks" / "checkout", "push" /
   // "pushes"; not "commits" / "comment").
   const alike = (a, b) => {
@@ -101,12 +118,34 @@ for (const id of ['commitCorner.review.copy', 'commitCorner.review.save', 'commi
   };
   for (const doc of ['README.md', 'media/walkthrough/keyboard.md', 'media/walkthrough/review.md', 'docs/intro/index.html', 'docs/SMOKE_TEST.md']) {
     const text = fs.readFileSync(path.join(root, doc), 'utf8').replace(/<\/?kbd>/g, '');
-    for (const m of text.matchAll(/Ctrl\+Alt\+G`? `?((?:Shift\+)?[A-Z])\b/g)) {
+    const found = [...text.matchAll(/Ctrl\+Alt\+G`? `?((?:Shift\+)?[A-Z])\b/g)];
+    for (const [n, m] of found.entries()) {
       const key = `ctrl+alt+g ${m[1].toLowerCase()}`;
       const cmds = kbs.filter((k) => k.key === key).map((k) => k.command);
-      const near = words(text.slice(Math.max(0, m.index - 160), m.index + 100));
+      // Its own words: up to the shortcuts before and after it (two in one line name two things).
+      const before = text.slice(0, m.index);
+      const from = Math.max(m.index - 160, n ? found[n - 1].index + found[n - 1][0].length : 0, ...['·', '|', ';'].map((c) => before.lastIndexOf(c) + 1));
+      const to = Math.min(m.index + 100, n + 1 < found.length ? found[n + 1].index : Infinity);
+      const near = words(text.slice(from, to));
       if (!cmds.length) problems.push(`${doc}: Ctrl+Alt+G ${m[1]} is not bound`);
-      else if (!cmds.some((c) => words(titleOf.get(c) || '').some((w) => near.some((n) => alike(n, w))))) problems.push(`${doc}: Ctrl+Alt+G ${m[1]} runs "${cmds.map((c) => titleOf.get(c)).join('" / "')}", which the text around it does not name`);
+      else if (!cmds.some((c) => titleWords(c).some((w) => near.some((n) => alike(n, w))))) problems.push(`${doc}: Ctrl+Alt+G ${m[1]} runs "${cmds.map((c) => titleOf.get(c)).join('" / "')}", which the text around it does not name`);
+    }
+  }
+  // The README's table ("| `S` / `U` / `R` | Stage / unstage / discard selected lines |"): each
+  // key with its part of the action (the parts split like the keys), else the whole action.
+  const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+  const table = readme.slice(readme.indexOf('| Then | Action |')).split('\n\n')[0].split('\n').slice(2);
+  const named = { '←': 'left', '→': 'right' };
+  for (const row of table) {
+    const [, keyCell, action] = /^\| (.+?) \| (.+) \|$/.exec(row) || [];
+    if (!keyCell) continue;
+    const keys = [...keyCell.matchAll(/`([^`]+)`/g)].map((k) => (named[k[1]] || k[1]).toLowerCase());
+    const parts = action.split(/ \/ /);
+    for (const [i, k] of keys.entries()) {
+      const cmds = kbs.filter((b) => b.key === `ctrl+alt+g ${k}`).map((b) => b.command);
+      const text = words(parts.length === keys.length ? parts[i] : action, true);
+      if (!cmds.length) problems.push(`README.md shortcut table: ${k} is not bound`);
+      else if (!cmds.some((c) => titleWords(c).some((w) => text.some((n) => alike(n, w))))) problems.push(`README.md shortcut table: ${k} runs "${cmds.map((c) => titleOf.get(c)).join('" / "')}", not "${parts.length === keys.length ? parts[i] : action}"`);
     }
   }
 }

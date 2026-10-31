@@ -370,15 +370,18 @@ async function pickWorktree(repo, placeHolder) {
   // The first entry is always the main worktree.
   const others = (await repo.getWorktrees()).slice(1).filter((w) => !w.bare && !w.prunable);
   if (!others.length) {
-    notify.info('This repository has no other worktrees.');
+    notify.info('This repository has no other worktrees (add one with the + in the Worktrees view).');
     return undefined;
   }
   // The worktree of the file in front of you first (Enter takes it).
   const ed = vscode.window.activeTextEditor;
   const file = ed && ed.document.uri.scheme === 'file' ? ed.document.uri.fsPath : undefined;
-  const inside = (w) => file && !path.relative(w.path, file).startsWith('..') && !path.isAbsolute(path.relative(w.path, file));
+  const inside = (w) => {
+    const rel = file && path.relative(w.path, file);
+    return rel !== undefined && rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+  };
   const here = others.filter(inside).sort((a, b) => b.path.length - a.path.length)[0];
-  const items = others.map((w) => ({ label: `$(list-tree) ${escapeIcons(w.branch || path.basename(w.path))}`, description: w === here ? `${w.path} · the file you have open` : w.path, w }));
+  const items = others.map((w) => ({ label: `$(list-tree) ${escapeIcons(w.branch || path.basename(w.path))}`, description: escapeIcons(w === here ? `${w.path} · the file you have open` : w.path), w }));
   if (here) items.unshift(...items.splice(others.indexOf(here), 1));
   const pick = others.length === 1 ? { w: others[0] } : await vscode.window.showQuickPick(items, { placeHolder });
   return pick && { repoRoot: repo.root, worktreePath: pick.w.path, worktree: pick.w };

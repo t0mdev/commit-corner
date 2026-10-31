@@ -6,6 +6,8 @@
   const vscode = acquireVsCodeApi();
   // @ts-ignore shared helpers from icons.js
   const ui = window.gaUi;
+  // The key after Ctrl+Alt+G is VS Code's (icons.js), never an action here.
+  const chordKeys = ui.chordGuard();
 
   const el = (tag, cls, text) => {
     const e = document.createElement(tag);
@@ -154,7 +156,7 @@
       focusedPath = w.path;
     });
     k.addEventListener('keydown', (e) => {
-      if (e.target !== k) return;
+      if (e.target !== k || chordKeys.has(e)) return;
       if (e.key === 'Enter' && !w.isCurrent && !w.prunable) {
         e.preventDefault();
         send('open');
@@ -168,6 +170,7 @@
 
   /** Arrow keys / Home / End move between cards, in reading order. */
   grid.addEventListener('keydown', (e) => {
+    if (chordKeys.has(e)) return;
     const cards = [...grid.querySelectorAll('.card')];
     const i = cards.indexOf(/** @type {Element} */ (document.activeElement));
     if (i < 0 || e.target !== cards[i]) return;
@@ -180,7 +183,7 @@
 
   // Esc from a card's button goes back to its card.
   grid.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
+    if (e.key !== 'Escape' || chordKeys.has(e)) return;
     const k = /** @type {HTMLElement} */ (e.target).closest('.card');
     if (k && k !== e.target) {
       e.preventDefault();

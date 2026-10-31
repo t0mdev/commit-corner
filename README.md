@@ -569,8 +569,8 @@ Things to know before disabling the built-in Git:
 Everything works without a mouse (layout: English/US). All shortcuts start
 with the chord `Ctrl+Alt+G` (`Cmd+Alt+G` on macOS); the second key also works
 with `Ctrl+Alt` still held (`Ctrl+Alt+G Ctrl+Alt+S`, `Ctrl+Alt+G Ctrl+Alt+Shift+F`).
-The keys used most are single letters; pull and push take `Shift`, so a stray key
-never changes a branch.
+The keys used most are single letters; pull and push on their own take `Shift`
+(`Y` syncs: pulls, then pushes).
 
 | Then | Action |
 |---|---|

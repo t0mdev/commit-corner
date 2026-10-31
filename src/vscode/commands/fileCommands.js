@@ -280,7 +280,7 @@ function register(ctx) {
       const uri = node instanceof vscode.Uri ? node : vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri;
       const r = revisionOf(manager, uri) || activeUris().map((u) => revisionOf(manager, u)).find((x) => x && x.ref);
       if (!r) {
-        vscode.window.setStatusBarMessage('Open Working File works in a revision or a diff (the worktrees overview is Ctrl+Alt+G Shift+W now)', 5000);
+        vscode.window.setStatusBarMessage(`Open Working File works in a revision or a diff (the worktrees overview is ${process.platform === 'darwin' ? 'Cmd' : 'Ctrl'}+Alt+G Shift+W)`, 5000);
         return;
       }
       repo = r.repo;

@@ -6,6 +6,8 @@
   const vscode = acquireVsCodeApi();
   // @ts-ignore shared helpers from icons.js
   const ui = window.gaUi;
+  // The key after Ctrl+Alt+G is VS Code's (icons.js), never an action here.
+  const chordKeys = ui.chordGuard();
   const SVG_NS = 'http://www.w3.org/2000/svg';
 
   const el = (tag, cls, text) => {
@@ -52,6 +54,7 @@
     b.dataset.days = String(days);
     b.addEventListener('click', () => setPeriod(days));
     b.addEventListener('keydown', (e) => {
+      if (chordKeys.has(e)) return;
       const i = PERIODS.findIndex(([d]) => d === days);
       const to = { ArrowRight: i + 1, ArrowDown: i + 1, ArrowLeft: i - 1, ArrowUp: i - 1 }[e.key];
       if (to === undefined) return;
@@ -189,7 +192,7 @@
           const open = () => send({ type: 'commits', shas: data.commits.filter((c) => c.date >= b.from && c.date < b.to).map((c) => c.sha), label: `${bucketLabel(b, weekly)}: ${plural(b.commits, 'commit')}` });
           tr.addEventListener('click', open);
           tr.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') open();
+            if (e.key === 'Enter' && !chordKeys.has(e)) open();
           });
         }
         table.appendChild(tr);
@@ -277,6 +280,7 @@
       if (active >= 0) openBucket(active);
     });
     wrap.addEventListener('keydown', (e) => {
+      if (chordKeys.has(e)) return;
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         openBucket(active);

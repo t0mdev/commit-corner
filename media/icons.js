@@ -207,9 +207,19 @@
   function chordGuard(win = window, now = Date.now) {
     const keys = new WeakSet();
     let until = 0;
+    let held; // the second key, while it is held down (its repeats are VS Code's too)
+    const mark = (/** @type {KeyboardEvent} */ e) => {
+      keys.add(e);
+      e.preventDefault(); // no character typed; VS Code still sees the key
+    };
     win.addEventListener('blur', () => (until = 0));
+    win.addEventListener('keyup', (/** @type {KeyboardEvent} */ e) => {
+      if (e.code === held) held = undefined;
+    }, true);
     win.addEventListener('keydown', (/** @type {KeyboardEvent} */ e) => {
-      if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+      // A page's own copy of a key (dispatched by script) is not a key press.
+      if (e.isTrusted === false || ['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+      if (e.repeat && held && e.code === held) return void mark(e);
       // (Ctrl+Alt+G Ctrl+Alt+G: the second one is the chord's second key, and the chord ends.)
       const g = (e.ctrlKey || e.metaKey) && e.altKey && (e.code === 'KeyG' || e.key.toLowerCase() === 'g');
       if (g && now() >= until) {
@@ -218,8 +228,8 @@
       }
       if (now() < until) {
         until = 0;
-        keys.add(e);
-        e.preventDefault(); // no character typed; VS Code still sees the key
+        held = e.code;
+        mark(e);
       }
     }, true);
     return keys;

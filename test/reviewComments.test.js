@@ -418,6 +418,16 @@ test('a comment on an agent\'s commit goes to that agent\'s review, and its row 
   await cmds['commitCorner.review.copy']();
   assert.match(clip(), /Why here/);
   assert.doesNotMatch(clip(), /mine/);
+  // Another commit of the agent, without comments yet: its review too (where a comment there would go).
+  fs.writeFileSync(path.join(wt, 'more.txt'), 'more\n');
+  gitIn(wt, 'add', 'more.txt');
+  gitIn(wt, 'commit', '-q', '-m', 'More work');
+  const later = gitIn(wt, 'rev-parse', 'HEAD');
+  mock.vscode.window.activeTextEditor = { document: { uri: toGitUri(repo.root, 'more.txt', later, { commit: later }) } };
+  mock.vscode.env.clipboard.text = '';
+  await cmds['commitCorner.review.copy']();
+  assert.match(clip(), /Why here/);
+  assert.doesNotMatch(clip(), /mine/);
   // Its row in the Worktrees view opens that revision.
   const shown = [];
   const saved = mock.vscode.window.showTextDocument;
@@ -578,8 +588,14 @@ test("a deleted comment's (or thread's) menu does nothing, never another worktre
   for (const id of ['commitCorner.review.copy', 'commitCorner.review.save', 'commitCorner.review.clear']) {
     mock.ui.messages.length = 0;
     await cmds[id]();
-    assert.match(mock.ui.messages.at(-1).msg, /No review comments yet/, id);
+    assert.match(mock.ui.messages.at(-1).msg, /^No review comments \(add them with the \+/, id);
   }
+});
+
+test('Delete All names files by their shortest distinct ending', () => {
+  const { shortNames } = require('../src/vscode/review');
+  assert.deepEqual(shortNames(['src/index.js', 'test/index.js', 'a/b/c.txt', 'README.md']), ['src/index.js', 'test/index.js', 'c.txt', 'README.md']);
+  assert.deepEqual(shortNames(['x/a/index.js', 'y/a/index.js']), ['x/a/index.js', 'y/a/index.js']);
 });
 
 test('stored comments are checked when read back, and kept within bounds', () => {
