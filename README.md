@@ -19,7 +19,7 @@ change summaries. Plain JavaScript, no runtime dependencies, no telemetry.
    keyboard in the list, `Space` ticks it off as *Viewed*; a file the agent changes again
    unticks itself.
 3. **Comment** — the **+** in an editor's gutter adds a review comment on that line (in the
-   agent's files or in a commit's diff). **Copy Review for the Agent** (`Ctrl+Alt+G Shift+C`)
+   agent's files or in a commit's diff). **Copy Review for the Agent** (`Ctrl+Alt+G C`)
    puts all of them together — file, line, the code as it is now, your comment — to paste
    into the agent's chat.
 4. **Summarize** — the sparkle button on that row (or on a pull request, or selected commits) asks your
@@ -123,7 +123,7 @@ new tags (open them in the graph).
 - **Viewed marks**: a commit's files — and the uncommitted ones — are
   **bold** until you open them, and a commit you started on says how many you
   have seen (`3/12`, ✓ when done). `N` goes to the next bold file and opens it
-  (in a diff: *Next Unviewed File*, `Ctrl+Alt+G Shift+N`); `V` or the
+  (in a diff: *Next Unviewed File*, `Ctrl+Alt+G N`); `V` or the
   right-click menu's *Mark as Not Viewed* makes an opened file bold again (to
   come back to it later), and a commit's menu marks all of its files. A
   commit's mark belongs to the change, not the commit: when an agent amends or
@@ -300,7 +300,7 @@ open). Without the API (switched off, offline), the view falls back to git only:
   used (so a stale local `origin/main` does not matter); without a test
   merge the remote's default branch is fetched along with the PR. The base
   can be changed per PR. Already-merged PRs still show their own changes.
-- Open a PR (`Ctrl+Alt+G P`: pick from the listed ones by number, title or
+- Open a PR (`Ctrl+Alt+G Shift+P`: pick from the listed ones by number, title or
   author, or type a number), check it out as a local branch that
   tracks the PR (Pull brings in new commits; pushing is refused with an offer
   to push to a branch, because GitHub never accepts pushes to `refs/pull/*`),
@@ -321,7 +321,7 @@ newest commit.
 
 ### Compare
 - Compare any two branches, tags or commits, or a ref with the working tree
-  (`Ctrl+Alt+G C`, or "Select for Compare" then "Compare with Selected").
+  (`Ctrl+Alt+G Shift+C`, or "Select for Compare" then "Compare with Selected").
 - **Three-dot** (changes since the branches diverged, what a PR shows) or
   **two-dot** (full difference); swap sides. With the working tree, three-dot
   is the default: everything HEAD did since it left the branch, committed or
@@ -424,16 +424,18 @@ newest commit.
   it, and when those lines themselves change, it says so. The worktree's row
   in the Worktrees view shows how many ("2 comments") and gets **Agent review** with
   every comment (click one to go there) and two buttons: **Copy Review for the
-  Agent** (`Ctrl+Alt+G Shift+C`; one Markdown text: what to do, then each
+  Agent** (`Ctrl+Alt+G C`; one Markdown text: what to do, then each
   comment with its file, lines and current code, or for lines that changed
   since, the old and the new — paste it into the agent's
   chat) and **Save Review to the Worktree** (the same as `.review-comments.md`
   in its folder, ignored by git; **Copy Instruction** then gives you the line
   to tell the agent). A file of that name that is not an earlier review is
-  never overwritten. Delete All Review Comments in its menu. Settings:
+  never overwritten. Copy, Save and **Delete All Review Comments…** (asks
+  first) are also in each comment's `…` menu, and Delete All in Agent review's.
+  Settings:
   `commitCorner.review.comments`, `commitCorner.review.fileName` (user setting).
 - Stashes are a group in the Repository view (`Delete` drops the focused one).
-- **Worktrees overview** (`Ctrl+Alt+G W`, or the dashboard button on the
+- **Worktrees overview** (`Ctrl+Alt+G Shift+W`, or the dashboard button on the
   Worktrees view): one card per worktree with branch, path, staged / changed /
   untracked counts, upstream with ↑ahead ↓behind, the last commit (avatar,
   author, age) and buttons to open, add to the workspace, show in the graph,
@@ -563,7 +565,7 @@ Things to know before disabling the built-in Git:
 
 Everything works without a mouse (layout: English/US). All shortcuts start
 with the chord `Ctrl+Alt+G` (`Cmd+Alt+G` on macOS); the second key also works
-with `Ctrl+Alt` still held (`Ctrl+Alt+G Ctrl+Alt+S`, `Ctrl+Alt+G Ctrl+Alt+Shift+P`).
+with `Ctrl+Alt` still held (`Ctrl+Alt+G Ctrl+Alt+S`, `Ctrl+Alt+G Ctrl+Alt+Shift+F`).
 
 | Then | Action |
 |---|---|
@@ -577,23 +579,21 @@ with `Ctrl+Alt` still held (`Ctrl+Alt+G Ctrl+Alt+S`, `Ctrl+Alt+G Ctrl+Alt+Shift+
 | `A` / `Shift+A` | Stage / unstage the current file (also from the staged side of a diff); not while a list or tree has focus |
 | `D` | Open the changes of the current file (not while a list or tree has focus) |
 | `←` / `→` | Previous / next revision of the file in a diff |
+| `N` | Next unviewed file of the commit (in a diff opened from a commit's files) |
+| `W` | Open the working file at the same line (in a revision or diff) |
+| `C` | Copy the review comments for the agent |
 | `Enter` | Commit |
+| `P` / `Shift+F` | Push / pull |
 | `F` / `Y` | Fetch / sync |
-| `Shift+P` / `Shift+F` | Push / pull |
-| `Shift+G` / `Shift+X` / `Shift+K` | Bisect: mark good / bad / skip (only while bisecting) |
-| `C` | Compare refs |
-| `O` | Checkout |
-| `P` | Open a pull request (pick one, or type its number) |
-| `Shift+U` | Undo the last history rewrite (rebase, fold, reword…) |
-| `W` | Worktrees overview |
+| `O` / `Shift+O` | Checkout / switch repository (several open) |
+| `Shift+C` | Compare refs |
+| `Shift+P` / `Shift+N` | Open a pull request (pick one, or type its number) / create one |
+| `Shift+W` | Worktrees overview |
 | `V` / `Shift+V` | Focus the sidebar Graph / changes since you last looked |
 | `T` | Repository Activity |
 | `Z` / `Shift+Z` | Stash / pop a stash |
-| `N` | Create pull request |
-| `Shift+N` | Next unviewed file of the commit (in a diff opened from a commit's files) |
-| `Shift+W` | Open the working file at the same line (in a revision or diff) |
-| `Shift+O` | Switch repository (several open) |
-| `Shift+C` | Copy the review comments for the agent |
+| `Shift+U` | Undo the last history rewrite (rebase, fold, reword…) |
+| `Shift+G` / `Shift+X` / `Shift+K` | Bisect: mark good / bad / skip (only while bisecting) |
 
 **Graph** (focused when it opens; `?` shows this list):
 - `↑ ↓ PgUp PgDn Home End` move; `Shift` extends the selection; `Ctrl+↑/↓`

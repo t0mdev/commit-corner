@@ -452,6 +452,8 @@ function register(ctx) {
 
   /** The VS Code thread's stored thread (a new one: none yet). */
   const recordOf = (thread) => thread && store.threads.get(idOf.get(thread));
+  /** A comment's thread record (by the comment's id when its widget thread was shown again since). */
+  const commentRecord = (comment) => recordOf(comment.thread) || [...store.threads.values()].find((t) => t.comments.some((c) => c.id === comment.id));
 
   // Add Comment / Reply (the widget's button): a new thread is stored with its lines' text.
   async function add(reply) {
@@ -555,11 +557,11 @@ function register(ctx) {
     return w && w.branch ? `branch ${w.branch}` : path.basename(root);
   };
 
-  /** The worktree (root) a command is for: the node's, the thread's, else picked from those with comments. */
+  /** The worktree (root) a command is for: the node's, the thread's (or comment's), else picked from those with comments. */
   async function rootFor(arg) {
     if (arg && typeof arg.worktreePath === 'string') return path.resolve(arg.worktreePath);
     if (arg && typeof arg.reviewRoot === 'string') return path.resolve(arg.reviewRoot);
-    const t = recordOf(arg);
+    const t = arg instanceof ReviewComment ? commentRecord(arg) : recordOf(arg);
     if (t) return t.root;
     const roots = store.roots();
     if (roots.length <= 1) return roots[0];

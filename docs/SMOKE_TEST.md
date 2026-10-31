@@ -52,7 +52,7 @@ reloading the window. Use a scratch clone with a GitHub remote.
 - [ ] Previous / next revision buttons in a diff editor step through the file's history.
 - [ ] Graph: badges have icons, avatars show initials, the Changes column fills in while scrolling; hovering a row shows no pop-up; Push/Pull show counts.
 - [ ] Repository view (branches): commit rows show an avatar icon (also in WSL/remote windows), age and +/−; the tooltip links work.
-- [ ] Worktrees overview (`Ctrl+Alt+G W`) lists every worktree with its state; Open / Remove work; it updates after editing a file in a worktree.
+- [ ] Worktrees overview (`Ctrl+Alt+G Shift+W`) lists every worktree with its state; Open / Remove work; it updates after editing a file in a worktree.
 
 ## Keyboard only (no mouse, US layout)
 - [ ] Graph: Shift+F10 opens the commit menu next to the cursor row; with three commits selected (Shift+↓) it offers "Show Range Changes".
@@ -60,6 +60,6 @@ reloading the window. Use a scratch clone with a GitHub remote.
 - [ ] Graph: with a screen reader (NVDA / Narrator), ↓ announces each commit; `?` opens the help dialog.
 - [ ] Repository view: ↓ to a merged branch, Delete → confirm deletes it; F2 renames; Delete on the current branch does nothing.
 - [ ] Repository view, Stashes group: Delete drops the focused stash after confirming.
-- [ ] `Ctrl+Alt+G Shift+P` pushes, `Ctrl+Alt+G Shift+F` pulls; during a bisect `Ctrl+Alt+G Shift+G` / `Shift+X` mark commits.
+- [ ] `Ctrl+Alt+G P` pushes, `Ctrl+Alt+G Shift+F` pulls; during a bisect `Ctrl+Alt+G Shift+G` / `Shift+X` mark commits.
 - [ ] Focus a file in the Source Control list and press `Ctrl+Alt+G A`: nothing is staged (the chord only acts from an editor).
 - [ ] Rebase editor: Ctrl+Z / Ctrl+Y undo and redo plan changes (and do not also trigger VS Code's own undo); `R` puts the cursor in the message; Esc, Esc asks before discarding; Home/End jump; the focused row has a visible outline in a high-contrast theme.

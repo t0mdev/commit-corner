@@ -480,6 +480,36 @@ test('editing and deleting comments; an empty comment is not added', async (t) =
   assert.ok(thread.disposed);
 });
 
+test("a comment's menu: Copy, Save and Delete All are for its worktree, without asking which", async (t) => {
+  const { r, repo, cmds, controller, open, store, clip } = await setup(t);
+  r.commit('base', { 'f.txt': 'a\nb\n' });
+  const wt = path.join(repo.root, '..', 'wt-menu');
+  gitIn(repo.root, 'worktree', 'add', '-q', '-b', 'agent/menu', wt);
+  t.after(() => fs.rmSync(wt, { recursive: true, force: true }));
+  // Comments in two worktrees: a command without its comment would ask which (and, unanswered, stop).
+  const mine = mock.vscode.Uri.file(path.join(wt, 'f.txt'));
+  const other = mock.vscode.Uri.file(path.join(repo.root, 'f.txt'));
+  open(mine);
+  open(other);
+  const thread = controller.newThread(mine, new mock.vscode.Range(1, 0, 1, 0));
+  await cmds['commitCorner.review.add']({ thread, text: 'in the worktree' });
+  const elsewhere = controller.newThread(other, new mock.vscode.Range(0, 0, 0, 0));
+  await cmds['commitCorner.review.add']({ thread: elsewhere, text: 'in the repository' });
+  const comment = thread.comments[0];
+  await cmds['commitCorner.review.copy'](comment);
+  assert.match(clip(), /in the worktree/);
+  assert.doesNotMatch(clip(), /in the repository/);
+  // Delete All asks first: No keeps them.
+  mock.ui.answers.push(undefined);
+  await cmds['commitCorner.review.clear'](comment);
+  assert.equal(store.forRoot(wt).length, 1, 'kept when not confirmed');
+  mock.ui.answers.push('Delete');
+  await cmds['commitCorner.review.clear'](comment);
+  assert.equal(store.forRoot(wt).length, 0);
+  assert.ok(thread.disposed);
+  assert.equal(store.forRoot(repo.root).length, 1, "the other worktree's comment stays");
+});
+
 test('stored comments are checked when read back, and kept within bounds', () => {
   const { ReviewStore, valid } = require('../src/vscode/review');
   const ok = { id: 'a', root: '/r', repoRoot: '/r', path: 'x.js', ref: null, start: 1, end: 1, anchor: ['x'], comments: [{ id: 'c', body: 'b', time: 1 }], time: 1 };

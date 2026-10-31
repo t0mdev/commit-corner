@@ -170,14 +170,14 @@ suite('One draft (graph and Source Control)', () => {
 });
 
 suite('VS Code chords in the graph', () => {
-  test('Ctrl+Alt+G W in the message opens the worktrees overview and types nothing', async () => {
+  test('Ctrl+Alt+G Shift+W in the message opens the worktrees overview and types nothing', async () => {
     await vscode.commands.executeCommand('commitCorner.showGraph');
     await sleep(1500); // the page is re-created when its tab comes back
     const page = await webview('graph.js', "!document.body.classList.contains('in-sidebar') && !!document.querySelector('.commit-message')");
     await evaluate(page, `(() => { const i = document.querySelector('.commit-message'); i.focus(); i.value = 'Chord test'; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
     const step = (name, p) => p.catch((e) => assert.fail(`${name}: ${e && (e.message || e.type || JSON.stringify(e))}`));
     await step('press Ctrl+Alt+G', press(page, 'g', { ctrl: true, alt: true }));
-    await step('press W', press(page, 'w'));
+    await step('press Shift+W', press(page, 'W', { shift: true }));
     const opened = await webview('worktrees.js', 'true', 8000).then(() => true, () => false);
     assert.ok(opened, 'VS Code still got the chord (the worktrees overview opened)');
     // The overview hid the graph's tab: back to it, its draft restored — without a "w".
@@ -189,7 +189,7 @@ suite('VS Code chords in the graph', () => {
       await key(again, null, 'ArrowRight');
     }
     await until(() => evaluate(again, `!!document.querySelector('.commit-message')`), 'the staging area');
-    assert.strictEqual(await evaluate(again, `document.querySelector('.commit-message').value`), 'Chord test', 'no "w" typed');
+    assert.strictEqual(await evaluate(again, `document.querySelector('.commit-message').value`), 'Chord test', 'no "W" typed');
   });
 });
 

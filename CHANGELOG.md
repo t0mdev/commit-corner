@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Each review comment has a `…` menu: **Copy Review for the Agent**, **Save Review to the Worktree** and, apart from them, **Delete All Review Comments…** (it asks first and names the worktree). These are for the comment's worktree, without asking which.
+- **Shortcuts**: the keys you use most while reviewing are single letters after `Ctrl+Alt+G` (`Cmd+Alt+G`): `N` next unviewed file, `W` open the working file, `C` copy the review for the agent, `P` push. What they did before moved to `Shift`: `Shift+N` create pull request, `Shift+W` worktrees overview, `Shift+C` compare refs, `Shift+P` open a pull request. `C` also works before you have comments (it says how to add them).
+
 ## 1.3.0
 
 - **Review comments for the agent**: the **+** in the gutter of a worktree's files (or the repository's) and of a commit's diff adds a comment on that line (Markdown; a comment on an agent's commit belongs to its worktree). **Copy Review for the Agent** (`Ctrl+Alt+G Shift+C`) puts all of a worktree's comments together — file, lines, the code as it is now, your comments — as one text to paste into the agent's chat; **Save Review to the Worktree** writes it as `.review-comments.md` there, ignored by git. Comments move with edits above them and say when their own lines changed (the review then shows the lines as they were and as they are now). The Worktrees view shows how many a worktree has and lists them under **Agent review**. Settings: `commitCorner.review.comments`, `commitCorner.review.fileName`.
