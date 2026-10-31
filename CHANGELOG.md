@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.4.0
 
 - **Shortcuts changed** (after `Ctrl+Alt+G`, `Cmd+Alt+G` on macOS): the keys used most while reviewing an agent's work are single letters now.
   - `N` next unviewed file (was `Shift+N`), `W` open the working file (was `Shift+W`; elsewhere it says where it works), `C` copy the review for the agent (was `Shift+C`; with comments in several worktrees it takes the one of the file in front of you).
