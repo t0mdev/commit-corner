@@ -1153,28 +1153,8 @@
 
   // ------------------------------------------------ uncommitted changes: staging in the graph
 
-  /**
-   * VS Code's chords start with Ctrl+Alt+G: the key after it is VS Code's (it reaches VS Code all
-   * the same), never a letter in the message or a staging key here (Ctrl+Alt+G S must not stage).
-   */
-  const chordKeys = new WeakSet();
-  const CHORD_MS = 5000; // as long as VS Code waits for the second key (it also stops on blur)
-  let chordUntil = 0;
-  window.addEventListener('blur', () => (chordUntil = 0));
-  window.addEventListener('keydown', (e) => {
-    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
-    // (Ctrl+Alt+G Ctrl+Alt+G: the second one is the chord's second key, and the chord ends.)
-    const g = (e.ctrlKey || e.metaKey) && e.altKey && (e.code === 'KeyG' || e.key.toLowerCase() === 'g');
-    if (g && Date.now() >= chordUntil) {
-      chordUntil = Date.now() + CHORD_MS;
-      return;
-    }
-    if (Date.now() < chordUntil) {
-      chordUntil = 0;
-      chordKeys.add(e);
-      e.preventDefault(); // no character typed; VS Code still sees the key
-    }
-  }, true);
+  // The key after Ctrl+Alt+G is VS Code's (icons.js).
+  const chordKeys = ui.chordGuard();
 
   /** Run a staging action on the host; the keyboard comes back to the same place afterwards. */
   function wtAction(action, extra = {}) {

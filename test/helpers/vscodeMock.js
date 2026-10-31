@@ -462,7 +462,7 @@ function createVscode() {
         return pickMessageAnswer(items);
       },
       async showWarningMessage(msg, ...items) {
-        ui.messages.push({ level: 'warning', msg });
+        ui.messages.push({ level: 'warning', msg, detail: items[0] && typeof items[0] === 'object' && !items[0].title ? items[0].detail : undefined });
         return pickMessageAnswer(items);
       },
       async showErrorMessage(msg, ...items) {

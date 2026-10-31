@@ -66,13 +66,49 @@ for (const prop of ['key', 'mac']) {
   }
   const g = prop === 'key' ? 'ctrl' : 'cmd';
   for (const kb of kbs) {
-    const m = new RegExp(`^${g}\\+alt\\+g (?!${g}\\+alt\\+)(.+)$`).exec(kb[prop] || '');
-    if (m && !kbs.some((o) => o[prop] === `${g}+alt+g ${g}+alt+${m[1]}` && o.command === kb.command && (o.when || '') === (kb.when || ''))) problems.push(`keybinding ${kb[prop]} (${kb.command}): no twin "${g}+alt+g ${g}+alt+${m[1]}"`);
+    // Both ways: "G S" has its "G Ctrl+Alt+S", and "G Ctrl+Alt+S" its "G S" (same command, same when).
+    const plainKey = new RegExp(`^${g}\\+alt\\+g (?!${g}\\+alt\\+)(.+)$`).exec(kb[prop] || '');
+    const held = new RegExp(`^${g}\\+alt\\+g ${g}\\+alt\\+(?!g$)(.+)$`).exec(kb[prop] || '');
+    const twin = plainKey ? `${g}+alt+g ${g}+alt+${plainKey[1]}` : held ? `${g}+alt+g ${held[1]}` : undefined;
+    if (twin && !kbs.some((o) => o[prop] === twin && o.command === kb.command && (o.when || '') === (kb.when || ''))) problems.push(`keybinding ${kb[prop]} (${kb.command}): no twin "${twin}"`);
   }
 }
-// Deleting every review comment is never a one-click icon on a comment (it sits in the … menu).
+// macOS: the same keys with Cmd for Ctrl.
+for (const kb of kbs) if (/^ctrl\+alt\+g\b/.test(kb.key) && kb.mac !== kb.key.replace(/ctrl/g, 'cmd')) problems.push(`keybinding ${kb.key} (${kb.command}): mac is "${kb.mac}", not "${kb.key.replace(/ctrl/g, 'cmd')}"`);
+// Deleting every review comment is never a one-click icon on a comment (it sits in the … menu, as
+// do Copy and Save), nor a button of a comment being edited (comments/comment/context).
 for (const menu of ['comments/comment/title', 'comments/commentThread/title', 'comments/commentThread/context']) {
   for (const item of pkg.contributes.menus[menu] || []) if (item.command === 'commitCorner.review.clear' && /^inline/.test(item.group || '')) problems.push(`menu ${menu}: Delete All Review Comments must not be inline`);
+}
+if ((pkg.contributes.menus['comments/comment/context'] || []).some((i) => i.command === 'commitCorner.review.clear')) problems.push('menu comments/comment/context: no Delete All Review Comments next to Save/Cancel');
+for (const id of ['commitCorner.review.copy', 'commitCorner.review.save', 'commitCorner.review.clear']) {
+  const item = (pkg.contributes.menus['comments/comment/title'] || []).find((i) => i.command === id && !/^inline/.test(i.group || ''));
+  if (!item || !/comment == reviewComment/.test(item.when || '')) problems.push(`menu comments/comment/title: ${id} belongs in each review comment's … menu`);
+}
+
+// Shortcuts named in the docs run what the text around them says: one word of the bound
+// command's title nearby (a swapped key left in a sentence would name another action).
+{
+  const titleOf = new Map(pkg.contributes.commands.map((c) => [c.command, c.title]));
+  const stop = new Set(['the', 'and', 'for', 'with', 'from', 'open', 'show', 'file', 'files', 'commit', 'corner', 'current', 'selected']);
+  const words = (s) => s.toLowerCase().replace(/[^a-z]+/g, ' ').split(' ').filter((w) => w.length > 2 && !stop.has(w));
+  // Alike: the same first 5 letters, or a whole short word ("checks" / "checkout", "push" /
+  // "pushes"; not "commits" / "comment").
+  const alike = (a, b) => {
+    let i = 0;
+    while (i < a.length && a[i] === b[i]) i++;
+    return i >= Math.min(5, a.length, b.length);
+  };
+  for (const doc of ['README.md', 'media/walkthrough/keyboard.md', 'media/walkthrough/review.md', 'docs/intro/index.html', 'docs/SMOKE_TEST.md']) {
+    const text = fs.readFileSync(path.join(root, doc), 'utf8').replace(/<\/?kbd>/g, '');
+    for (const m of text.matchAll(/Ctrl\+Alt\+G`? `?((?:Shift\+)?[A-Z])\b/g)) {
+      const key = `ctrl+alt+g ${m[1].toLowerCase()}`;
+      const cmds = kbs.filter((k) => k.key === key).map((k) => k.command);
+      const near = words(text.slice(Math.max(0, m.index - 160), m.index + 100));
+      if (!cmds.length) problems.push(`${doc}: Ctrl+Alt+G ${m[1]} is not bound`);
+      else if (!cmds.some((c) => words(titleOf.get(c) || '').some((w) => near.some((n) => alike(n, w))))) problems.push(`${doc}: Ctrl+Alt+G ${m[1]} runs "${cmds.map((c) => titleOf.get(c)).join('" / "')}", which the text around it does not name`);
+    }
+  }
 }
 
 // The same property twice in a row (an edit applied twice): legal JavaScript, never meant.

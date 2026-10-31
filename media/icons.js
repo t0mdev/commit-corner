@@ -196,6 +196,35 @@
     return bar;
   }
 
+  /**
+   * VS Code's chords start with Ctrl+Alt+G (Cmd+Alt+G): the key after it is VS Code's (it reaches
+   * VS Code all the same), never a character typed or an action key of the page (Ctrl+Alt+G S
+   * must not stage, nor mark a rebase step "squash"). Returns the set of those key events, for
+   * the page's own handlers to skip. VS Code waits 5 s for that key, and stops on blur.
+   * @param {{ addEventListener: Function }} [win]
+   * @returns {WeakSet<KeyboardEvent>}
+   */
+  function chordGuard(win = window, now = Date.now) {
+    const keys = new WeakSet();
+    let until = 0;
+    win.addEventListener('blur', () => (until = 0));
+    win.addEventListener('keydown', (/** @type {KeyboardEvent} */ e) => {
+      if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+      // (Ctrl+Alt+G Ctrl+Alt+G: the second one is the chord's second key, and the chord ends.)
+      const g = (e.ctrlKey || e.metaKey) && e.altKey && (e.code === 'KeyG' || e.key.toLowerCase() === 'g');
+      if (g && now() >= until) {
+        until = now() + 5000;
+        return;
+      }
+      if (now() < until) {
+        until = 0;
+        keys.add(e);
+        e.preventDefault(); // no character typed; VS Code still sees the key
+      }
+    }, true);
+    return keys;
+  }
+
   // @ts-ignore
-  window.gaUi = { icon, avatar, initials, hue, compact, shortAge, tinyAge, shortDate, longAge, fullDate, statBar };
+  window.gaUi = { icon, avatar, initials, hue, compact, shortAge, tinyAge, shortDate, longAge, fullDate, statBar, chordGuard };
 })();
