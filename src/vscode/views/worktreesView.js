@@ -172,7 +172,8 @@ class ReviewThreadNode {
     const preview = first
       .replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+)/, '') // a heading, quote or list mark at its start
       .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // a link: its text
-      .replace(/(\*\*|__|\*|_|`+)(\S(?:.*?\S)?)\1/g, '$2') // paired emphasis and code marks (not the _ in my_name)
+      .replace(/(`+)([^`]+)\1/g, '$2') // code spans
+      .replace(/(?<![\w*])(\*\*|__|\*|_)(\S(?:.*?\S)?)\1(?![\w*])/g, '$2') // emphasis around words (not snake_case_names, not 2*3*4)
       .replace(/\s+/g, ' ').trim();
     const item = new vscode.TreeItem(`${path.posix.basename(t.path)}:${t.start + 1}`, vscode.TreeItemCollapsibleState.None);
     item.description = preview.length > 80 ? `${preview.slice(0, 79)}…` : preview;

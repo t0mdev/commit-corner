@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Review comments for the agent**: the **+** in the gutter of a worktree's files (or the repository's) and of a commit's diff adds a comment on that line (Markdown; a comment on an agent's commit belongs to its worktree). **Copy Review for the Agent** (`Ctrl+Alt+G Shift+C`) puts all of a worktree's comments together — file, lines, the code as it is now, your comments — as one text to paste into the agent's chat; **Save Review to the Worktree** writes it as `.review-comments.md` there, ignored by git. Comments move with edits above them and say when their own lines changed. The Worktrees view shows how many a worktree has and lists them under **Agent review**. Settings: `commitCorner.review.comments`, `commitCorner.review.fileName`.
+- **Review comments for the agent**: the **+** in the gutter of a worktree's files (or the repository's) and of a commit's diff adds a comment on that line (Markdown; a comment on an agent's commit belongs to its worktree). **Copy Review for the Agent** (`Ctrl+Alt+G Shift+C`) puts all of a worktree's comments together — file, lines, the code as it is now, your comments — as one text to paste into the agent's chat; **Save Review to the Worktree** writes it as `.review-comments.md` there, ignored by git. Comments move with edits above them and say when their own lines changed (the review then shows the lines as they were and as they are now). The Worktrees view shows how many a worktree has and lists them under **Agent review**. Settings: `commitCorner.review.comments`, `commitCorner.review.fileName`.
 
 ## 1.2.0
 

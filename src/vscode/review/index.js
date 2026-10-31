@@ -352,11 +352,15 @@ function register(ctx) {
     const set = shown.get(e.document.uri.toString());
     if (!set || !e.contentChanges.length) return;
     const changes = e.contentChanges.map((c) => ({ c, delta: (c.text.match(/\r\n|\r|\n/g) || []).length - (c.range.end.line - c.range.start.line) }));
+    const count = e.document.lineCount;
     const cache = new Map();
     const line = (i) => {
       if (!cache.has(i)) cache.set(i, normLines([e.document.lineAt(i).text])[0]);
       return cache.get(i);
     };
+    // The whole text normalized, once per edit, when a search reaches far (a file reloaded).
+    let all;
+    const lines = () => all || (all = Array.from({ length: count }, (_, i) => line(i)));
     const moved = [];
     for (const thread of set) {
       const t = store.threads.get(idOf.get(thread));
@@ -364,44 +368,51 @@ function register(ctx) {
       let shift = 0;
       let touched = false;
       let reach = 0;
+      let first = Infinity; // where the first change of its own lines began
       for (const { c, delta } of changes) {
         const r = c.range;
         // Wholly above: ending before its first line, or right at its start leaving that line
-        // whole (lines inserted or deleted before it). A thread whose lines are gone keeps
-        // looking for them instead (an undo puts them back there).
-        const atStart = r.end.line === t.start && r.end.character === 0 && !t.outdated && (/[\r\n]$/.test(c.text) || (c.text === '' && r.start.character === 0));
-        if (r.end.line < t.start || atStart) shift += delta;
-        if (!(r.end.line < t.start || atStart) || t.outdated) {
-          // Its own lines (or, for a thread whose lines are gone, anything above them: they may be back).
-          if (r.start.line > t.end) continue;
-          touched = true;
-          reach += Math.abs(delta) + (r.end.line - r.start.line) + 1;
-        }
+        // whole (lines inserted or deleted before it): a move. A thread whose lines are gone
+        // also looks for them after a change at its start (an undo puts them back there).
+        const atStart = r.end.line === t.start && r.end.character === 0 && (/[\r\n]$/.test(c.text) || (c.text === '' && r.start.character === 0));
+        if (r.end.line < t.start || atStart) {
+          shift += delta;
+          if (!(atStart && t.outdated)) continue;
+        } else if (r.start.line > t.end) continue;
+        else first = Math.min(first, r.start.line); // an edit of its own lines (not one before them)
+        touched = true;
+        reach += Math.abs(delta) + (r.end.line - r.start.line) + 1;
       }
       if (!shift && !touched) continue;
       let start = Math.max(0, t.start + shift);
       const was = !!t.outdated;
       if (touched) {
-        const count = e.document.lineCount;
         const n = t.anchor.length;
         const here = Math.min(start, Math.max(0, count - 1));
         // Where it would be now: its lines still there (with a neighbour as before) is the answer.
-        const same = n && here + n <= count && t.anchor.every((a, k) => line(here + k) === normLines([a])[0]);
+        const there = n && here + n <= count && t.anchor.every((a, k) => line(here + k) === normLines([a])[0]);
         const neighbour = t.before == null || t.after == null || (here > 0 && line(here - 1) === normLines([t.before])[0]) || (here + n < count && line(here + n) === normLines([t.after])[0]);
-        if (same && neighbour) {
+        if (there && neighbour) {
           start = here;
           t.outdated = false;
         } else {
           // Close by, as far as the edit reached.
           const radius = reach + n + 2;
-          const lo = Math.max(0, here - radius);
-          const window = [];
-          for (let i = lo; i <= Math.min(count - 1, here + radius + n); i++) window.push(line(i));
-          const found = relocate(window, here - lo, t, radius);
+          let found;
+          if (radius > 2000) found = relocate(lines(), here, t, radius);
+          else {
+            const lo = Math.max(0, here - radius);
+            const window = [];
+            for (let i = lo; i <= Math.min(count - 1, here + radius + n); i++) window.push(line(i));
+            const at = relocate(window, here - lo, t, radius);
+            found = at === undefined ? undefined : lo + at;
+          }
           t.outdated = found === undefined;
-          start = t.outdated ? here : lo + found;
+          // Gone: kept where the edit took them (an undo brings them back there).
+          start = t.outdated ? Math.min(here, Math.max(0, Math.min(first, count - 1))) : found;
         }
       }
+      if (start === t.start && was === !!t.outdated) continue; // nothing to tell anyone
       t.end = start + (t.end - t.start);
       t.start = start;
       thread.range = new vscode.Range(t.start, 0, t.end, 0);
@@ -585,7 +596,7 @@ function register(ctx) {
   }
 
   /** Text as VS Code reads that file (files.encoding, a BOM), so the stored lines compare. */
-  const decode = (buf, uri) => (vscode.workspace.decode ? Promise.resolve(vscode.workspace.decode(buf, { uri })).catch(() => buf.toString('utf8')) : Promise.resolve(buf.toString('utf8')));
+  const decode = (buf, uri) => Promise.resolve().then(() => (vscode.workspace.decode ? vscode.workspace.decode(buf, { uri }) : buf.toString('utf8'))).catch(() => buf.toString('utf8'));
 
   /** The open editor of a working file, also when it was opened through the symlinked workspace path. */
   function openDocument(abs) {
@@ -675,10 +686,13 @@ function register(ctx) {
     if (!root || root === CANCELLED) return;
     // Only a folder known now as the repository's or one of its worktrees (comments outlive them).
     const w = await whose(root);
-    // Its real path now (not a symlink put in its place): what the file is written into.
-    const real = await fs.promises.realpath(root).catch(() => undefined);
-    if (!w || !real || !same(rootPath(real), root) || (!w.main && !(await w.repo.ownsWorktree(root).catch(() => false)))) {
+    if (!w || (!w.main && !(await w.repo.ownsWorktree(root).catch(() => false)))) {
       notify.warn(`${plain(root)} is not a worktree of an open repository any more.`);
+      return;
+    }
+    // The folder itself must not be a link (one put in its place since git listed it).
+    if (await isLink(root)) {
+      notify.warn(`${plain(root)} is a symbolic link now: the review was not saved.`);
       return;
     }
     const name = config().get('review.fileName', '.review-comments.md');
@@ -694,7 +708,7 @@ function register(ctx) {
     // Only a name that may be written (free, or an earlier review) gets ignored; then ignored
     // first (the file and its temporary twin), so git never sees it, even for a moment.
     try {
-      await checkTarget(real, name);
+      await checkTarget(root, name);
     } catch (e) {
       notify.warn(`The review was not saved: ${plain(e.message)}`);
       return;
@@ -704,7 +718,7 @@ function register(ctx) {
       return false;
     });
     try {
-      await writeReview(real, name, review.text);
+      await writeReview(root, name, review.text);
     } catch (e) {
       notify.warn(`The review was not saved: ${plain(e.message)}`);
       return;
@@ -758,7 +772,7 @@ function register(ctx) {
 
 /** A plain file name: no folders, no ".git", nothing Windows treats as a device or trims. */
 function fileNameOk(name) {
-  return typeof name === 'string' && /^[^\\/:*?"<>|\u0000-\u001f\u202a-\u202e\u2066-\u2069]{1,100}$/.test(name) && !/^git~\d/i.test(name) && !/[. ]$/.test(name) && name !== '.' && name !== '..'
+  return typeof name === 'string' && /^[^\\/:*?"<>|\u0000-\u001f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]{1,100}$/.test(name) && !/^git~\d/i.test(name) && !/[. ]$/.test(name) && name !== '.' && name !== '..'
     && !/^\.git$/i.test(name) && !/^(con|prn|aux|nul|conin\$|conout\$|com[\d¹²³]|lpt[\d¹²³])\s*(\..*)?$/i.test(name);
 }
 
@@ -784,9 +798,14 @@ const tmpName = (name) => `.${name}.${newId()}.tmp`;
  * symlink or a hard link), never over a file that is not an earlier review, and only while the
  * root is still the folder that was checked (not a symlink put there since).
  */
+/** Whether a path is a symbolic link itself. */
+const isLink = (p) => fs.promises.lstat(p).then((st) => st.isSymbolicLink(), () => false);
+
 async function writeReview(root, name, text) {
+  // Where the folder really is (a mapped drive, a symlinked parent are fine); the folder itself
+  // must not be a link, and must still be the same folder when the file is renamed into it.
+  if (await isLink(root)) throw new Error('the worktree folder is a link.');
   const real = await fs.promises.realpath(root);
-  if (real !== path.resolve(root)) throw new Error('the worktree folder is a link.');
   const file = path.join(root, name);
   await checkTarget(root, name);
   const tmp = path.join(root, tmpName(name));
@@ -798,7 +817,7 @@ async function writeReview(root, name, text) {
     } finally {
       await fh.close();
     }
-    if ((await fs.promises.realpath(root)) !== real) throw new Error('the worktree folder changed while the review was written.');
+    if ((await isLink(root)) || (await fs.promises.realpath(root)) !== real) throw new Error('the worktree folder changed while the review was written.');
     await renameOver(tmp, file);
   } catch (e) {
     await fs.promises.rm(tmp, { force: true, maxRetries: 3 }).catch(() => {});

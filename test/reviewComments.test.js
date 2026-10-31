@@ -311,6 +311,73 @@ test('an agent rewriting a big open file with 50 comments in it costs little', a
   assert.ok(threads.every((th, k) => th.range.start.line === 1000 + k * 3000));
 });
 
+test('a deleted inner "}" does not land on the function\'s own "}"', () => {
+  const lines = ['function f() {', '  if (x) {', '    go();', '  }', '}', ''];
+  const where = F.anchorOf(lines, 3, 3); // the if's brace
+  const now = ['function f() {', '  if (x) {', '}', '']; // "    go();" and "  }" deleted
+  assert.equal(F.relocate(F.normLines(now), 3, where), undefined);
+});
+
+test('a comment whose lines are gone: an edit far above only moves it; a paste at its start moves it, a restore finds it', async (t) => {
+  const lines = Array.from({ length: 30 }, (_, k) => `const v${k} = ${k};`);
+  const { thread, edit } = await commented(t, lines, 10);
+  // Its line changed: "changed".
+  const changed = [...lines];
+  changed[10] = 'const v10 = 1000;';
+  edit(changed, [10, 13, 10, 15], '1000');
+  assert.match(thread.label, /changed/);
+  // Five lines pasted at the top: it moves with them, still "changed" (nothing looked for far away).
+  const top = Array.from({ length: 5 }, (_, k) => `// ${k}`);
+  edit([...top, ...changed], [0, 0, 0, 0], `${top.join('\n')}\n`);
+  assert.equal(thread.range.start.line, 15);
+  assert.match(thread.label, /changed/);
+  // Three lines pasted right at its start: it moves down with its line.
+  const mid = ['// a', '// b', '// c'];
+  const now = [...top, ...changed.slice(0, 10), ...mid, ...changed.slice(10)];
+  edit(now, [15, 0, 15, 0], `${mid.join('\n')}\n`);
+  assert.equal(thread.range.start.line, 18);
+  // Its line restored: found again, not "changed".
+  const restored = [...now];
+  restored[18] = 'const v10 = 10;';
+  edit(restored, [18, 13, 18, 17], '10');
+  assert.equal(thread.range.start.line, 18);
+  assert.doesNotMatch(thread.label, /changed/);
+});
+
+test('a CRLF paste right above a comment, and a reload reported as one change ending at its line, move it as they should', async (t) => {
+  const lines = blocks(['a', 'b']);
+  const { thread, edit } = await commented(t, lines, 9);
+  edit([...lines.slice(0, 9), 'x', 'y', ...lines.slice(9)], [9, 0, 9, 0], 'x\r\ny\r\n');
+  assert.equal(thread.range.start.line, 11);
+  // VS Code's reload: one change from the first changed line to column 0 of the first unchanged one.
+  const now = ['// header', ...lines.slice(0, 9), 'x', 'y', ...lines.slice(9)];
+  edit(now, [0, 0, 1, 0], '// header\nfunction a() {\n');
+  assert.equal(thread.range.start.line, 12);
+  assert.doesNotMatch(thread.label, /changed/);
+});
+
+test('a reloaded big file in which 10 of 50 comments changed costs little too', async (t) => {
+  const lines = Array.from({ length: 200000 }, (_, k) => `const v${k} = ${k};`);
+  const env = await setup(t);
+  env.r.commit('base', { 'big.js': lines.join('\n') });
+  const file = mock.vscode.Uri.file(path.join(env.repo.root, 'big.js'));
+  let current = lines;
+  const doc = { uri: file, getText: () => current.join('\n'), get lineCount() { return current.length; }, lineAt: (i) => ({ text: current[i] }) };
+  mock.vscode.workspace.textDocuments.push(doc);
+  t.after(() => mock.vscode.workspace.textDocuments.splice(mock.vscode.workspace.textDocuments.indexOf(doc), 1));
+  const threads = [];
+  for (let k = 0; k < 50; k++) {
+    const th = env.controller.newThread(file, new mock.vscode.Range(1000 + k * 3000, 0, 1000 + k * 3000, 0));
+    await env.cmds['commitCorner.review.add']({ thread: th, text: `c${k}` });
+    threads.push(th);
+  }
+  current = lines.map((l, i) => (i % 15000 === 1000 ? `${l} // changed` : l)); // 10 of the commented lines
+  const t0 = Date.now();
+  mock.events.onDidChangeTextDocument.fire({ document: doc, contentChanges: [{ range: new mock.vscode.Range(0, 0, lines.length - 1, 0), text: current.join('\n') }] });
+  assert.ok(Date.now() - t0 < 1000, `${Date.now() - t0} ms`);
+  assert.equal(threads.filter((th) => /changed/.test(th.label)).length, 10);
+});
+
 test('a comment on an agent\'s commit goes to that agent\'s review, and its row opens the commit there', async (t) => {
   const { r, repo, cmds, controller, store, clip } = await setup(t);
   r.commit('base', { 'a.txt': 'x\n' });
@@ -435,7 +502,7 @@ test('Save never writes through a link, never over another file, never with a de
   await writeReview(r.dir, 'review.md', '# Review comments for y\n');
   assert.equal(fs.readFileSync(path.join(r.dir, 'victim.txt'), 'utf8'), '# Review comments for x\nvictim\n');
   assert.equal(fs.readFileSync(path.join(r.dir, 'review.md'), 'utf8'), '# Review comments for y\n');
-  for (const bad of ['sub/x.md', '..', '.git', 'NUL', 'con.txt', 'x.md ', 'x.md.', 'a\nb', 'GIT~1', 'review\u202e.md', 'CONIN$', 'COM¹']) assert.equal(fileNameOk(bad), false, bad);
+  for (const bad of ['sub/x.md', '..', '.git', 'NUL', 'con.txt', 'x.md ', 'x.md.', 'a\nb', 'GIT~1', 'review\u202e.md', 'CONIN$', 'COM¹', 'a\u200bb.md', '\ufeffx.md']) assert.equal(fileNameOk(bad), false, bad);
   assert.equal(fileNameOk('.review-comments.md'), true);
   const own = { commonDir: path.join(r.dir, '.git'), gitDir: path.join(r.dir, '.git') };
   await excludeFile(own, 'review.md');
@@ -470,6 +537,20 @@ test('Save leaves a file of that name that is not a review alone, and does not h
   assert.match(mock.ui.messages.pop().msg, /not an earlier review/);
   const exclude = path.join(repo.commonDir, 'info', 'exclude');
   assert.doesNotMatch(fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '', /review-comments/);
+});
+
+test('Save writes into a worktree reached through a symlinked parent, never into one that became a link', { skip: process.platform === 'win32' }, async (t) => {
+  const { writeReview } = require('../src/vscode/review');
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-parent-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(base, 'real', 'wt'), { recursive: true });
+  fs.symlinkSync(path.join(base, 'real'), path.join(base, 'via'));
+  await writeReview(path.join(base, 'via', 'wt'), 'r.md', '# Review comments for x\n');
+  assert.equal(fs.readFileSync(path.join(base, 'real', 'wt', 'r.md'), 'utf8'), '# Review comments for x\n');
+  fs.mkdirSync(path.join(base, 'elsewhere'));
+  fs.symlinkSync(path.join(base, 'elsewhere'), path.join(base, 'wt-link'));
+  await assert.rejects(writeReview(path.join(base, 'wt-link'), 'r.md', '# Review comments for x\n'), /is a link/);
+  assert.equal(fs.existsSync(path.join(base, 'elsewhere', 'r.md')), false);
 });
 
 test('Save refuses a folder that is no longer a worktree of an open repository', async (t) => {

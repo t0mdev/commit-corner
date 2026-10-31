@@ -425,7 +425,8 @@ newest commit.
   in the Worktrees view shows how many ("2 comments") and gets **Agent review** with
   every comment (click one to go there) and two buttons: **Copy Review for the
   Agent** (`Ctrl+Alt+G Shift+C`; one Markdown text: what to do, then each
-  comment with its file, lines and current code — paste it into the agent's
+  comment with its file, lines and current code, or for lines that changed
+  since, the old and the new — paste it into the agent's
   chat) and **Save Review to the Worktree** (the same as `.review-comments.md`
   in its folder, ignored by git; **Copy Instruction** then gives you the line
   to tell the agent). A file of that name that is not an earlier review is

@@ -41,7 +41,7 @@ const distinctive = (anchor, min = 4) => anchor.some((l) => (norm(l).match(/[A-Z
  *  2. else the nearest place (below first: lines added above move them down) where they are
  *     with both neighbours as they were, then with one (a lone "}": only a line or two away, or
  *     with telling neighbours);
- *  3. else where they were, when they still are there (both neighbours edited);
+ *  3. else where they were, when they still are there and distinctive (both neighbours edited);
  *  4. else the nearest place they are at all, if they are distinctive (a lone "}" is not).
  * @param {string[]} normed the file's lines, normalized once (see normLines)
  * @param {{anchor: string[], before?: string|null, after?: string|null}} where
@@ -70,7 +70,8 @@ function relocate(normed, start, where, radius = Infinity) {
   let one;
   let loose;
   for (let d = 1; d <= far; d++) {
-    for (const i of [start + d, start - d]) {
+    for (let side = 0; side < 2; side++) {
+      const i = side ? start - d : start + d;
       if (!at(i)) continue;
       const k = near(i);
       if (k === 2 && (telling || d <= 2)) return i;
@@ -79,7 +80,8 @@ function relocate(normed, start, where, radius = Infinity) {
     }
   }
   if (one !== undefined) return one;
-  if (at(start)) return start;
+  // Its lines still at their place, both neighbours edited: itself, if the lines say so (a "}" could be any "}").
+  if (sure && at(start)) return start;
   return loose !== undefined && sure ? loose : undefined;
 }
 
