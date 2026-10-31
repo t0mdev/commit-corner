@@ -504,7 +504,7 @@ class Repository extends EventEmitter {
     }
     if (gst.isDirectory()) return true; // older layout, of a recorded submodule inside the tree
     if (!gst.isFile()) return false;
-    const m = /^gitdir: (.+?)\s*$/m.exec(await fs.promises.readFile(dotGit, 'utf8').catch(() => ''));
+    const m = /^gitdir: (.+?)\s*$/m.exec(await readDotGit(dotGit));
     if (!m) return false;
     const target = await fs.promises.realpath(path.resolve(dir, m[1])).catch(() => '');
     const modules = await fs.promises.realpath(path.join(this.commonDir, 'modules')).catch(() => '');
@@ -2490,7 +2490,7 @@ class Repository extends EventEmitter {
       return false;
     }
     if (!st.isFile()) return false;
-    const m = /^gitdir: (.+?)\s*$/m.exec(await fs.promises.readFile(path.join(dir, '.git'), 'utf8').catch(() => ''));
+    const m = /^gitdir: (.+?)\s*$/m.exec(await readDotGit(path.join(dir, '.git')));
     if (!m) return false;
     const target = await fs.promises.realpath(path.resolve(dir, m[1])).catch(() => '');
     const worktrees = await fs.promises.realpath(path.join(this.commonDir, 'worktrees')).catch(() => '');
@@ -2829,6 +2829,25 @@ function lit(p) {
 }
 
 /**
+ * A `.git` file's text ("gitdir: …"): its first 4 KB, opened without following a link and
+ * without waiting on a FIFO; '' when it cannot be read as a regular file.
+ */
+async function readDotGit(file) {
+  let fh;
+  try {
+    fh = await fs.promises.open(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+    if (!(await fh.stat()).isFile()) return '';
+    const buf = Buffer.alloc(4096);
+    const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+    return buf.subarray(0, bytesRead).toString('utf8');
+  } catch {
+    return '';
+  } finally {
+    if (fh) await fh.close().catch(() => {});
+  }
+}
+
+/**
  * A repository-relative path that stays inside: not absolute, no drive letter, no ".." part,
  * nothing in git's own folder, no NUL. (A tab is a legal file name character for git; page
  * input is stricter, see the graph's pagePath.)
@@ -2872,7 +2891,7 @@ async function ownsGitDir(root, gitDir) {
   }
   let target = dotGit;
   if (stat.isFile()) {
-    const m = /^gitdir: (.+?)\s*$/m.exec(await fs.promises.readFile(dotGit, 'utf8').catch(() => ''));
+    const m = /^gitdir: (.+?)\s*$/m.exec(await readDotGit(dotGit));
     if (!m) return false;
     target = path.resolve(root, m[1]);
   } else if (!stat.isDirectory()) return false;

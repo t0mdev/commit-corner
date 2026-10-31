@@ -422,7 +422,7 @@ newest commit.
   comment on an agent's commit belongs to that agent's worktree. A comment
   keeps the text of its lines and their neighbours: it moves with edits above
   it, and when those lines themselves change, it says so. The worktree's row
-  in the Worktrees view shows the count (`💬 2`) and gets **Agent review** with
+  in the Worktrees view shows how many ("2 comments") and gets **Agent review** with
   every comment (click one to go there) and two buttons: **Copy Review for the
   Agent** (`Ctrl+Alt+G Shift+C`; one Markdown text: what to do, then each
   comment with its file, lines and current code — paste it into the agent's

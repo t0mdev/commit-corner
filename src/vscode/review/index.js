@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const notify = require('../notify');
 const { SCHEME, fromGitUri, toGitUri } = require('../uri');
 const { safeRelPath } = require('../../git/repository');
+const { normalizePath } = require('../../git/pathUtil');
 const { config, log, shortSha, escapeIcons, confirm } = require('../util');
 const { splitLines, normLines, anchorOf, relocate, reviewText, MAX_ANCHOR, MAX_LINE } = require('./format');
 
@@ -28,7 +29,10 @@ const MAX_BODY = 20000;
 const MAX_FILE = 2 * 1024 * 1024;
 const REVIEW_HEADING = '# Review comments for';
 const isFullSha = (s) => typeof s === 'string' && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(s);
-const same = (a, b) => (process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase());
+/** Paths compared as the file system does: case and composed/decomposed letters alike off Linux. */
+const same = (a, b) => (process.platform === 'linux' ? a === b : a.normalize('NFC').toLowerCase() === b.normalize('NFC').toLowerCase());
+/** One form for every root (a drive letter in lower case, as VS Code's paths have it). */
+const rootPath = (p) => normalizePath(path.resolve(p));
 /** Repository text (a path, a branch) in a one-line message: no $(icon) syntax, no control characters. */
 const plain = (t) => escapeIcons(String(t).replace(/[\u0000-\u001f\u007f]/g, ' '));
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -59,7 +63,9 @@ class ReviewStore {
   }
 
   roots() {
-    return [...new Set([...this.threads.values()].map((t) => t.root))];
+    const out = [];
+    for (const t of this.threads.values()) if (!out.some((r) => same(r, t.root))) out.push(t.root);
+    return out;
   }
 
   /** Store threads (new or changed). `moved`: only their places changed (no list to redraw). */
@@ -151,16 +157,16 @@ function register(ctx) {
    * seconds; callers at the same time share one `git worktree list`.
    */
   const worktreeCache = new Map();
-  function worktreesOf(repo) {
+  function worktreesOf(repo, fresh = false) {
     const hit = worktreeCache.get(repo.root);
-    if (hit && Date.now() - hit.at < 15000) return hit.list;
-    const list = repo.getWorktrees().then((all) => all.filter((w) => !w.bare).map((w) => ({ ...w, path: path.resolve(w.path) })), () => []);
+    if (hit && !fresh && Date.now() - hit.at < 15000) return hit.list;
+    const list = repo.getWorktrees().then((all) => all.filter((w) => !w.bare).map((w) => ({ ...w, path: rootPath(w.path) })), () => []);
     worktreeCache.set(repo.root, { at: Date.now(), list });
     return list;
   }
 
   /** The repository's own folder (its real path, also when it was opened through a symlink). */
-  const rootOf = (repo) => path.resolve(repo.root);
+  const rootOf = (repo) => rootPath(repo.root);
 
   /**
    * Where a document is in the review: its worktree (or repository) root, the file there, the
@@ -189,7 +195,20 @@ function register(ctx) {
     } else return undefined;
     // An agent's worktree outside the repository's folder: every open repository's worktrees.
     const candidates = repo ? [repo] : manager.repositories;
-    const abs = path.resolve(uri.fsPath);
+    let best = await bestRoot(candidates, path.resolve(uri.fsPath));
+    // macOS: /tmp/wt opened, git lists /private/tmp/wt.
+    if (!best && uri.scheme === 'file') {
+      const real = await fs.promises.realpath(uri.fsPath).catch(() => undefined);
+      if (real && real !== uri.fsPath) best = await bestRoot(manager.repositories, real);
+    }
+    if (!best) return undefined;
+    // git's names are composed (NFC); a macOS path may not be.
+    const file = (gitPath || best.path).normalize('NFC');
+    return safeRelPath(file) ? { repo: best.repo, root: best.root, path: file, ref } : undefined;
+  }
+
+  /** The repository root or worktree an absolute path lies in (the innermost), with the path inside it. */
+  async function bestRoot(candidates, abs) {
     let best;
     for (const r of candidates) {
       const display = path.resolve(r.displayRoot || r.root);
@@ -201,9 +220,7 @@ function register(ctx) {
         if (!best || dir.length > best.dir.length) best = { repo: r, dir, root, path: rel.split(path.sep).join('/') };
       }
     }
-    if (!best) return undefined;
-    const file = gitPath || best.path;
-    return safeRelPath(file) ? { repo: best.repo, root: best.root, path: file, ref } : undefined;
+    return best;
   }
 
   /**
@@ -211,12 +228,13 @@ function register(ctx) {
    * yet in the main worktree's), else the repository's own.
    */
   async function ownerOfCommit(repo, sha, fallback) {
-    const list = await worktreesOf(repo);
-    const [main, ...others] = list;
+    // Asked now: the agent may have committed a moment ago.
+    const [main, ...others] = await worktreesOf(repo, true);
     if (!main || !others.length || !same(fallback, rootOf(repo))) return fallback;
-    if (main.head && (await repo.isAncestor(sha, main.head).catch(() => false))) return fallback;
-    for (const w of others) if (w.head && (await repo.isAncestor(sha, w.head).catch(() => false))) return w.path;
-    return fallback;
+    const has = await Promise.all([main, ...others].map((w) => (w.head ? repo.isAncestor(sha, w.head).catch(() => false) : false)));
+    if (has[0]) return fallback;
+    const i = has.findIndex((x, k) => k > 0 && x);
+    return i > 0 ? others[i - 1].path : fallback;
   }
 
   const controller = vscode.comments.createCommentController('commitCorner.review', 'Review for the agent');
@@ -269,7 +287,7 @@ function register(ctx) {
   }
 
   /** Does a stored thread belong in this document: a file's by worktree and path, a commit's by repository, path and commit. */
-  const belongs = (t, at) => (t.ref ? t.ref === at.ref && same(t.repoRoot, at.repo.root) && t.path === at.path : !at.ref && same(t.root, at.root) && t.path === at.path);
+  const belongs = (t, at) => same(t.path, at.path) && (t.ref ? t.ref === at.ref && same(t.repoRoot, at.repo.root) : !at.ref && same(t.root, at.root));
 
   const queryPath = (uri) => {
     try {
@@ -282,17 +300,19 @@ function register(ctx) {
   /** The stored threads of a document, found again in its text as it is now. */
   async function showFor(document) {
     const key = document.uri.toString();
-    if (!enabled() || !store.threads.size || shown.has(key) || pending.has(key)) return;
+    if (!enabled() || !store.threads.size || pending.has(key)) return;
     // Cheap first: no comment on a file of that name, nothing to look up.
     const name = path.basename(document.uri.scheme === SCHEME ? queryPath(document.uri) : document.uri.fsPath);
-    if (![...store.threads.values()].some((t) => path.posix.basename(t.path) === name)) return;
+    if (![...store.threads.values()].some((t) => same(path.posix.basename(t.path), name))) return;
     pending.add(key);
     try {
       const at = await locate(document.uri).catch(() => undefined);
-      if (!at || shown.has(key)) return;
-      const mine = [...store.threads.values()].filter((t) => belongs(t, at));
+      if (!at) return;
+      // (Not those it shows already: one added while this was looking.)
+      const showing = new Set([...(shown.get(key) || [])].map((th) => idOf.get(th)));
+      const mine = [...store.threads.values()].filter((t) => belongs(t, at) && !showing.has(t.id));
       if (!mine.length) return;
-      const normed = normLines(splitLines(document.getText()));
+      const normed = mine.some((t) => !t.ref) ? normLines(splitLines(document.getText())) : [];
       const moved = mine.filter((t) => follow(t, normed));
       for (const t of mine) show(document, t);
       if (moved.length) store.put(moved, true);
@@ -314,37 +334,54 @@ function register(ctx) {
     return true;
   }
 
+  /** A document's lines lo..hi as relocate compares them (read line by line: no copy of a big file per keystroke). */
+  function linesOf(document, lo, hi) {
+    const out = [];
+    for (let i = Math.max(0, lo); i <= Math.min(hi, document.lineCount - 1); i++) out.push(document.lineAt(i).text);
+    return normLines(out);
+  }
+
   /**
-   * An edit in an open editor: threads below it move by the lines it added or removed (exactly,
-   * as VS Code reports them); a thread whose own lines were edited says so when they no longer
-   * read as before.
+   * An edit in an open editor: threads below it move by the lines it added or removed, exactly as
+   * VS Code reports them (all of an edit's changes refer to the text before it). A thread the edit
+   * touches (its lines, or right at its start: an undo, a paste) is looked for again close by;
+   * not there, it says that its lines changed.
    */
   function onEdit(e) {
     const set = shown.get(e.document.uri.toString());
     if (!set || !e.contentChanges.length) return;
+    const changes = e.contentChanges.map((c) => ({ c, delta: (c.text.match(/\r\n|\r|\n/g) || []).length - (c.range.end.line - c.range.start.line) }));
     const moved = [];
-    let lines;
     for (const thread of set) {
       const t = store.threads.get(idOf.get(thread));
       if (!t || t.ref) continue;
       let shift = 0;
       let touched = false;
-      for (const c of e.contentChanges) {
-        const added = (c.text.match(/\r\n|\r|\n/g) || []).length;
-        const removed = c.range.end.line - c.range.start.line;
-        // Wholly above the thread's first line (ending at its start, or a line inserted before it).
-        const endsBefore = c.range.end.line < t.start || (c.range.end.line === t.start && c.range.end.character === 0 && (c.range.start.line < t.start || /[\r\n]$/.test(c.text)));
-        if (endsBefore) shift += added - removed;
-        else if (c.range.start.line <= t.end) touched = true;
+      let reach = 0;
+      let from = t.start;
+      for (const { c, delta } of changes) {
+        // Wholly above: it ends before the thread's first line (or exactly at its start, having begun above it).
+        if (c.range.end.line < t.start || (c.range.end.line === t.start && c.range.end.character === 0 && c.range.start.line < t.start)) {
+          shift += delta;
+        } else if (c.range.start.line <= t.end) {
+          touched = true;
+          from = Math.min(from, c.range.start.line);
+          reach += Math.abs(delta) + (c.range.end.line - c.range.start.line) + 1;
+        }
       }
       if (!shift && !touched) continue;
-      t.start = Math.max(0, t.start + shift);
-      t.end = Math.max(t.start, t.end + shift);
+      let start = Math.max(0, t.start + shift);
       if (touched) {
-        if (!lines) lines = splitLines(e.document.getText());
-        const now = lines.slice(t.start, t.start + t.anchor.length).map((l) => l.slice(0, MAX_LINE).trim());
-        t.outdated = now.length !== t.anchor.length || now.some((l, k) => l !== t.anchor[k].trim());
+        // Close by: where the edit was, as far as it reached, give or take the thread's length.
+        const center = Math.max(0, from + shift);
+        const radius = reach + t.anchor.length + 2;
+        const lo = Math.max(0, center - radius);
+        const found = relocate(linesOf(e.document, lo, center + radius + t.anchor.length), center - lo, t, radius);
+        t.outdated = found === undefined;
+        start = t.outdated ? Math.min(Math.max(0, from + shift), Math.max(0, e.document.lineCount - 1)) : lo + found;
       }
+      t.end = start + (t.end - t.start);
+      t.start = start;
       thread.range = new vscode.Range(t.start, 0, t.end, 0);
       decorate(thread, t);
       moved.push(t);
@@ -497,8 +534,9 @@ function register(ctx) {
       items.push({ label: `$(${w && w.main ? 'repo' : 'folder'}) ${escapeIcons(w && w.branch ? w.branch : path.basename(r))}`, description: plural(store.forRoot(r).length, 'comment'), detail: escapeIcons(r), root: r });
     }
     const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Review comments of which worktree?', matchOnDetail: true });
-    return pick && pick.root;
+    return pick ? pick.root : CANCELLED;
   }
+  const CANCELLED = Symbol('cancelled');
 
   /**
    * A file's lines now: an open editor's text, else the file (a regular one inside the
@@ -513,18 +551,40 @@ function register(ctx) {
       return blob ? splitLines(blob.toString('utf8')) : undefined;
     }
     const abs = path.join(root, ...t.path.split('/'));
-    const open = vscode.workspace.textDocuments.find((d) => d.uri.scheme === 'file' && same(path.resolve(d.uri.fsPath), abs));
+    const open = openDocument(abs);
     if (open) return splitLines(open.getText());
     if (!(await insideRoot(root, t.path))) return undefined;
     const { readAtMost } = require('../commands/fileCommands');
     const buf = await readAtMost(abs, MAX_FILE).catch(() => undefined);
-    return buf ? splitLines(buf.toString('utf8')) : undefined;
+    if (!buf) return undefined;
+    // As VS Code reads it (files.encoding, a BOM), so the stored lines compare.
+    const text = vscode.workspace.decode ? await vscode.workspace.decode(buf, { uri: vscode.Uri.file(abs) }).catch(() => buf.toString('utf8')) : buf.toString('utf8');
+    return splitLines(text);
+  }
+
+  /** The open editor of a working file, also when it was opened through the symlinked workspace path. */
+  function openDocument(abs) {
+    return vscode.workspace.textDocuments.find((d) => {
+      if (d.uri.scheme !== 'file') return false;
+      let p = path.resolve(d.uri.fsPath);
+      for (const r of manager.repositories) {
+        const display = path.resolve(r.displayRoot || r.root);
+        if (display !== path.resolve(r.root) && (p === display || p.startsWith(display + path.sep))) p = path.resolve(r.root) + p.slice(display.length);
+      }
+      return same(p, abs);
+    });
   }
 
   /** The review of a root as text: each comment with the code it is about, as it is now. */
   async function build(root) {
     const threads = store.forRoot(root);
     if (!threads.length) return undefined;
+    // Files are read only from a folder known now as the repository's or one of its worktrees.
+    const w = await whose(root);
+    const known = !!w && (w.main || (await w.repo.ownsWorktree(root).catch(() => false)));
+    // Shown in an editor: kept in place by its edits; only checked there, never looked for elsewhere.
+    const tracked = new Set();
+    for (const set of shown.values()) for (const th of set) tracked.add(idOf.get(th));
     const files = new Map(); // one read per file (and commit), however many comments it has
     const out = [];
     const moved = [];
@@ -532,7 +592,7 @@ function register(ctx) {
       const key = `${t.ref || ''}\0${t.path}`;
       if (!files.has(key)) {
         const repo = manager.getRepository(t.repoRoot);
-        const lines = await currentLines(repo, root, t);
+        const lines = t.ref || known ? await currentLines(repo, root, t) : undefined;
         files.set(key, lines && { lines, normed: t.ref ? undefined : normLines(lines) });
       }
       const file = files.get(key);
@@ -540,7 +600,10 @@ function register(ctx) {
         out.push({ path: t.path, ref: t.ref, start: t.start, end: t.end, state: 'missing', code: t.anchor, comments: t.comments.map((c) => c.body) });
         continue;
       }
-      if (!t.ref && follow(t, file.normed)) {
+      if (!t.ref && tracked.has(t.id)) {
+        const here = file.normed.slice(t.start, t.start + t.anchor.length);
+        t.outdated = here.length !== t.anchor.length || here.some((l, k) => l !== t.anchor[k].slice(0, MAX_LINE).trim());
+      } else if (!t.ref && follow(t, file.normed)) {
         moved.push(t);
         for (const set of shown.values()) {
           for (const th of set) {
@@ -555,12 +618,12 @@ function register(ctx) {
       out.push({ path: t.path, ref: t.ref, start: t.start, end: t.end, state, code, comments: t.comments.map((c) => c.body) });
     }
     if (moved.length) store.put(moved, true);
-    const w = await whose(root);
     return { text: reviewText({ name: path.basename(root), branch: w && w.branch, threads: out }), count: out.length, who: w };
   }
 
   cmd('commitCorner.review.copy', async (arg) => {
     const root = await rootFor(arg);
+    if (root === CANCELLED) return;
     const review = root && (await build(root));
     if (!review) {
       notify.info('No review comments yet: add them with the + in the gutter of a file (or of a commit\'s diff).');
@@ -569,12 +632,12 @@ function register(ctx) {
     await vscode.env.clipboard.writeText(review.text);
     const name = review.who && review.who.branch ? `branch ${review.who.branch}` : path.basename(root);
     // The command is done; the notification just says so.
-    notify.info(`Copied ${plural(review.count, 'review comment')} for ${plain(name)}: paste ${review.count === 1 ? 'it' : 'them'} into the agent's chat.`).then(undefined, () => {});
+    notify.info(`Copied ${plural(review.count, 'review comment')} for ${plain(name)}: paste ${review.count === 1 ? 'it' : 'them'} into your agent's chat.`).then(undefined, () => {});
   });
 
   cmd('commitCorner.review.save', async (arg) => {
     const root = await rootFor(arg);
-    if (!root) return;
+    if (!root || root === CANCELLED) return;
     // Only a folder known now as the repository's or one of its worktrees (comments outlive them).
     const w = await whose(root);
     if (!w || (!w.main && !(await w.repo.ownsWorktree(root).catch(() => false)))) {
@@ -591,19 +654,20 @@ function register(ctx) {
       notify.info('No review comments yet.');
       return;
     }
+    // Ignored first (the file and its temporary twin), so it is never seen by git, even for a moment.
+    const ignored = await excludeFile(w.repo, name).then(() => true, (e) => {
+      log().info(`Review file not excluded: ${e.message}`);
+      return false;
+    });
     try {
       await writeReview(root, name, review.text);
     } catch (e) {
       notify.warn(`The review was not saved: ${plain(e.message)}`);
       return;
     }
-    const ignored = await excludeFile(w.repo.commonDir, name).then(() => true, (e) => {
-      log().info(`Review file not excluded: ${e.message}`);
-      return false;
-    });
     const tell = `Read ${name} and address the review comments in it.`;
     const label = w.branch ? `branch ${w.branch}` : path.basename(root);
-    notify.info(`Saved ${plural(review.count, 'review comment')} to ${plain(name)} in ${plain(label)}${ignored ? ' (ignored by git)' : ''}.`, 'Copy Instruction', 'Open File').then(async (choice) => {
+    notify[ignored ? 'info' : 'warn'](`Saved ${plural(review.count, 'review comment')} to ${plain(name)} in ${plain(label)}${ignored ? ' (ignored by git).' : '. It is NOT ignored by git: do not commit it.'}`, 'Copy Instruction', 'Open File').then(async (choice) => {
       if (choice === 'Copy Instruction') await vscode.env.clipboard.writeText(tell);
       else if (choice === 'Open File') await vscode.window.showTextDocument(vscode.Uri.file(path.join(root, name)), { preview: false });
     }).then(undefined, (e) => log().warn(`Review file: ${e.message}`));
@@ -623,7 +687,7 @@ function register(ctx) {
 
   cmd('commitCorner.review.clear', async (arg) => {
     const root = await rootFor(arg);
-    if (!root) return;
+    if (!root || root === CANCELLED) return;
     const n = store.forRoot(root).length;
     if (!n) return;
     if (!(await confirm(`Delete the ${plural(n, 'review comment')} of ${plain(await nameOf(root))}?`, 'Delete'))) return;
@@ -651,7 +715,7 @@ function register(ctx) {
 /** A plain file name: no folders, no ".git", nothing Windows treats as a device or trims. */
 function fileNameOk(name) {
   return typeof name === 'string' && /^[^\\/:*?"<>|\u0000-\u001f]{1,100}$/.test(name) && !/[. ]$/.test(name) && name !== '.' && name !== '..'
-    && !/^\.git$/i.test(name) && !/^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(name);
+    && !/^\.git$/i.test(name) && !/^(con|prn|aux|nul|conin\$|conout\$|com[\d¹²³]|lpt[\d¹²³])\s*(\..*)?$/i.test(name);
 }
 
 /** Every folder from the root to the file is a real folder (no symlink to elsewhere), the file a regular one. */
@@ -668,41 +732,65 @@ async function insideRoot(root, rel) {
   return !!st && st.isFile();
 }
 
+/** Temporary twin of the review file while it is written (also kept from git). */
+const tmpName = (name) => `.${name}.${newId()}.tmp`;
+
 /**
  * Write the review file in the root: written beside it and renamed over it (never through a
- * symlink or a hard link), and never over a file that is not an earlier review.
+ * symlink or a hard link), never over a file that is not an earlier review, and only while the
+ * root is still the folder that was checked (not a symlink put there since).
  */
 async function writeReview(root, name, text) {
+  const real = await fs.promises.realpath(root);
   const file = path.join(root, name);
   const st = await fs.promises.lstat(file).catch(() => null);
   if (st) {
     if (!st.isFile()) throw new Error(`${name} exists and is not a regular file.`);
     const { readAtMost } = require('../commands/fileCommands');
     const head = await readAtMost(file, MAX_FILE).catch(() => undefined);
-    if (!head || !head.toString('utf8').startsWith(REVIEW_HEADING)) throw new Error(`${name} exists and is not an earlier review: it is left as it is.`);
+    if (!head || !head.toString('utf8').replace(/^﻿/, '').startsWith(REVIEW_HEADING)) throw new Error(`${name} exists and is not an earlier review: it is left as it is.`);
   }
-  const tmp = path.join(root, `.${name}.${newId()}.tmp`);
+  const tmp = path.join(root, tmpName(name));
   const { O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW } = fs.constants;
-  const fh = await fs.promises.open(tmp, O_WRONLY | O_CREAT | O_EXCL | (O_NOFOLLOW || 0), 0o644);
   try {
-    await fh.writeFile(text);
-  } finally {
-    await fh.close();
-  }
-  try {
-    await fs.promises.rename(tmp, file);
+    const fh = await fs.promises.open(tmp, O_WRONLY | O_CREAT | O_EXCL | (O_NOFOLLOW || 0), 0o644);
+    try {
+      await fh.writeFile(text);
+    } finally {
+      await fh.close();
+    }
+    if ((await fs.promises.realpath(root)) !== real) throw new Error('the worktree folder changed while the review was written.');
+    await renameOver(tmp, file);
   } catch (e) {
-    await fs.promises.rm(tmp, { force: true });
+    await fs.promises.rm(tmp, { force: true }).catch(() => {});
     throw e;
   }
 }
 
+/** rename, again for a moment on Windows when a virus scanner or the indexer still holds the file. */
+async function renameOver(from, to) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await fs.promises.rename(from, to);
+      return;
+    } catch (e) {
+      if (process.platform !== 'win32' || attempt >= 5 || !['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) throw e;
+      await new Promise((res) => setTimeout(res, 100 * (attempt + 1)));
+    }
+  }
+}
+
 /**
- * Keep git from seeing the review file: its name in the repository's info/exclude (shared by all
- * its worktrees), once. `commonDir`: the repository's own (never what a worktree's files say).
+ * Keep git from seeing the review file (and its temporary twin): lines in the repository's
+ * info/exclude (shared by all its worktrees), once. Only in the repository's own git folder:
+ * its git dir is the common dir (a main worktree) or one of the common dir's worktrees (a
+ * linked one); a .git file that points elsewhere gets nothing written.
  */
-async function excludeFile(commonDir, name) {
-  const info = path.join(commonDir, 'info');
+async function excludeFile(repo, name) {
+  const common = await fs.promises.realpath(repo.commonDir);
+  const gitDir = await fs.promises.realpath(repo.gitDir);
+  if (gitDir !== common && !gitDir.startsWith(path.join(common, 'worktrees') + path.sep)) throw new Error('the repository\'s git folder is not its own');
+  const info = path.join(common, 'info');
   let st = await fs.promises.lstat(info).catch(() => null);
   if (!st) {
     await fs.promises.mkdir(info); // its parent is the repository's git folder
@@ -713,13 +801,19 @@ async function excludeFile(commonDir, name) {
   const fst = await fs.promises.lstat(file).catch(() => null);
   if (fst && !fst.isFile()) throw new Error('info/exclude is not a regular file');
   const { readAtMost } = require('../commands/fileCommands');
-  const existing = fst ? String((await readAtMost(file, MAX_FILE)) || '') : '';
-  const line = `/${name.replace(/([*?[\\!#])/g, '\\$1')}`;
-  if (existing.split(/\r?\n/).includes(line)) return;
+  const buf = fst ? await readAtMost(file, MAX_FILE) : Buffer.alloc(0);
+  if (!buf) throw new Error('info/exclude is too large');
+  const existing = buf.toString('utf8');
+  const glob = name.replace(/([*?[\\!#])/g, '\\$1');
+  const wanted = [`/${glob}`, `/.${glob}.*.tmp`].filter((l) => !existing.split(/\r?\n/).includes(l));
+  if (!wanted.length) return;
   const { O_WRONLY, O_APPEND, O_CREAT, O_NOFOLLOW } = fs.constants;
   const fh = await fs.promises.open(file, O_WRONLY | O_APPEND | O_CREAT | (O_NOFOLLOW || 0), 0o644);
   try {
-    await fh.write(`${existing && !existing.endsWith('\n') ? '\n' : ''}${line}\n`);
+    // The file opened is the one checked (not a link put in its place since).
+    const [a, b] = [await fh.stat(), await fs.promises.lstat(file)];
+    if (!a.isFile() || a.ino !== b.ino || a.dev !== b.dev || (await fs.promises.realpath(info)) !== info) throw new Error('info/exclude changed while it was written');
+    await fh.write(`${existing && !existing.endsWith('\n') ? '\n' : ''}${wanted.join('\n')}\n`);
   } finally {
     await fh.close();
   }

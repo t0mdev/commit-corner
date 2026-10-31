@@ -11,6 +11,10 @@ const { toGitUri } = require('../uri');
 const { shortSha, confirm, formatDate, escapeMarkdown, debounce, inThisWindow, escapeIcons, statusIcon, STATUS_LABELS, log } = require('../util');
 const { pickRef, inputBranchName } = require('../pickers');
 const { GitError } = require('../../git/exec');
+const { normalizePath, samePath } = require('../../git/pathUtil');
+
+/** A worktree's folder as review comments store it (one form: a lower-case drive letter on Windows). */
+const reviewRoot = (p) => normalizePath(path.resolve(p));
 
 /** Fired after worktree commands change the list (add, remove, lock, prune). */
 const changed = new vscode.EventEmitter();
@@ -127,13 +131,13 @@ class ReviewCommentsNode {
   constructor(parent) {
     this.parent = parent;
     this.worktreePath = parent.worktreePath;
-    if (parent.provider) parent.provider.reviewNodes.set(path.resolve(this.worktreePath), this);
+    if (parent.provider) parent.provider.reviewNodes.set(reviewRoot(this.worktreePath), this);
   }
 
   /** Read when drawn: a moved comment redraws this row alone, not the worktrees (and their git calls). */
   get threads() {
     const review = require('../review').get();
-    return review ? review.forRoot(path.resolve(this.worktreePath)) : [];
+    return review ? review.forRoot(reviewRoot(this.worktreePath)) : [];
   }
 
   getTreeItem() {
@@ -163,9 +167,11 @@ class ReviewThreadNode {
 
   getTreeItem() {
     const t = this.thread;
-    const first = t.comments[0].body.split(/\r?\n/)[0];
+    // The first line, as text (no Markdown marks: the comment itself renders them).
+    const first = t.comments[0].body.split(/\r?\n/).find((l) => l.trim() && !/^\s*(```|~~~)/.test(l)) || '';
+    const preview = first.replace(/[*_`~#>]+/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\s+/g, ' ').trim();
     const item = new vscode.TreeItem(`${path.posix.basename(t.path)}:${t.start + 1}`, vscode.TreeItemCollapsibleState.None);
-    item.description = first.length > 80 ? `${first.slice(0, 79)}…` : first;
+    item.description = preview.length > 80 ? `${preview.slice(0, 79)}…` : preview;
     const md = new vscode.MarkdownString();
     md.appendText(`${t.path}, line ${t.start + 1}${t.ref ? ` in ${shortSha(t.ref)}` : ''}${t.outdated ? ' (these lines have changed)' : ''}\n\n`);
     for (const c of t.comments) md.appendText(`${c.body}\n\n`);
@@ -195,8 +201,8 @@ class WorktreeNode {
     if (wt.changes) parts.push(dirty ? `● ${dirty} change${dirty === 1 ? '' : 's'}` : '✓ clean');
     // Review comments waiting to go to the agent: seen without opening the row.
     const review = require('../review').get();
-    const comments = review ? review.forRoot(path.resolve(wt.path)).length : 0;
-    if (comments) parts.push(`💬 ${comments}`);
+    const comments = review ? review.forRoot(reviewRoot(wt.path)).length : 0;
+    if (comments) parts.push(`${comments} comment${comments === 1 ? '' : 's'}`);
     if (wt.ahead || wt.behind) parts.push(`${wt.ahead ? `↑${wt.ahead}` : ''}${wt.behind ? `↓${wt.behind}` : ''}`);
     else if (wt.base && (wt.baseAhead || wt.baseBehind)) parts.push(`${wt.baseAhead ? `↑${wt.baseAhead}` : ''}${wt.baseBehind ? `↓${wt.baseBehind}` : ''} vs ${wt.base}`);
     parts.push(path.basename(wt.path));
@@ -245,7 +251,7 @@ class WorktreeNode {
       }
     }
     const review = require('../review').get();
-    const comments = review ? review.forRoot(path.resolve(wt.path)) : [];
+    const comments = review ? review.forRoot(reviewRoot(wt.path)) : [];
     if (comments.length) out.push(new ReviewCommentsNode(this));
     if (wt.changes) out.push(new MessageNode(`Working tree: ${changesText(wt.changes)}`, wt.changes.conflicts ? 'warning' : changesText(wt.changes) === 'clean' ? 'check' : 'diff'));
     if (wt.upstream) out.push(new MessageNode(`${wt.upstream}: ${wt.ahead || 0} ahead, ${wt.behind || 0} behind`, 'cloud'));
@@ -271,6 +277,17 @@ class WorktreesView extends TreeProvider {
     this.reviewNodes = new Map();
     this.view = require('../util').registerTreeView('commitCorner.worktrees', vscode.window.createTreeView('commitCorner.worktrees', { treeDataProvider: this, manageCheckboxStateManually: true }));
     const refresh = debounce(() => this.refresh(), 1500);
+    // An "Agent review" row redrawn at most every 300 ms (a comment moves with every keystroke above it).
+    const pendingReview = new Set();
+    const flushReview = debounce(() => {
+      const nodes = [...pendingReview];
+      pendingReview.clear();
+      if (nodes.length) this._onDidChangeTreeData.fire(nodes);
+    }, 300);
+    const redrawReview = (node) => {
+      pendingReview.add(node);
+      flushReview();
+    };
     this.disposables = [
       this.view,
       manager.onDidChangeActive(() => this.refresh()),
@@ -292,8 +309,11 @@ class WorktreesView extends TreeProvider {
       // Review comments: a comment that moved (or was edited) redraws its worktree's review row;
       // one added or deleted, the worktrees (their counts), a moment later.
       ...(require('../review').get() ? [require('../review').get().onDidChange((e) => {
-        const node = this.reviewNodes.get(e.root);
-        if (node && !this.reviewCountChanged(node)) this._onDidChangeTreeData.fire(node);
+        const node = [...this.reviewNodes].find(([root]) => samePath(root, e.root));
+        if (e.moved) {
+          // Only places changed (typing above a comment): its row's labels, if it is shown; never the worktrees.
+          if (node) redrawReview(node[1]);
+        } else if (node && !this.reviewCountChanged(node[1])) redrawReview(node[1]);
         else refresh();
       })] : []),
       viewed.watchCheckboxes(this.view, this),

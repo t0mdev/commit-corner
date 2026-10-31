@@ -19,46 +19,64 @@ const norm = (s) => String(s).slice(0, MAX_LINE).trim();
 
 /**
  * The lines a comment covers, as stored to find them again (capped), with one line of context
- * on each side: a "}" or a blank line is found again by its neighbours, not at any "}".
+ * on each side: a "}" or a blank line is found again by its neighbours, not at any "}". (A
+ * thread longer than the stored lines keeps no line after: it would not be next to them.)
  */
 function anchorOf(lines, start, end) {
+  const last = Math.min(end, start + MAX_ANCHOR - 1);
+  const at = (i) => (i >= 0 && i < lines.length ? String(lines[i]).slice(0, MAX_LINE) : null);
   return {
-    anchor: lines.slice(start, Math.min(end, start + MAX_ANCHOR - 1) + 1).map((l) => l.slice(0, MAX_LINE)),
-    before: start > 0 ? lines[start - 1].slice(0, MAX_LINE) : null,
-    after: end + 1 < lines.length ? lines[end + 1].slice(0, MAX_LINE) : null,
+    anchor: lines.slice(start, last + 1).map((l) => String(l).slice(0, MAX_LINE)),
+    before: at(start - 1),
+    after: last === end ? at(end + 1) : null,
   };
 }
 
+/** Lines worth finding anywhere in a file: with some letters or digits (not just "}" or "end"). */
+const distinctive = (anchor) => anchor.some((l) => (norm(l).match(/[A-Za-z0-9_]/g) || []).length >= 4);
+
 /**
- * Where a comment's lines are now: the place nearest to where they were (`start`) where they
- * still are, preferring one whose neighbours are the same too, and looking below first (lines
- * added above move them down); undefined when they are not there any more.
+ * Where a comment's lines are now, or undefined when they are gone:
+ *  1. where they were, when they still are there with a neighbour as it was;
+ *  2. else the nearest place (below first: lines added above move them down) where they are
+ *     with both neighbours as they were, then with one (a lone "}": only a line or two away);
+ *  3. else where they were, when they still are there (both neighbours edited);
+ *  4. else the nearest place they are at all, if they are distinctive (a lone "}" is not).
  * @param {string[]} normed the file's lines, normalized once (see normLines)
  * @param {{anchor: string[], before?: string|null, after?: string|null}} where
+ * @param {number} [radius] look no further than this from `start` (an edit's surroundings)
  */
-function relocate(normed, start, where) {
+function relocate(normed, start, where, radius = Infinity) {
   const anchor = where.anchor.map(norm);
-  if (!anchor.length || !anchor.some(Boolean)) {
-    // Blank lines only: found by their neighbours alone, else where they were.
-    if (where.before == null && where.after == null) return start < normed.length ? start : undefined;
-  }
   const n = anchor.length;
+  const before = where.before == null ? null : norm(where.before);
+  const after = where.after == null ? null : norm(where.after);
+  if (!n) return start < normed.length ? start : undefined;
   const at = (i) => {
+    if (i < 0 || i + n > normed.length) return false;
     for (let k = 0; k < n; k++) if (normed[i + k] !== anchor[k]) return false;
     return true;
   };
-  const context = (i) => (where.before == null || normed[i - 1] === norm(where.before)) && (where.after == null || normed[i + n] === norm(where.after));
+  // How many of its neighbours are as they were (a missing one counts as matching).
+  const near = (i) => (before === null || normed[i - 1] === before ? 1 : 0) + (after === null || normed[i + n] === after ? 1 : 0);
+  if (at(start) && near(start) >= 1) return start;
+  const far = Math.min(radius, Math.max(start, normed.length - start));
+  // A "}" with one neighbour as it was is only itself close by; distinctive lines anywhere.
+  const sure = distinctive(where.anchor);
+  let one;
   let loose;
-  const last = normed.length - n;
-  for (let d = 0; d <= Math.max(start, last - start); d++) {
-    for (const i of d ? [start + d, start - d] : [start]) {
-      if (i < 0 || i > last || !at(i)) continue;
-      if (context(i)) return i;
+  for (let d = 1; d <= far; d++) {
+    for (const i of [start + d, start - d]) {
+      if (!at(i)) continue;
+      const k = near(i);
+      if (k === 2) return i;
+      if (k === 1 && one === undefined && (sure || d <= 2)) one = i;
       if (loose === undefined) loose = i;
     }
   }
-  // Blank lines whose neighbours changed too: no telling where they went.
-  return anchor.some(Boolean) ? loose : undefined;
+  if (one !== undefined) return one;
+  if (at(start)) return start;
+  return loose !== undefined && sure ? loose : undefined;
 }
 
 /** A file's lines as relocate compares them (once per file, however many comments it has). */
