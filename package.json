@@ -4795,14 +4795,14 @@
       },
       {
         "command": "commitCorner.prOpen",
-        "key": "ctrl+alt+g ctrl+alt+shift+p",
-        "mac": "cmd+alt+g cmd+alt+shift+p",
+        "key": "ctrl+alt+g ctrl+alt+p",
+        "mac": "cmd+alt+g cmd+alt+p",
         "when": "commitCorner.hasRepository"
       },
       {
         "command": "commitCorner.prOpen",
-        "key": "ctrl+alt+g shift+p",
-        "mac": "cmd+alt+g shift+p",
+        "key": "ctrl+alt+g p",
+        "mac": "cmd+alt+g p",
         "when": "commitCorner.hasRepository"
       },
       {
@@ -4975,14 +4975,14 @@
       },
       {
         "command": "commitCorner.push",
-        "key": "ctrl+alt+g ctrl+alt+p",
-        "mac": "cmd+alt+g cmd+alt+p",
+        "key": "ctrl+alt+g ctrl+alt+shift+p",
+        "mac": "cmd+alt+g cmd+alt+shift+p",
         "when": "commitCorner.hasRepository"
       },
       {
         "command": "commitCorner.push",
-        "key": "ctrl+alt+g p",
-        "mac": "cmd+alt+g p",
+        "key": "ctrl+alt+g shift+p",
+        "mac": "cmd+alt+g shift+p",
         "when": "commitCorner.hasRepository"
       },
       {
@@ -5152,13 +5152,13 @@
         "key": "ctrl+alt+g ctrl+alt+n",
         "mac": "cmd+alt+g cmd+alt+n",
         "command": "commitCorner.nextUnviewedFile",
-        "when": "commitCorner.hasRepository && commitCorner.activeEditorIsCommitFile"
+        "when": "commitCorner.hasRepository"
       },
       {
         "key": "ctrl+alt+g n",
         "mac": "cmd+alt+g n",
         "command": "commitCorner.nextUnviewedFile",
-        "when": "commitCorner.hasRepository && commitCorner.activeEditorIsCommitFile"
+        "when": "commitCorner.hasRepository"
       },
       {
         "key": "ctrl+alt+g ctrl+alt+shift+o",
@@ -5193,6 +5193,18 @@
         "key": "ctrl+alt+g c",
         "mac": "cmd+alt+g c",
         "command": "commitCorner.review.copy"
+      },
+      {
+        "command": "commitCorner.worktreeChangesVsBase",
+        "key": "ctrl+alt+g ctrl+alt+shift+d",
+        "mac": "cmd+alt+g cmd+alt+shift+d",
+        "when": "commitCorner.hasRepository"
+      },
+      {
+        "command": "commitCorner.worktreeChangesVsBase",
+        "key": "ctrl+alt+g shift+d",
+        "mac": "cmd+alt+g shift+d",
+        "when": "commitCorner.hasRepository"
       }
     ],
     "configuration": [
@@ -5754,7 +5766,7 @@
           {
             "id": "review",
             "title": "Review an agent's worktree",
-            "description": "Changes vs main, file by file, with Viewed checkboxes and a summary.\n[Show Worktrees](command:commitCorner.sidebar.worktrees)",
+            "description": "Changes vs main, file by file, with Viewed checkboxes, comments for the agent and a summary.\n[Show Worktrees](command:commitCorner.sidebar.worktrees)",
             "media": {
               "markdown": "media/walkthrough/review.md"
             },

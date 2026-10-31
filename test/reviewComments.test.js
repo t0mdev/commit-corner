@@ -480,7 +480,7 @@ test('editing and deleting comments; an empty comment is not added', async (t) =
   assert.ok(thread.disposed);
 });
 
-test("a comment's menu: Copy, Save and Delete All are for its worktree, without asking which", async (t) => {
+test("a comment's menu: Copy, Save and Delete All are for its worktree, without asking which; from the keyboard, the active file's", async (t) => {
   const { r, repo, cmds, controller, open, store, clip } = await setup(t);
   r.commit('base', { 'f.txt': 'a\nb\n' });
   const wt = path.join(repo.root, '..', 'wt-menu');
@@ -499,15 +499,40 @@ test("a comment's menu: Copy, Save and Delete All are for its worktree, without 
   await cmds['commitCorner.review.copy'](comment);
   assert.match(clip(), /in the worktree/);
   assert.doesNotMatch(clip(), /in the repository/);
+  await cmds['commitCorner.review.save'](comment);
+  assert.match(fs.readFileSync(path.join(wt, '.review-comments.md'), 'utf8'), /in the worktree/);
+  assert.ok(!fs.existsSync(path.join(repo.root, '.review-comments.md')));
+  // While a comment is being edited: its saved text would go, so first save (or cancel) it.
+  await cmds['commitCorner.review.editComment'](comment);
+  mock.vscode.env.clipboard.text = 'before';
+  await cmds['commitCorner.review.copy'](comment);
+  assert.equal(clip(), 'before');
+  assert.match(mock.ui.messages.at(-1).msg, /Save \(or cancel\) the comment you are editing first/);
+  await cmds['commitCorner.review.cancelEdit'](comment);
+  // From the keyboard (no comment given): the worktree of the file in front of you, no picker.
+  mock.vscode.window.activeTextEditor = { document: { uri: other } };
+  t.after(() => (mock.vscode.window.activeTextEditor = undefined));
+  await cmds['commitCorner.review.copy']();
+  assert.match(clip(), /in the repository/);
+  assert.doesNotMatch(clip(), /in the worktree/);
   // Delete All asks first: No keeps them.
   mock.ui.answers.push(undefined);
   await cmds['commitCorner.review.clear'](comment);
   assert.equal(store.forRoot(wt).length, 1, 'kept when not confirmed');
+  assert.match(mock.ui.messages.at(-1).msg, /^Delete the review comment of branch agent\/menu\?$/);
   mock.ui.answers.push('Delete');
   await cmds['commitCorner.review.clear'](comment);
   assert.equal(store.forRoot(wt).length, 0);
   assert.ok(thread.disposed);
   assert.equal(store.forRoot(repo.root).length, 1, "the other worktree's comment stays");
+  // The deleted comment's menu (still on screen a moment): nothing happens, never the other worktree's review.
+  mock.vscode.env.clipboard.text = 'before';
+  mock.vscode.window.activeTextEditor = undefined;
+  await cmds['commitCorner.review.copy'](comment);
+  assert.equal(clip(), 'before');
+  assert.match(mock.ui.messages.at(-1).msg, /gone/);
+  await cmds['commitCorner.review.copy']({ $mid: 1, commentUniqueId: 3, thread: { $mid: 2 } });
+  assert.equal(clip(), 'before', 'a comment VS Code no longer knows');
 });
 
 test('stored comments are checked when read back, and kept within bounds', () => {

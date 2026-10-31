@@ -60,6 +60,6 @@ reloading the window. Use a scratch clone with a GitHub remote.
 - [ ] Graph: with a screen reader (NVDA / Narrator), ↓ announces each commit; `?` opens the help dialog.
 - [ ] Repository view: ↓ to a merged branch, Delete → confirm deletes it; F2 renames; Delete on the current branch does nothing.
 - [ ] Repository view, Stashes group: Delete drops the focused stash after confirming.
-- [ ] `Ctrl+Alt+G P` pushes, `Ctrl+Alt+G Shift+F` pulls; during a bisect `Ctrl+Alt+G Shift+G` / `Shift+X` mark commits.
+- [ ] `Ctrl+Alt+G Shift+P` pushes, `Ctrl+Alt+G Shift+F` pulls; during a bisect `Ctrl+Alt+G Shift+G` / `Shift+X` mark commits.
 - [ ] Focus a file in the Source Control list and press `Ctrl+Alt+G A`: nothing is staged (the chord only acts from an editor).
 - [ ] Rebase editor: Ctrl+Z / Ctrl+Y undo and redo plan changes (and do not also trigger VS Code's own undo); `R` puts the cursor in the message; Esc, Esc asks before discarding; Home/End jump; the focused row has a visible outline in a high-contrast theme.

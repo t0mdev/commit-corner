@@ -452,8 +452,6 @@ function register(ctx) {
 
   /** The VS Code thread's stored thread (a new one: none yet). */
   const recordOf = (thread) => thread && store.threads.get(idOf.get(thread));
-  /** A comment's thread record (by the comment's id when its widget thread was shown again since). */
-  const commentRecord = (comment) => recordOf(comment.thread) || [...store.threads.values()].find((t) => t.comments.some((c) => c.id === comment.id));
 
   // Add Comment / Reply (the widget's button): a new thread is stored with its lines' text.
   async function add(reply) {
@@ -557,13 +555,27 @@ function register(ctx) {
     return w && w.branch ? `branch ${w.branch}` : path.basename(root);
   };
 
-  /** The worktree (root) a command is for: the node's, the thread's (or comment's), else picked from those with comments. */
+  /**
+   * The worktree (root) a command is for: the node's, the thread's or comment's, else (from the
+   * keyboard) the one of the file in front of you, else picked from those with comments.
+   */
   async function rootFor(arg) {
     if (arg && typeof arg.worktreePath === 'string') return path.resolve(arg.worktreePath);
     if (arg && typeof arg.reviewRoot === 'string') return path.resolve(arg.reviewRoot);
-    const t = arg instanceof ReviewComment ? commentRecord(arg) : recordOf(arg);
+    // A comment's menu: its worktree. A comment deleted since is nothing to act on (VS Code then
+    // hands over its id only), never another worktree's comments.
+    if (arg instanceof ReviewComment || (arg && typeof arg === 'object' && 'commentUniqueId' in arg)) {
+      const t = recordOf(arg.thread);
+      if (t) return t.root;
+      notify.info('That review comment is gone (deleted since).');
+      return CANCELLED;
+    }
+    const t = recordOf(arg);
     if (t) return t.root;
     const roots = store.roots();
+    const here = await activeRoot();
+    const mine = here && roots.find((r) => same(r, here));
+    if (mine) return mine;
     if (roots.length <= 1) return roots[0];
     const items = [];
     for (const r of roots) {
@@ -574,6 +586,23 @@ function register(ctx) {
     return pick ? pick.root : CANCELLED;
   }
   const CANCELLED = Symbol('cancelled');
+
+  /** The worktree of the active editor's file (its shown comments' worktree first: a commit's comments belong to the agent's). */
+  async function activeRoot() {
+    const ed = vscode.window.activeTextEditor;
+    if (!ed) return undefined;
+    const t = [...(shown.get(ed.document.uri.toString()) || [])].map(recordOf).find(Boolean);
+    if (t) return t.root;
+    const at = await locate(ed.document.uri).catch(() => undefined);
+    return at && at.root;
+  }
+
+  /** Whether one of the root's comments is open for editing (its text is not saved yet). */
+  const editing = (root) => [...shown.values()].some((set) => [...set].some((th) => {
+    const t = recordOf(th);
+    return t && same(t.root, root) && th.comments.some((c) => c.mode === vscode.CommentMode.Editing);
+  }));
+  const editingNote = () => notify.info('Save (or cancel) the comment you are editing first: the review takes the saved text.');
 
   /**
    * A file's lines now: an open editor's text, else the file (a regular one inside the
@@ -673,9 +702,10 @@ function register(ctx) {
   cmd('commitCorner.review.copy', async (arg) => {
     const root = await rootFor(arg);
     if (root === CANCELLED) return;
+    if (root && editing(root)) return void editingNote();
     const review = root && (await build(root));
     if (!review) {
-      notify.info('No review comments yet: add them with the + in the gutter of a file (or of a commit\'s diff).');
+      notify.info(enabled() ? 'No review comments yet: add them with the + in the gutter of a file (or of a commit\'s diff).' : 'Review comments are turned off (setting commitCorner.review.comments).');
       return;
     }
     await vscode.env.clipboard.writeText(review.text);
@@ -687,6 +717,7 @@ function register(ctx) {
   cmd('commitCorner.review.save', async (arg) => {
     const root = await rootFor(arg);
     if (!root || root === CANCELLED) return;
+    if (editing(root)) return void editingNote();
     // Only a folder known now as the repository's or one of its worktrees (comments outlive them).
     const w = await whose(root);
     if (!w || (!w.main && !(await w.repo.ownsWorktree(root).catch(() => false)))) {
@@ -749,9 +780,13 @@ function register(ctx) {
   cmd('commitCorner.review.clear', async (arg) => {
     const root = await rootFor(arg);
     if (!root || root === CANCELLED) return;
-    const n = store.forRoot(root).length;
-    if (!n) return;
-    if (!(await confirm(`Delete the ${plural(n, 'review comment')} of ${plain(await nameOf(root))}?`, 'Delete'))) return;
+    const threads = store.forRoot(root);
+    if (!threads.length) return;
+    const n = threads.reduce((sum, t) => sum + t.comments.length, 0);
+    const files = [...new Set(threads.map((t) => path.posix.basename(t.path)))];
+    const where = files.length > 3 ? `${files.slice(0, 3).join(', ')} and ${files.length - 3} more files` : files.join(', ');
+    const detail = `In ${plain(where)}, also in files that are not open. This cannot be undone: copy or save the review first if the agent still needs it.`;
+    if (!(await confirm(`Delete ${n === 1 ? 'the review comment' : `all ${n} review comments`} of ${plain(await nameOf(root))}?`, 'Delete', detail))) return;
     clearRoot(root);
   });
 

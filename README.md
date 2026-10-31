@@ -21,7 +21,8 @@ change summaries. Plain JavaScript, no runtime dependencies, no telemetry.
 3. **Comment** — the **+** in an editor's gutter adds a review comment on that line (in the
    agent's files or in a commit's diff). **Copy Review for the Agent** (`Ctrl+Alt+G C`)
    puts all of them together — file, line, the code as it is now, your comment — to paste
-   into the agent's chat.
+   into the agent's chat (or **Save Review to the Worktree** for the agent to read). When it
+   is done, **Delete All Review Comments…** in a comment's `…` menu clears them.
 4. **Summarize** — the sparkle button on that row (or on a pull request, or selected commits) asks your
    language model what changed, **what looks risky** and which files to read first.
 
@@ -113,7 +114,8 @@ new tags (open them in the graph).
 - **Any file row** (an expanded commit's, the details pane's, the uncommitted
   ones): `O` or the file button opens the **working file** — at the line you
   were looking at when that revision's diff is open, mapped through the edits
-  since, and under its new name when it was renamed; `W` compares it with the
+  since, and under its new name when it was renamed (in an open revision or
+  diff: *Open Working File*, `Ctrl+Alt+G W`); `W` compares it with the
   working file, `B` with the **base branch** (the one you last picked with
   `Shift+B`, else origin's default branch such as `origin/main`, or a local
   `main`/`master`), `Shift+B`
@@ -431,8 +433,8 @@ newest commit.
   in its folder, ignored by git; **Copy Instruction** then gives you the line
   to tell the agent). A file of that name that is not an earlier review is
   never overwritten. Copy, Save and **Delete All Review Comments…** (asks
-  first) are also in each comment's `…` menu, and Delete All in Agent review's.
-  Settings:
+  first; for when the agent has dealt with them) are also in each comment's
+  `…` menu; Delete All is in **Agent review**'s menu too. Settings:
   `commitCorner.review.comments`, `commitCorner.review.fileName` (user setting).
 - Stashes are a group in the Repository view (`Delete` drops the focused one).
 - **Worktrees overview** (`Ctrl+Alt+G Shift+W`, or the dashboard button on the
@@ -581,13 +583,14 @@ with `Ctrl+Alt` still held (`Ctrl+Alt+G Ctrl+Alt+S`, `Ctrl+Alt+G Ctrl+Alt+Shift+
 | `←` / `→` | Previous / next revision of the file in a diff |
 | `N` | Next unviewed file of the commit (in a diff opened from a commit's files) |
 | `W` | Open the working file at the same line (in a revision or diff) |
-| `C` | Copy the review comments for the agent |
+| `C` | Copy the review comments for the agent (those of the file in front of you, else pick a worktree) |
+| `Shift+D` | Changes of a worktree vs its base (an agent's work) |
 | `Enter` | Commit |
-| `P` / `Shift+F` | Push / pull |
-| `F` / `Y` | Fetch / sync |
+| `F` / `Shift+F` | Fetch / pull |
+| `Shift+P` / `Y` | Push / sync |
 | `O` / `Shift+O` | Checkout / switch repository (several open) |
 | `Shift+C` | Compare refs |
-| `Shift+P` / `Shift+N` | Open a pull request (pick one, or type its number) / create one |
+| `P` / `Shift+N` | Open a pull request (pick one, or type its number) / create one |
 | `Shift+W` | Worktrees overview |
 | `V` / `Shift+V` | Focus the sidebar Graph / changes since you last looked |
 | `T` | Repository Activity |

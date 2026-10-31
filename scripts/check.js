@@ -53,6 +53,25 @@ for (const kb of pkg.contributes.keybindings || []) if (!declared.has(kb.command
 for (const kb of pkg.contributes.keybindings || []) {
   if (/^ctrl\+alt\+g\b/i.test(kb.key) && !(kb.mac && /^cmd\+alt\+g\b/i.test(kb.mac))) problems.push(`keybinding ${kb.key} (${kb.command}): no "mac" variant with cmd+alt+g`);
 }
+// One key, one meaning: no key bound twice under the same when clause; and the chord's second key
+// also works with Ctrl+Alt still held (README), for the same command.
+const kbs = pkg.contributes.keybindings || [];
+const byKey = new Map();
+for (const kb of kbs) {
+  for (const k of [kb.key, kb.mac].filter(Boolean)) {
+    const id = `${k} [${kb.when || ''}]`;
+    if (byKey.has(id) && byKey.get(id) !== kb.command) problems.push(`keybinding ${id}: both ${byKey.get(id)} and ${kb.command}`);
+    byKey.set(id, kb.command);
+  }
+}
+for (const kb of kbs) {
+  const m = /^ctrl\+alt\+g (?!ctrl\+alt\+)(.+)$/.exec(kb.key);
+  if (m && !kbs.some((o) => o.key === `ctrl+alt+g ctrl+alt+${m[1]}` && o.command === kb.command && (o.when || '') === (kb.when || ''))) problems.push(`keybinding ${kb.key} (${kb.command}): no twin "ctrl+alt+g ctrl+alt+${m[1]}"`);
+}
+// Deleting every review comment is never a one-click icon on a comment (it sits in the … menu).
+for (const menu of ['comments/comment/title', 'comments/commentThread/title', 'comments/commentThread/context']) {
+  for (const item of pkg.contributes.menus[menu] || []) if (item.command === 'commitCorner.review.clear' && /^inline/.test(item.group || '')) problems.push(`menu ${menu}: Delete All Review Comments must not be inline`);
+}
 
 // The same property twice in a row (an edit applied twice): legal JavaScript, never meant.
 for (const f of jsFiles.filter((p) => p.includes(`${path.sep}src${path.sep}`) || p.includes(`${path.sep}media${path.sep}`))) {

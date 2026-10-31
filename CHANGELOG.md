@@ -2,8 +2,11 @@
 
 ## Unreleased
 
-- Each review comment has a `…` menu: **Copy Review for the Agent**, **Save Review to the Worktree** and, apart from them, **Delete All Review Comments…** (it asks first and names the worktree). These are for the comment's worktree, without asking which.
-- **Shortcuts**: the keys you use most while reviewing are single letters after `Ctrl+Alt+G` (`Cmd+Alt+G`): `N` next unviewed file, `W` open the working file, `C` copy the review for the agent, `P` push. What they did before moved to `Shift`: `Shift+N` create pull request, `Shift+W` worktrees overview, `Shift+C` compare refs, `Shift+P` open a pull request. `C` also works before you have comments (it says how to add them).
+- **Shortcuts changed** (after `Ctrl+Alt+G`, `Cmd+Alt+G` on macOS): the keys used most while reviewing an agent's work are single letters now — `N` next unviewed file (was `Shift+N`), `W` open the working file (was `Shift+W`), `C` copy the review for the agent (was `Shift+C`; with comments in several worktrees it takes the one of the file in front of you). What those letters did before moved to `Shift`: `Shift+N` create a pull request, `Shift+W` worktrees overview, `Shift+C` compare refs. New: `Shift+D` shows the changes of a worktree vs its base. Push stays `Shift+P`, `P` still opens a pull request.
+- Each review comment has a `…` menu: **Copy Review for the Agent**, **Save Review to the Worktree** and, in its own group, **Delete All Review Comments…**. They act on that comment's worktree, without asking which. Delete All asks first and says how many comments in which files go (replies counted).
+- While you edit a comment, Copy and Save ask you to save (or cancel) it first: the review takes the saved text. With review comments turned off, `C` says so.
+- The Actions hub (`Ctrl+Alt+G Space`) has a Review group: next unviewed file, open working file, copy, save, delete all.
+- The interactive rebase editor no longer takes the key after `Ctrl+Alt+G` as an action (`Ctrl+Alt+G S` marked the commit "squash").
 
 ## 1.3.0
 

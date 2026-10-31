@@ -361,9 +361,29 @@
     return i;
   }
 
+  /**
+   * VS Code's chords start with Ctrl+Alt+G: the key after it is VS Code's (it reaches VS Code all
+   * the same), never an action key here (Ctrl+Alt+G S must not mark a commit "squash").
+   */
+  const chordKeys = new WeakSet();
+  let chordUntil = 0;
+  window.addEventListener('keydown', (e) => {
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+    const g = (e.ctrlKey || e.metaKey) && e.altKey && (e.code === 'KeyG' || e.key.toLowerCase() === 'g');
+    if (g && Date.now() >= chordUntil) {
+      chordUntil = Date.now() + 1500;
+      return;
+    }
+    if (Date.now() < chordUntil) {
+      chordUntil = 0;
+      chordKeys.add(e);
+      e.preventDefault(); // no character typed in a message box; VS Code still sees the key
+    }
+  }, true);
+
   function onKey(ev, i) {
     // Keys typed into the row's action dropdown or message box belong to them.
-    if (ev.target !== ev.currentTarget) return;
+    if (ev.target !== ev.currentTarget || chordKeys.has(ev)) return;
     if ((ev.key === 'Enter' || ev.key === ' ') && !ev.ctrlKey && !ev.metaKey) {
       ev.preventDefault();
       vscode.postMessage({ type: 'openCommit', sha: plan[i].sha });

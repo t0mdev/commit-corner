@@ -137,7 +137,7 @@
   const spacer = el('span', 'spacer');
   const refreshBtn = button('', 'Refresh', () => vscode.postMessage({ type: 'refresh' }), 'refresh');
   const pullBtn = button('Pull', 'Pull from the upstream branch (Ctrl+Alt+G Shift+F)', () => vscode.postMessage({ type: 'command', command: 'commitCorner.pull', args: {} }), 'down');
-  const pushBtn = button('Push', 'Push to the upstream branch (Ctrl+Alt+G P)', () => vscode.postMessage({ type: 'command', command: 'commitCorner.push', args: {} }), 'up');
+  const pushBtn = button('Push', 'Push to the upstream branch (Ctrl+Alt+G Shift+P)', () => vscode.postMessage({ type: 'command', command: 'commitCorner.push', args: {} }), 'up');
   pushBtn.classList.add('primary');
   const fetchBtn = button('Fetch', 'Fetch from remotes (Ctrl+Alt+G F)', () => vscode.postMessage({ type: 'command', command: 'commitCorner.fetch', args: {} }), 'cloudDown');
   const headBtn = button('HEAD', 'Jump to the checked-out commit', () => revealSha(head && head.sha, true), 'target');
