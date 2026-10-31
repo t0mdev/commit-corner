@@ -2,11 +2,11 @@
 
 ## Unreleased
 
-- **Shortcuts changed** (after `Ctrl+Alt+G`, `Cmd+Alt+G` on macOS): the keys used most while reviewing an agent's work are single letters now — `N` next unviewed file (was `Shift+N`), `W` open the working file (was `Shift+W`), `C` copy the review for the agent (was `Shift+C`; with comments in several worktrees it takes the one of the file in front of you). What those letters did before moved to `Shift`: `Shift+N` create a pull request, `Shift+W` worktrees overview, `Shift+C` compare refs. New: `Shift+D` shows the changes of a worktree vs its base. Push stays `Shift+P`, `P` still opens a pull request.
-- Each review comment has a `…` menu: **Copy Review for the Agent**, **Save Review to the Worktree** and, in its own group, **Delete All Review Comments…**. They act on that comment's worktree, without asking which. Delete All asks first and says how many comments in which files go (replies counted).
-- While you edit a comment, Copy and Save ask you to save (or cancel) it first: the review takes the saved text. With review comments turned off, `C` says so.
+- **Shortcuts changed** (after `Ctrl+Alt+G`, `Cmd+Alt+G` on macOS): the keys used most while reviewing an agent's work are single letters now — `N` next unviewed file (was `Shift+N`), `W` open the working file (was `Shift+W`; elsewhere it says where it works), `C` copy the review for the agent (was `Shift+C`; with comments in several worktrees it takes the one of the file in front of you). What those letters did before moved to `Shift`: `Shift+N` create a pull request, `Shift+W` worktrees overview, `Shift+C` compare refs. New: `Shift+D` shows the changes of a worktree vs its base. Push stays `Shift+P`, `P` still opens a pull request.
+- Each review comment has a `…` menu: **Copy Review for the Agent**, **Save Review to the Worktree** and, in its own group, **Delete All Review Comments…**. They act on that comment's worktree, without asking which. Delete All asks first and says how many comments (and replies) in which files go.
+- While you edit a comment, Copy and Save tell you to save (or cancel) it first: the review takes the saved text. With no comments (or review comments turned off), Copy, Save and Delete All say so; their worktree picker says what it is for.
 - The Actions hub (`Ctrl+Alt+G Space`) has a Review group: next unviewed file, open working file, copy, save, delete all.
-- The interactive rebase editor no longer takes the key after `Ctrl+Alt+G` as an action (`Ctrl+Alt+G S` marked the commit "squash").
+- The interactive rebase editor no longer takes the key after `Ctrl+Alt+G` as its own (`Ctrl+Alt+G S` marked the commit "squash", `Ctrl+Alt+G Ctrl+Alt+Enter` started the rebase); the graph waits as long as VS Code (5 s) for that key.
 
 ## 1.3.0
 

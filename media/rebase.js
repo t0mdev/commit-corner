@@ -17,6 +17,28 @@
     drop: 'remove the commit',
   };
 
+  /**
+   * VS Code's chords start with Ctrl+Alt+G: the key after it is VS Code's (it reaches VS Code all
+   * the same), never an action key here (Ctrl+Alt+G S must not mark a commit "squash").
+   */
+  const chordKeys = new WeakSet();
+  const CHORD_MS = 5000; // as long as VS Code waits for the second key (it also stops on blur)
+  let chordUntil = 0;
+  window.addEventListener('blur', () => (chordUntil = 0));
+  window.addEventListener('keydown', (e) => {
+    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
+    const g = (e.ctrlKey || e.metaKey) && e.altKey && (e.code === 'KeyG' || e.key.toLowerCase() === 'g');
+    if (g && Date.now() >= chordUntil) {
+      chordUntil = Date.now() + CHORD_MS;
+      return;
+    }
+    if (Date.now() < chordUntil) {
+      chordUntil = 0;
+      chordKeys.add(e);
+      e.preventDefault(); // no character typed in a message box; VS Code still sees the key
+    }
+  }, true);
+
   /** @type {any[]} */
   let plan = [];
   let original = [];
@@ -175,7 +197,7 @@
     // Escape leaves the text box (back to its commit row); everything else bubbles normally so
     // VS Code's own shortcuts and Ctrl+Enter keep working here.
     ta.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !chordKeys.has(e)) {
         e.preventDefault();
         const row = ta.closest('.entry');
         if (row) row.focus();
@@ -216,7 +238,7 @@
       select.addEventListener('change', () => setAction(i, select.value, 'select'));
       // Esc in the action list goes back to its row, like in a message box.
       select.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Escape') {
+        if (ev.key === 'Escape' && !chordKeys.has(ev)) {
           ev.preventDefault();
           ev.stopPropagation();
           row.focus();
@@ -341,6 +363,7 @@
 
   // Ctrl/Cmd+Enter starts the rebase from anywhere in the editor.
   document.addEventListener('keydown', (ev) => {
+    if (chordKeys.has(ev)) return; // Ctrl+Alt+G Ctrl+Alt+Enter is VS Code's Commit, not Start
     // Undo / redo of the plan. In a message box the box's own text undo applies instead.
     const mod = ev.ctrlKey || ev.metaKey;
     const inText = /** @type {HTMLElement} */ (ev.target).tagName === 'TEXTAREA';
@@ -360,26 +383,6 @@
     for (let j = i + dir; j >= 0 && j < plan.length; j += dir) if (plan[j].type === 'commit') return j;
     return i;
   }
-
-  /**
-   * VS Code's chords start with Ctrl+Alt+G: the key after it is VS Code's (it reaches VS Code all
-   * the same), never an action key here (Ctrl+Alt+G S must not mark a commit "squash").
-   */
-  const chordKeys = new WeakSet();
-  let chordUntil = 0;
-  window.addEventListener('keydown', (e) => {
-    if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return;
-    const g = (e.ctrlKey || e.metaKey) && e.altKey && (e.code === 'KeyG' || e.key.toLowerCase() === 'g');
-    if (g && Date.now() >= chordUntil) {
-      chordUntil = Date.now() + 1500;
-      return;
-    }
-    if (Date.now() < chordUntil) {
-      chordUntil = 0;
-      chordKeys.add(e);
-      e.preventDefault(); // no character typed in a message box; VS Code still sees the key
-    }
-  }, true);
 
   function onKey(ev, i) {
     // Keys typed into the row's action dropdown or message box belong to them.

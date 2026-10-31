@@ -5176,13 +5176,13 @@
         "key": "ctrl+alt+g ctrl+alt+w",
         "mac": "cmd+alt+g cmd+alt+w",
         "command": "commitCorner.openWorkingFile",
-        "when": "commitCorner.hasRepository && resourceScheme == commitcorner"
+        "when": "commitCorner.hasRepository"
       },
       {
         "key": "ctrl+alt+g w",
         "mac": "cmd+alt+g w",
         "command": "commitCorner.openWorkingFile",
-        "when": "commitCorner.hasRepository && resourceScheme == commitcorner"
+        "when": "commitCorner.hasRepository"
       },
       {
         "key": "ctrl+alt+g ctrl+alt+c",

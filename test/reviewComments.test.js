@@ -409,6 +409,15 @@ test('a comment on an agent\'s commit goes to that agent\'s review, and its row 
   assert.equal(store.forRoot(repo.root).length, 0);
   await cmds['commitCorner.review.copy']({ worktreePath: wt });
   assert.match(clip(), new RegExp(`\`agent\\.txt\`, line 1 in commit ${sha.slice(0, 7)}\\n\\n\`\`\`txt\\n1  the agent was here\\n\`\`\`\\n\\n> Why here\\?`));
+  // From the keyboard in that commit's diff, with comments in the repository too: the agent's review.
+  fs.writeFileSync(path.join(repo.root, 'a.txt'), 'x\n');
+  const mine = controller.newThread(mock.vscode.Uri.file(path.join(repo.root, 'a.txt')), new mock.vscode.Range(0, 0, 0, 0));
+  await cmds['commitCorner.review.add']({ thread: mine, text: 'mine' });
+  mock.vscode.window.activeTextEditor = { document: { uri: rev } };
+  t.after(() => (mock.vscode.window.activeTextEditor = undefined));
+  await cmds['commitCorner.review.copy']();
+  assert.match(clip(), /Why here/);
+  assert.doesNotMatch(clip(), /mine/);
   // Its row in the Worktrees view opens that revision.
   const shown = [];
   const saved = mock.vscode.window.showTextDocument;
@@ -533,6 +542,17 @@ test("a comment's menu: Copy, Save and Delete All are for its worktree, without 
   assert.match(mock.ui.messages.at(-1).msg, /gone/);
   await cmds['commitCorner.review.copy']({ $mid: 1, commentUniqueId: 3, thread: { $mid: 2 } });
   assert.equal(clip(), 'before', 'a comment VS Code no longer knows');
+  await cmds['commitCorner.review.copy'](thread);
+  await cmds['commitCorner.review.copy']({ $mid: 2, commentControlHandle: 0, commentThreadHandle: 4 });
+  assert.equal(clip(), 'before', 'nor its thread');
+  // Nothing left to save or delete: it says so (not a silent no-op from the Actions hub).
+  mock.ui.answers.push('Delete');
+  await cmds['commitCorner.review.clear']({ reviewRoot: repo.root });
+  for (const id of ['commitCorner.review.save', 'commitCorner.review.clear']) {
+    mock.ui.messages.length = 0;
+    await cmds[id]();
+    assert.match(mock.ui.messages.at(-1).msg, /No review comments yet/, id);
+  }
 });
 
 test('stored comments are checked when read back, and kept within bounds', () => {

@@ -56,17 +56,19 @@ for (const kb of pkg.contributes.keybindings || []) {
 // One key, one meaning: no key bound twice under the same when clause; and the chord's second key
 // also works with Ctrl+Alt still held (README), for the same command.
 const kbs = pkg.contributes.keybindings || [];
-const byKey = new Map();
-for (const kb of kbs) {
-  for (const k of [kb.key, kb.mac].filter(Boolean)) {
-    const id = `${k} [${kb.when || ''}]`;
-    if (byKey.has(id) && byKey.get(id) !== kb.command) problems.push(`keybinding ${id}: both ${byKey.get(id)} and ${kb.command}`);
-    byKey.set(id, kb.command);
+for (const prop of ['key', 'mac']) {
+  const byKey = new Map();
+  for (const kb of kbs.filter((x) => x[prop])) {
+    const same = byKey.get(kb[prop]) || [];
+    // Two commands on one key clash when their when clauses can hold together: the same, or one always.
+    for (const o of same) if (o.command !== kb.command && (!o.when || !kb.when || o.when === kb.when)) problems.push(`keybinding ${kb[prop]}: both ${o.command} [${o.when || ''}] and ${kb.command} [${kb.when || ''}]`);
+    byKey.set(kb[prop], [...same, kb]);
   }
-}
-for (const kb of kbs) {
-  const m = /^ctrl\+alt\+g (?!ctrl\+alt\+)(.+)$/.exec(kb.key);
-  if (m && !kbs.some((o) => o.key === `ctrl+alt+g ctrl+alt+${m[1]}` && o.command === kb.command && (o.when || '') === (kb.when || ''))) problems.push(`keybinding ${kb.key} (${kb.command}): no twin "ctrl+alt+g ctrl+alt+${m[1]}"`);
+  const g = prop === 'key' ? 'ctrl' : 'cmd';
+  for (const kb of kbs) {
+    const m = new RegExp(`^${g}\\+alt\\+g (?!${g}\\+alt\\+)(.+)$`).exec(kb[prop] || '');
+    if (m && !kbs.some((o) => o[prop] === `${g}+alt+g ${g}+alt+${m[1]}` && o.command === kb.command && (o.when || '') === (kb.when || ''))) problems.push(`keybinding ${kb[prop]} (${kb.command}): no twin "${g}+alt+g ${g}+alt+${m[1]}"`);
+  }
 }
 // Deleting every review comment is never a one-click icon on a comment (it sits in the … menu).
 for (const menu of ['comments/comment/title', 'comments/commentThread/title', 'comments/commentThread/context']) {

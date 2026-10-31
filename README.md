@@ -302,7 +302,7 @@ open). Without the API (switched off, offline), the view falls back to git only:
   used (so a stale local `origin/main` does not matter); without a test
   merge the remote's default branch is fetched along with the PR. The base
   can be changed per PR. Already-merged PRs still show their own changes.
-- Open a PR (`Ctrl+Alt+G Shift+P`: pick from the listed ones by number, title or
+- Open a PR (`Ctrl+Alt+G P`: pick from the listed ones by number, title or
   author, or type a number), check it out as a local branch that
   tracks the PR (Pull brings in new commits; pushing is refused with an offer
   to push to a branch, because GitHub never accepts pushes to `refs/pull/*`),
@@ -406,7 +406,7 @@ newest commit.
   in another worktree shows up), expands to its state, upstream and
   checked-out commit, and opens its **uncommitted changes** in the multi-diff
   editor (inline button). **Changes vs Base** (inline button, also on the
-  overview cards) shows everything a worktree changed since it left the
+  overview cards and `Ctrl+Alt+G Shift+D`) shows everything a worktree changed since it left the
   default branch — its commits and its uncommitted work in one multi-diff,
   the right side being the files in its folder. `Delete` removes the focused
   worktree.
@@ -432,7 +432,8 @@ newest commit.
   chat) and **Save Review to the Worktree** (the same as `.review-comments.md`
   in its folder, ignored by git; **Copy Instruction** then gives you the line
   to tell the agent). A file of that name that is not an earlier review is
-  never overwritten. Copy, Save and **Delete All Review Comments…** (asks
+  never overwritten. Only submitted comments go in (not a reply still being
+  typed). Copy, Save and **Delete All Review Comments…** (asks
   first; for when the agent has dealt with them) are also in each comment's
   `…` menu; Delete All is in **Agent review**'s menu too. Settings:
   `commitCorner.review.comments`, `commitCorner.review.fileName` (user setting).
@@ -568,6 +569,8 @@ Things to know before disabling the built-in Git:
 Everything works without a mouse (layout: English/US). All shortcuts start
 with the chord `Ctrl+Alt+G` (`Cmd+Alt+G` on macOS); the second key also works
 with `Ctrl+Alt` still held (`Ctrl+Alt+G Ctrl+Alt+S`, `Ctrl+Alt+G Ctrl+Alt+Shift+F`).
+The keys used most are single letters; pull and push take `Shift`, so a stray key
+never changes a branch.
 
 | Then | Action |
 |---|---|
