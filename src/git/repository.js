@@ -2835,6 +2835,8 @@ function lit(p) {
 async function readDotGit(file) {
   let fh;
   try {
+    // A symlinked .git file is not followed (on Windows either, where O_NOFOLLOW does not exist).
+    if ((await fs.promises.lstat(file)).isSymbolicLink()) return '';
     fh = await fs.promises.open(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
     if (!(await fh.stat()).isFile()) return '';
     const buf = Buffer.alloc(4096);

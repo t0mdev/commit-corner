@@ -91,9 +91,14 @@ class ReviewStore {
   }
 
   changed(roots, moved) {
-    // Places that moved while typing: written a little later; the list itself soon.
-    clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.flush(), moved ? 3000 : 500);
+    // Places that moved while typing: written a little later; the list itself soon (a move
+    // never puts off a comment added just before it).
+    const due = Date.now() + (moved ? 3000 : 500);
+    if (!this.timer || due < this.due) {
+      clearTimeout(this.timer);
+      this.due = due;
+      this.timer = setTimeout(() => this.flush(), due - Date.now());
+    }
     for (const root of roots) this.emitter.fire({ root, moved });
   }
 
@@ -199,7 +204,7 @@ function register(ctx) {
     // macOS: /tmp/wt opened, git lists /private/tmp/wt.
     if (!best && uri.scheme === 'file') {
       const real = await fs.promises.realpath(uri.fsPath).catch(() => undefined);
-      if (real && real !== uri.fsPath) best = await bestRoot(manager.repositories, real);
+      if (real && !same(real, uri.fsPath)) best = await bestRoot(manager.repositories, real);
     }
     if (!best) return undefined;
     // git's names are composed (NFC); a macOS path may not be.
@@ -214,7 +219,8 @@ function register(ctx) {
       const display = path.resolve(r.displayRoot || r.root);
       const roots = [{ dir: display, root: rootOf(r) }, { dir: rootOf(r), root: rootOf(r) }, ...(await worktreesOf(r)).map((w) => ({ dir: w.path, root: w.path }))];
       for (const { dir, root } of roots) {
-        const rel = path.relative(dir, abs);
+        // macOS: git names folders composed (NFC), the file system may hand them out decomposed.
+        const rel = process.platform === 'darwin' ? path.relative(dir.normalize('NFC'), abs.normalize('NFC')) : path.relative(dir, abs);
         if (!rel || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) continue;
         // (Opened through the symlinked workspace path: filed under the real one.)
         if (!best || dir.length > best.dir.length) best = { repo: r, dir, root, path: rel.split(path.sep).join('/') };
@@ -334,23 +340,23 @@ function register(ctx) {
     return true;
   }
 
-  /** A document's lines lo..hi as relocate compares them (read line by line: no copy of a big file per keystroke). */
-  function linesOf(document, lo, hi) {
-    const out = [];
-    for (let i = Math.max(0, lo); i <= Math.min(hi, document.lineCount - 1); i++) out.push(document.lineAt(i).text);
-    return normLines(out);
-  }
-
   /**
    * An edit in an open editor: threads below it move by the lines it added or removed, exactly as
-   * VS Code reports them (all of an edit's changes refer to the text before it). A thread the edit
-   * touches (its lines, or right at its start: an undo, a paste) is looked for again close by;
-   * not there, it says that its lines changed.
+   * VS Code reports them (all of an edit's changes refer to the text before it); lines inserted
+   * or deleted right at a thread's first line are a move too. A thread the edit touches (its own
+   * lines: typed in, replaced, a whole file reloaded) is looked at where it would be now first,
+   * then close by; not there, it says that its lines changed. Lines are read one by one, and only
+   * for touched threads.
    */
   function onEdit(e) {
     const set = shown.get(e.document.uri.toString());
     if (!set || !e.contentChanges.length) return;
     const changes = e.contentChanges.map((c) => ({ c, delta: (c.text.match(/\r\n|\r|\n/g) || []).length - (c.range.end.line - c.range.start.line) }));
+    const cache = new Map();
+    const line = (i) => {
+      if (!cache.has(i)) cache.set(i, normLines([e.document.lineAt(i).text])[0]);
+      return cache.get(i);
+    };
     const moved = [];
     for (const thread of set) {
       const t = store.threads.get(idOf.get(thread));
@@ -358,32 +364,49 @@ function register(ctx) {
       let shift = 0;
       let touched = false;
       let reach = 0;
-      let from = t.start;
       for (const { c, delta } of changes) {
-        // Wholly above: it ends before the thread's first line (or exactly at its start, having begun above it).
-        if (c.range.end.line < t.start || (c.range.end.line === t.start && c.range.end.character === 0 && c.range.start.line < t.start)) {
-          shift += delta;
-        } else if (c.range.start.line <= t.end) {
+        const r = c.range;
+        // Wholly above: ending before its first line, or right at its start leaving that line
+        // whole (lines inserted or deleted before it). A thread whose lines are gone keeps
+        // looking for them instead (an undo puts them back there).
+        const atStart = r.end.line === t.start && r.end.character === 0 && !t.outdated && (/[\r\n]$/.test(c.text) || (c.text === '' && r.start.character === 0));
+        if (r.end.line < t.start || atStart) shift += delta;
+        if (!(r.end.line < t.start || atStart) || t.outdated) {
+          // Its own lines (or, for a thread whose lines are gone, anything above them: they may be back).
+          if (r.start.line > t.end) continue;
           touched = true;
-          from = Math.min(from, c.range.start.line);
-          reach += Math.abs(delta) + (c.range.end.line - c.range.start.line) + 1;
+          reach += Math.abs(delta) + (r.end.line - r.start.line) + 1;
         }
       }
       if (!shift && !touched) continue;
       let start = Math.max(0, t.start + shift);
+      const was = !!t.outdated;
       if (touched) {
-        // Close by: where the edit was, as far as it reached, give or take the thread's length.
-        const center = Math.max(0, from + shift);
-        const radius = reach + t.anchor.length + 2;
-        const lo = Math.max(0, center - radius);
-        const found = relocate(linesOf(e.document, lo, center + radius + t.anchor.length), center - lo, t, radius);
-        t.outdated = found === undefined;
-        start = t.outdated ? Math.min(Math.max(0, from + shift), Math.max(0, e.document.lineCount - 1)) : lo + found;
+        const count = e.document.lineCount;
+        const n = t.anchor.length;
+        const here = Math.min(start, Math.max(0, count - 1));
+        // Where it would be now: its lines still there (with a neighbour as before) is the answer.
+        const same = n && here + n <= count && t.anchor.every((a, k) => line(here + k) === normLines([a])[0]);
+        const neighbour = t.before == null || t.after == null || (here > 0 && line(here - 1) === normLines([t.before])[0]) || (here + n < count && line(here + n) === normLines([t.after])[0]);
+        if (same && neighbour) {
+          start = here;
+          t.outdated = false;
+        } else {
+          // Close by, as far as the edit reached.
+          const radius = reach + n + 2;
+          const lo = Math.max(0, here - radius);
+          const window = [];
+          for (let i = lo; i <= Math.min(count - 1, here + radius + n); i++) window.push(line(i));
+          const found = relocate(window, here - lo, t, radius);
+          t.outdated = found === undefined;
+          start = t.outdated ? here : lo + found;
+        }
       }
       t.end = start + (t.end - t.start);
       t.start = start;
       thread.range = new vscode.Range(t.start, 0, t.end, 0);
-      decorate(thread, t);
+      // The title only when it changes (each change is a message to VS Code's window).
+      if (was !== !!t.outdated) decorate(thread, t);
       moved.push(t);
     }
     if (moved.length) store.put(moved, true);
@@ -548,7 +571,7 @@ function register(ctx) {
       const size = await repo.blobSize(t.ref, t.path).catch(() => undefined);
       if (size === undefined || size > MAX_FILE) return undefined;
       const blob = await repo.show(t.ref, t.path).catch(() => null);
-      return blob ? splitLines(blob.toString('utf8')) : undefined;
+      return blob ? splitLines(await decode(blob, toGitUri(t.repoRoot, t.path, t.ref))) : undefined;
     }
     const abs = path.join(root, ...t.path.split('/'));
     const open = openDocument(abs);
@@ -558,9 +581,11 @@ function register(ctx) {
     const buf = await readAtMost(abs, MAX_FILE).catch(() => undefined);
     if (!buf) return undefined;
     // As VS Code reads it (files.encoding, a BOM), so the stored lines compare.
-    const text = vscode.workspace.decode ? await vscode.workspace.decode(buf, { uri: vscode.Uri.file(abs) }).catch(() => buf.toString('utf8')) : buf.toString('utf8');
-    return splitLines(text);
+    return splitLines(await decode(buf, vscode.Uri.file(abs)));
   }
+
+  /** Text as VS Code reads that file (files.encoding, a BOM), so the stored lines compare. */
+  const decode = (buf, uri) => (vscode.workspace.decode ? Promise.resolve(vscode.workspace.decode(buf, { uri })).catch(() => buf.toString('utf8')) : Promise.resolve(buf.toString('utf8')));
 
   /** The open editor of a working file, also when it was opened through the symlinked workspace path. */
   function openDocument(abs) {
@@ -569,10 +594,21 @@ function register(ctx) {
       let p = path.resolve(d.uri.fsPath);
       for (const r of manager.repositories) {
         const display = path.resolve(r.displayRoot || r.root);
-        if (display !== path.resolve(r.root) && (p === display || p.startsWith(display + path.sep))) p = path.resolve(r.root) + p.slice(display.length);
+        if (!same(display, path.resolve(r.root)) && (same(p, display) || same(p.slice(0, display.length + 1), display + path.sep))) p = path.resolve(r.root) + p.slice(display.length);
       }
       return same(p, abs);
     });
+  }
+
+  /** A stored thread's place and title in every editor that shows it. */
+  function redecorate(t) {
+    for (const set of shown.values()) {
+      for (const th of set) {
+        if (idOf.get(th) !== t.id) continue;
+        th.range = new vscode.Range(t.start, 0, t.end, 0);
+        decorate(th, t);
+      }
+    }
   }
 
   /** The review of a root as text: each comment with the code it is about, as it is now. */
@@ -602,20 +638,19 @@ function register(ctx) {
       }
       if (!t.ref && tracked.has(t.id)) {
         const here = file.normed.slice(t.start, t.start + t.anchor.length);
-        t.outdated = here.length !== t.anchor.length || here.some((l, k) => l !== t.anchor[k].slice(0, MAX_LINE).trim());
+        const outdated = here.length !== t.anchor.length || here.some((l, k) => l !== t.anchor[k].slice(0, MAX_LINE).trim());
+        if (outdated !== !!t.outdated) {
+          t.outdated = outdated;
+          moved.push(t);
+          redecorate(t);
+        }
       } else if (!t.ref && follow(t, file.normed)) {
         moved.push(t);
-        for (const set of shown.values()) {
-          for (const th of set) {
-            if (idOf.get(th) !== t.id) continue;
-            th.range = new vscode.Range(t.start, 0, t.end, 0);
-            decorate(th, t);
-          }
-        }
+        redecorate(t);
       }
       const state = t.outdated ? 'changed' : 'current';
-      const code = state === 'current' ? file.lines.slice(t.start, Math.min(t.end, t.start + MAX_ANCHOR - 1) + 1) : t.anchor;
-      out.push({ path: t.path, ref: t.ref, start: t.start, end: t.end, state, code, comments: t.comments.map((c) => c.body) });
+      const here = file.lines.slice(t.start, Math.min(t.end, t.start + MAX_ANCHOR - 1) + 1);
+      out.push({ path: t.path, ref: t.ref, start: t.start, end: t.end, state, code: state === 'current' ? here : t.anchor, now: state === 'changed' ? here : undefined, comments: t.comments.map((c) => c.body) });
     }
     if (moved.length) store.put(moved, true);
     return { text: reviewText({ name: path.basename(root), branch: w && w.branch, threads: out }), count: out.length, who: w };
@@ -632,7 +667,7 @@ function register(ctx) {
     await vscode.env.clipboard.writeText(review.text);
     const name = review.who && review.who.branch ? `branch ${review.who.branch}` : path.basename(root);
     // The command is done; the notification just says so.
-    notify.info(`Copied ${plural(review.count, 'review comment')} for ${plain(name)}: paste ${review.count === 1 ? 'it' : 'them'} into your agent's chat.`).then(undefined, () => {});
+    notify.info(`Copied ${plural(review.count, 'review comment')} (${plain(name)}) for your agent's chat.`).then(undefined, () => {});
   });
 
   cmd('commitCorner.review.save', async (arg) => {
@@ -640,7 +675,9 @@ function register(ctx) {
     if (!root || root === CANCELLED) return;
     // Only a folder known now as the repository's or one of its worktrees (comments outlive them).
     const w = await whose(root);
-    if (!w || (!w.main && !(await w.repo.ownsWorktree(root).catch(() => false)))) {
+    // Its real path now (not a symlink put in its place): what the file is written into.
+    const real = await fs.promises.realpath(root).catch(() => undefined);
+    if (!w || !real || !same(rootPath(real), root) || (!w.main && !(await w.repo.ownsWorktree(root).catch(() => false)))) {
       notify.warn(`${plain(root)} is not a worktree of an open repository any more.`);
       return;
     }
@@ -654,13 +691,20 @@ function register(ctx) {
       notify.info('No review comments yet.');
       return;
     }
-    // Ignored first (the file and its temporary twin), so it is never seen by git, even for a moment.
+    // Only a name that may be written (free, or an earlier review) gets ignored; then ignored
+    // first (the file and its temporary twin), so git never sees it, even for a moment.
+    try {
+      await checkTarget(real, name);
+    } catch (e) {
+      notify.warn(`The review was not saved: ${plain(e.message)}`);
+      return;
+    }
     const ignored = await excludeFile(w.repo, name).then(() => true, (e) => {
       log().info(`Review file not excluded: ${e.message}`);
       return false;
     });
     try {
-      await writeReview(root, name, review.text);
+      await writeReview(real, name, review.text);
     } catch (e) {
       notify.warn(`The review was not saved: ${plain(e.message)}`);
       return;
@@ -714,7 +758,7 @@ function register(ctx) {
 
 /** A plain file name: no folders, no ".git", nothing Windows treats as a device or trims. */
 function fileNameOk(name) {
-  return typeof name === 'string' && /^[^\\/:*?"<>|\u0000-\u001f]{1,100}$/.test(name) && !/[. ]$/.test(name) && name !== '.' && name !== '..'
+  return typeof name === 'string' && /^[^\\/:*?"<>|\u0000-\u001f\u202a-\u202e\u2066-\u2069]{1,100}$/.test(name) && !/^git~\d/i.test(name) && !/[. ]$/.test(name) && name !== '.' && name !== '..'
     && !/^\.git$/i.test(name) && !/^(con|prn|aux|nul|conin\$|conout\$|com[\d¹²³]|lpt[\d¹²³])\s*(\..*)?$/i.test(name);
 }
 
@@ -742,14 +786,9 @@ const tmpName = (name) => `.${name}.${newId()}.tmp`;
  */
 async function writeReview(root, name, text) {
   const real = await fs.promises.realpath(root);
+  if (real !== path.resolve(root)) throw new Error('the worktree folder is a link.');
   const file = path.join(root, name);
-  const st = await fs.promises.lstat(file).catch(() => null);
-  if (st) {
-    if (!st.isFile()) throw new Error(`${name} exists and is not a regular file.`);
-    const { readAtMost } = require('../commands/fileCommands');
-    const head = await readAtMost(file, MAX_FILE).catch(() => undefined);
-    if (!head || !head.toString('utf8').replace(/^﻿/, '').startsWith(REVIEW_HEADING)) throw new Error(`${name} exists and is not an earlier review: it is left as it is.`);
-  }
+  await checkTarget(root, name);
   const tmp = path.join(root, tmpName(name));
   const { O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW } = fs.constants;
   try {
@@ -762,9 +801,20 @@ async function writeReview(root, name, text) {
     if ((await fs.promises.realpath(root)) !== real) throw new Error('the worktree folder changed while the review was written.');
     await renameOver(tmp, file);
   } catch (e) {
-    await fs.promises.rm(tmp, { force: true }).catch(() => {});
+    await fs.promises.rm(tmp, { force: true, maxRetries: 3 }).catch(() => {});
     throw e;
   }
+}
+
+/** The review file's name in the root may be written: free, or an earlier review (never another file). */
+async function checkTarget(root, name) {
+  const file = path.join(root, name);
+  const st = await fs.promises.lstat(file).catch(() => null);
+  if (!st) return;
+  if (!st.isFile()) throw new Error(`${name} exists and is not a regular file.`);
+  const { readAtMost } = require('../commands/fileCommands');
+  const head = await readAtMost(file, MAX_FILE).catch(() => undefined);
+  if (!head || !head.toString('utf8').replace(/^\uFEFF/, '').startsWith(REVIEW_HEADING)) throw new Error(`${name} exists and is not an earlier review: it is left as it is.`);
 }
 
 /** rename, again for a moment on Windows when a virus scanner or the indexer still holds the file. */
@@ -819,4 +869,4 @@ async function excludeFile(repo, name) {
   }
 }
 
-module.exports = { register, get, ReviewStore, valid, insideRoot, excludeFile, writeReview, fileNameOk };
+module.exports = { register, get, same, ReviewStore, valid, insideRoot, excludeFile, writeReview, checkTarget, fileNameOk };

@@ -198,7 +198,7 @@ test('comment on a line of an agent\'s worktree: it moves with edits, the review
   mock.events.onDidChangeTextDocument.fire({ document: doc, contentChanges: [{ range: new mock.vscode.Range(5, 9, 5, 17), text: 'items.length ? items[0] : null' }] });
   assert.match(thread.label, /these lines have changed/);
   await cmds['commitCorner.review.copy']({ worktreePath: wt });
-  assert.match(clip(), /line 6 \(these lines have changed since the comment; they were:\)\n\n```js\n {2}return items\[0\];\n```/);
+  assert.match(clip(), /line 6 \(these lines have changed since the comment; they were:\)\n\n```js\n {2}return items\[0\];\n```\n\nNow, line 6:\n\n```js\n6 {4}return items\.length \? items\[0\] : null;\n```/);
   // Delete All (asked first).
   mock.ui.answers.push('Delete');
   await cmds['commitCorner.review.clear']({ worktreePath: wt });
@@ -230,6 +230,85 @@ test('lines deleted around a comment and the deletion undone: the comment is bac
   mock.events.onDidChangeTextDocument.fire({ document: doc, contentChanges: [{ range: new mock.vscode.Range(10, 0, 10, 0), text: '\n' }] });
   assert.equal(thread.range.start.line, 11);
   assert.doesNotMatch(thread.label, /changed/);
+});
+
+/** Comment on line `at` of a file with these lines, in an open editor. */
+async function commented(t, lines, at) {
+  const env = await setup(t);
+  env.r.commit('base', { 'f.js': lines.join('\n') });
+  const file = mock.vscode.Uri.file(path.join(env.repo.root, 'f.js'));
+  const doc = env.open(file);
+  const thread = env.controller.newThread(file, new mock.vscode.Range(at, 0, at, 0));
+  await env.cmds['commitCorner.review.add']({ thread, text: 'here' });
+  /** The file rewritten (on disk, as an agent does) and the edit VS Code reports. */
+  const edit = (now, range, text) => {
+    fs.writeFileSync(file.fsPath, now.join('\n'));
+    mock.events.onDidChangeTextDocument.fire({ document: doc, contentChanges: [{ range: new mock.vscode.Range(...range), text }] });
+  };
+  return { ...env, file, doc, thread, edit };
+}
+
+const blocks = (names) => names.flatMap((n) => [`function ${n}() {`, '  if (ok) {', '    done();', '  }', '}', '']);
+
+test('an open file the agent rewrote (one change from its first to its last line): the comment stays on its "}"', async (t) => {
+  const lines = blocks(['a', 'b', 'c']);
+  const { thread, edit, store, repo } = await commented(t, lines, 16); // c's closing brace
+  const now = [...lines];
+  now[0] = 'function a1() {';
+  now[now.length - 1] = '// end';
+  edit(now, [0, 0, lines.length - 1, 0], now.join('\n'));
+  assert.equal(thread.range.start.line, 16);
+  assert.doesNotMatch(thread.label, /changed/);
+  assert.equal(store.forRoot(repo.root)[0].outdated, false);
+});
+
+test('lines pasted right above a commented "}" move it down; it stays as it was', async (t) => {
+  const lines = blocks(['a', 'b']);
+  const { thread, edit } = await commented(t, lines, 4);
+  const pasted = ['// x', '// y', '// z'];
+  edit([...lines.slice(0, 4), ...pasted, ...lines.slice(4)], [4, 0, 4, 0], `${pasted.join('\n')}\n`);
+  assert.equal(thread.range.start.line, 7);
+  assert.doesNotMatch(thread.label, /changed/);
+});
+
+test('a "}" whose own line was deleted does not turn up at another block\'s identical "}"', () => {
+  const lines = blocks(['a', 'b']);
+  const where = F.anchorOf(lines, 10, 10); // b's brace: "  }" above, "" below
+  const now = lines.filter((_, k) => k !== 10);
+  assert.notEqual(F.relocate(F.normLines(now), 10, where), 4, 'not a\'s brace (same neighbours, far away)');
+  // Nor when nothing is close by.
+  const far = [...blocks(['a']), ...Array.from({ length: 20 }, (_, k) => `// ${k}`), 'x'];
+  assert.equal(F.relocate(F.normLines(far), 25, { anchor: ['}'], before: '  }', after: '' }), undefined);
+});
+
+test('the review notices lines that changed in an open editor, and the editor says so too', async (t) => {
+  const lines = ['const a = 1;', 'const b = 2;', 'const c = 3;'];
+  const { thread, cmds, repo, file, clip } = await commented(t, lines, 1);
+  fs.writeFileSync(file.fsPath, ['const a = 1;', 'const b = 20;', 'const c = 3;'].join('\n')); // no edit event: changed behind the editor's back
+  await cmds['commitCorner.review.copy']({ reviewRoot: repo.root });
+  assert.match(clip(), /these lines have changed/);
+  assert.match(thread.label, /these lines have changed/);
+});
+
+test('an agent rewriting a big open file with 50 comments in it costs little', async (t) => {
+  const lines = Array.from({ length: 200000 }, (_, k) => `const v${k} = ${k};`);
+  const env = await setup(t);
+  env.r.commit('base', { 'big.js': lines.join('\n') });
+  const file = mock.vscode.Uri.file(path.join(env.repo.root, 'big.js'));
+  const text = lines.join('\n');
+  const doc = { uri: file, getText: () => text, lineCount: lines.length, lineAt: (i) => ({ text: lines[i] }) };
+  mock.vscode.workspace.textDocuments.push(doc);
+  t.after(() => mock.vscode.workspace.textDocuments.splice(mock.vscode.workspace.textDocuments.indexOf(doc), 1));
+  const threads = [];
+  for (let k = 0; k < 50; k++) {
+    const th = env.controller.newThread(file, new mock.vscode.Range(1000 + k * 3000, 0, 1000 + k * 3000, 0));
+    await env.cmds['commitCorner.review.add']({ thread: th, text: `c${k}` });
+    threads.push(th);
+  }
+  const t0 = Date.now();
+  mock.events.onDidChangeTextDocument.fire({ document: doc, contentChanges: [{ range: new mock.vscode.Range(0, 0, lines.length - 1, 0), text }] });
+  assert.ok(Date.now() - t0 < 200, `${Date.now() - t0} ms`);
+  assert.ok(threads.every((th, k) => th.range.start.line === 1000 + k * 3000));
 });
 
 test('a comment on an agent\'s commit goes to that agent\'s review, and its row opens the commit there', async (t) => {
@@ -356,7 +435,7 @@ test('Save never writes through a link, never over another file, never with a de
   await writeReview(r.dir, 'review.md', '# Review comments for y\n');
   assert.equal(fs.readFileSync(path.join(r.dir, 'victim.txt'), 'utf8'), '# Review comments for x\nvictim\n');
   assert.equal(fs.readFileSync(path.join(r.dir, 'review.md'), 'utf8'), '# Review comments for y\n');
-  for (const bad of ['sub/x.md', '..', '.git', 'NUL', 'con.txt', 'x.md ', 'x.md.', 'a\nb']) assert.equal(fileNameOk(bad), false, bad);
+  for (const bad of ['sub/x.md', '..', '.git', 'NUL', 'con.txt', 'x.md ', 'x.md.', 'a\nb', 'GIT~1', 'review\u202e.md', 'CONIN$', 'COM¹']) assert.equal(fileNameOk(bad), false, bad);
   assert.equal(fileNameOk('.review-comments.md'), true);
   const own = { commonDir: path.join(r.dir, '.git'), gitDir: path.join(r.dir, '.git') };
   await excludeFile(own, 'review.md');
@@ -377,6 +456,20 @@ test('Save never writes through a link, never over another file, never with a de
   fs.symlinkSync(path.join(r.dir, 'real'), path.join(r.dir, 'linked'));
   assert.equal(await insideRoot(r.dir, 'real/f.txt'), true);
   assert.equal(await insideRoot(r.dir, 'linked/f.txt'), false, 'not through a symlinked folder');
+});
+
+test('Save leaves a file of that name that is not a review alone, and does not hide it from git', async (t) => {
+  const { r, repo, cmds, controller, open } = await setup(t);
+  r.commit('base', { 'f.txt': 'a\n' });
+  fs.writeFileSync(path.join(repo.root, '.review-comments.md'), 'my own notes\n');
+  const file = mock.vscode.Uri.file(path.join(repo.root, 'f.txt'));
+  open(file);
+  await cmds['commitCorner.review.add']({ thread: controller.newThread(file, new mock.vscode.Range(0, 0, 0, 0)), text: 'x' });
+  await cmds['commitCorner.review.save']({ reviewRoot: repo.root });
+  assert.equal(fs.readFileSync(path.join(repo.root, '.review-comments.md'), 'utf8'), 'my own notes\n');
+  assert.match(mock.ui.messages.pop().msg, /not an earlier review/);
+  const exclude = path.join(repo.commonDir, 'info', 'exclude');
+  assert.doesNotMatch(fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '', /review-comments/);
 });
 
 test('Save refuses a folder that is no longer a worktree of an open repository', async (t) => {

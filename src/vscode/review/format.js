@@ -33,13 +33,14 @@ function anchorOf(lines, start, end) {
 }
 
 /** Lines worth finding anywhere in a file: with some letters or digits (not just "}" or "end"). */
-const distinctive = (anchor) => anchor.some((l) => (norm(l).match(/[A-Za-z0-9_]/g) || []).length >= 4);
+const distinctive = (anchor, min = 4) => anchor.some((l) => (norm(l).match(/[A-Za-z0-9_]/g) || []).length >= min);
 
 /**
  * Where a comment's lines are now, or undefined when they are gone:
  *  1. where they were, when they still are there with a neighbour as it was;
  *  2. else the nearest place (below first: lines added above move them down) where they are
- *     with both neighbours as they were, then with one (a lone "}": only a line or two away);
+ *     with both neighbours as they were, then with one (a lone "}": only a line or two away, or
+ *     with telling neighbours);
  *  3. else where they were, when they still are there (both neighbours edited);
  *  4. else the nearest place they are at all, if they are distinctive (a lone "}" is not).
  * @param {string[]} normed the file's lines, normalized once (see normLines)
@@ -63,13 +64,16 @@ function relocate(normed, start, where, radius = Infinity) {
   const far = Math.min(radius, Math.max(start, normed.length - start));
   // A "}" with one neighbour as it was is only itself close by; distinctive lines anywhere.
   const sure = distinctive(where.anchor);
+  // A "}" with both neighbours as they were: itself only when those neighbours are telling (not
+  // "  }" and a blank line, which every other block ends with too), or a line or two away.
+  const telling = sure || distinctive([where.before || '', where.after || ''], 3);
   let one;
   let loose;
   for (let d = 1; d <= far; d++) {
     for (const i of [start + d, start - d]) {
       if (!at(i)) continue;
       const k = near(i);
-      if (k === 2) return i;
+      if (k === 2 && (telling || d <= 2)) return i;
       if (k === 1 && one === undefined && (sure || d <= 2)) one = i;
       if (loose === undefined) loose = i;
     }
@@ -113,7 +117,7 @@ const quote = (text) => String(text).split(/\r\n|\r|\n/).map((l) => (l ? `> ${l}
  * The review as Markdown for the agent: what to do, then each comment with its file, lines and
  * code, by file and line. `state`: "current" (the code as it is now), "changed" (the lines are
  * not there any more: the code as it was), "missing" (the file is gone).
- * @param {{name: string, branch?: string, threads: {path: string, ref?: string|null, start: number, end: number, state?: 'current'|'changed'|'missing', code: string[], comments: string[]}[]}} review
+ * @param {{name: string, branch?: string, threads: {path: string, ref?: string|null, start: number, end: number, state?: 'current'|'changed'|'missing', code: string[], now?: string[], comments: string[]}[]}} review
  */
 function reviewText(review) {
   const threads = review.threads.slice().sort((a, b) => a.path.localeCompare(b.path, 'en') || a.start - b.start);
@@ -129,13 +133,19 @@ function reviewText(review) {
     const inCommit = t.ref ? ` in commit ${t.ref.slice(0, 7)}` : '';
     const note = state === 'changed' ? ' (these lines have changed since the comment; they were:)' : state === 'missing' ? ' (the file is not there any more; the lines were:)' : '';
     out.push('', `## ${k + 1}. ${codeSpan(t.path)}, ${lines}${inCommit}${note}`, '');
-    if (t.code && t.code.length) {
-      const cut = t.code.map((l) => (l.length > MAX_LINE ? `${l.slice(0, MAX_LINE)}…` : l));
-      // Line numbers only for the code as it is now (old code at today's numbers would mislead).
+    // Line numbers only for the code as it is now (old code at today's numbers would mislead).
+    const block = (lines, numbered) => {
+      const cut = lines.map((l) => (l.length > MAX_LINE ? `${l.slice(0, MAX_LINE)}…` : l));
       const width = String(t.start + cut.length).length;
-      const body = state === 'current' ? cut.map((l, i) => `${String(t.start + 1 + i).padStart(width)}  ${l}`).join('\n') : cut.join('\n');
+      const body = numbered ? cut.map((l, i) => `${String(t.start + 1 + i).padStart(width)}  ${l}`).join('\n') : cut.join('\n');
       const f = fence(body);
       out.push(`${f}${language(t.path)}`, body, f, '');
+    };
+    if (t.code && t.code.length) block(t.code, state === 'current');
+    // Changed: what is there now as well, so the agent sees both without opening the file.
+    if (state === 'changed' && t.now && t.now.length) {
+      out.push(`Now, ${lines}:`, '');
+      block(t.now, true);
     }
     out.push(t.comments.map(quote).join('\n\n'));
   });

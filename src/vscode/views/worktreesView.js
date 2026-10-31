@@ -11,7 +11,7 @@ const { toGitUri } = require('../uri');
 const { shortSha, confirm, formatDate, escapeMarkdown, debounce, inThisWindow, escapeIcons, statusIcon, STATUS_LABELS, log } = require('../util');
 const { pickRef, inputBranchName } = require('../pickers');
 const { GitError } = require('../../git/exec');
-const { normalizePath, samePath } = require('../../git/pathUtil');
+const { normalizePath } = require('../../git/pathUtil');
 
 /** A worktree's folder as review comments store it (one form: a lower-case drive letter on Windows). */
 const reviewRoot = (p) => normalizePath(path.resolve(p));
@@ -169,7 +169,11 @@ class ReviewThreadNode {
     const t = this.thread;
     // The first line, as text (no Markdown marks: the comment itself renders them).
     const first = t.comments[0].body.split(/\r?\n/).find((l) => l.trim() && !/^\s*(```|~~~)/.test(l)) || '';
-    const preview = first.replace(/[*_`~#>]+/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\s+/g, ' ').trim();
+    const preview = first
+      .replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+)/, '') // a heading, quote or list mark at its start
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // a link: its text
+      .replace(/(\*\*|__|\*|_|`+)(\S(?:.*?\S)?)\1/g, '$2') // paired emphasis and code marks (not the _ in my_name)
+      .replace(/\s+/g, ' ').trim();
     const item = new vscode.TreeItem(`${path.posix.basename(t.path)}:${t.start + 1}`, vscode.TreeItemCollapsibleState.None);
     item.description = preview.length > 80 ? `${preview.slice(0, 79)}…` : preview;
     const md = new vscode.MarkdownString();
@@ -277,7 +281,7 @@ class WorktreesView extends TreeProvider {
     this.reviewNodes = new Map();
     this.view = require('../util').registerTreeView('commitCorner.worktrees', vscode.window.createTreeView('commitCorner.worktrees', { treeDataProvider: this, manageCheckboxStateManually: true }));
     const refresh = debounce(() => this.refresh(), 1500);
-    // An "Agent review" row redrawn at most every 300 ms (a comment moves with every keystroke above it).
+    // An "Agent review" row redrawn once typing pauses for 300 ms (a comment moves with every keystroke above it).
     const pendingReview = new Set();
     const flushReview = debounce(() => {
       const nodes = [...pendingReview];
@@ -309,7 +313,8 @@ class WorktreesView extends TreeProvider {
       // Review comments: a comment that moved (or was edited) redraws its worktree's review row;
       // one added or deleted, the worktrees (their counts), a moment later.
       ...(require('../review').get() ? [require('../review').get().onDidChange((e) => {
-        const node = [...this.reviewNodes].find(([root]) => samePath(root, e.root));
+        const same = require('../review').same;
+        const node = [...this.reviewNodes].find(([root]) => same(root, e.root));
         if (e.moved) {
           // Only places changed (typing above a comment): its row's labels, if it is shown; never the worktrees.
           if (node) redrawReview(node[1]);
