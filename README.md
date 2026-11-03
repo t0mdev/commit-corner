@@ -163,8 +163,11 @@ new tags (open them in the graph).
   Merge Resolution* is in its menu and hover, `A` on a section opens all its
   files. Merges of more than two parents offer the parents' changes only; a
   shallow clone without the merge's base says so. Merging again needs no
-  working tree: nothing in yours or in the index changes, and its objects
-  stay out of the repository's object store.
+  working tree: nothing in yours or in the index changes (like
+  `git merge-tree`, it leaves the few objects it made, conflicted files and
+  their folders, for `git gc`). With git older than 2.38 a merge with more
+  than 1000 files (or 64 MB) changed on both sides shows its resolution as
+  unavailable.
 - Details pane: avatar, author, age and date, SHA (copy), change summary,
   full message, committer, signature status (GPG/SSH), parents, refs, and the
   changed files with per-file bars and line stats. Click a file to open its diff.

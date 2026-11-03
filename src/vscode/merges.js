@@ -46,7 +46,8 @@ async function parentSides(repo, commit, signal) {
   const subjects = new Map(res.stdout.split('\n').map((l) => l.split('\0')));
   return commit.parents.map((p) => {
     const subject = subjects.get(p) || '';
-    const short = subject.length > 50 ? `${subject.slice(0, 49)}…` : subject;
+    const chars = Array.from(subject); // (whole characters: an emoji is not cut in half)
+    const short = chars.length > 50 ? `${chars.slice(0, 49).join('')}…` : subject;
     return short ? `${shortSha(p)} “${short}”` : shortSha(p);
   });
 }
@@ -107,8 +108,19 @@ async function filesAgainst(repo, sha, base) {
     const r = await repo.getMergeResolution(sha, { commit }).catch(() => undefined);
     if (r && r.tree === base) return { files: r.files, leftLabel: AUTO_LABEL };
   }
-  return { files: await repo.diffFiles(base, sha, { blobs: true }), leftLabel: commit.parents.includes(base) ? undefined : AUTO_LABEL };
+  // (Kept a little: N pressed through a big parent-2 list diffs once.)
+  const key = `${repo.root}\0${base}\0${sha}`;
+  let files = againstCache.get(key);
+  if (!files) {
+    files = await repo.diffFiles(base, sha, { blobs: true });
+    againstCache.set(key, files);
+    if (againstCache.size > 10) againstCache.delete(againstCache.keys().next().value);
+  }
+  return { files, leftLabel: commit.parents.includes(base) ? undefined : AUTO_LABEL };
 }
+
+/** filesAgainst's diffs of fixed SHAs (the last 10). */
+const againstCache = new Map();
 
 /** How many files a view has (resolution: also whether that is exact). */
 async function countView(repo, commit, view, signal) {
@@ -123,8 +135,7 @@ async function countView(repo, commit, view, signal) {
  * Ask which view of a merge to open. Shown at once; the counts fill in as git finds them
  * (Enter on the first entry does not wait). Resolves to the view, or undefined.
  */
-async function pickMergeView(repo, commit) {
-  const sides = await parentSides(repo, commit);
+function pickMergeView(repo, commit) {
   const qp = vscode.window.createQuickPick();
   qp.title = `Merge ${shortSha(commit.sha)}: ${escapeIcons(commit.subject || '')}`;
   qp.placeholder = commit.parents.length === 2 ? 'Which changes of this merge?' : `Which changes of this merge? (it merges ${commit.parents.length} parents: Merge Resolution needs two)`;
@@ -132,7 +143,7 @@ async function pickMergeView(repo, commit) {
   let items = mergeViews(commit).map((view) => ({
     label: `${view === 'resolution' ? '$(git-compare)' : '$(diff)'} ${viewTitle(view)}`,
     description: 'counting…',
-    detail: escapeIcons(viewDetail(commit, view, sides)),
+    detail: viewDetail(commit, view),
     view,
   }));
   let active = items[0].view;
@@ -148,20 +159,28 @@ async function pickMergeView(repo, commit) {
   show();
   qp.busy = true;
   const controller = new AbortController();
+  // The parents' subjects in the details as soon as git has them.
+  parentSides(repo, commit, controller.signal).then((sides) => {
+    if (controller.signal.aborted) return;
+    items = items.map((x) => ({ ...x, detail: escapeIcons(viewDetail(commit, x.view, sides)) }));
+    show();
+  }, () => {});
   let pending = items.length;
   for (const item of items) {
     countView(repo, commit, item.view, controller.signal).then(
       ({ count, exact }) => countText(item.view, count, exact),
       (e) => {
         if (e && e.code !== 'Cancelled') log().warn(`Merge ${shortSha(commit.sha)}, ${item.view}: ${e.message}`);
-        return 'unavailable';
+        return { unavailable: e && e.message };
       },
-    ).then((text) => {
+    ).then((got) => {
       if (controller.signal.aborted) return;
-      // Most merges are clean: then Enter takes what the merge brought in.
-      if (item.view === 'resolution' && /^no files/.test(text) && !moved) active = 'parent1';
+      const text = typeof got === 'string' ? got : 'unavailable';
+      // Most merges are clean (and a resolution may be unavailable): then Enter takes what the
+      // merge brought in.
+      if (item.view === 'resolution' && (/^no files/.test(text) || typeof got !== 'string') && !moved) active = 'parent1';
       const side = item.view === 'resolution' ? '' : `${shortSha(commit.parents[parentIndex(item.view)])} · `;
-      items = items.map((x) => (x.view === item.view ? { ...x, description: `${side}${text}` } : x));
+      items = items.map((x) => (x.view === item.view ? { ...x, description: `${side}${text}`, ...(typeof got === 'string' ? {} : { detail: escapeIcons(`Unavailable: ${got.unavailable || 'git could not tell'}`) }) } : x));
       show();
       if (--pending === 0) qp.busy = false;
     });
@@ -196,8 +215,8 @@ async function openMergeView(repo, commit, view) {
       const controller = new AbortController();
       if (token) token.onCancellationRequested(() => controller.abort());
       return mergeViewFiles(repo, commit, view, controller.signal).catch((e) => {
-        if (e && e.code === 'Cancelled') return undefined;
-        throw e;
+        if (e && e.code !== 'Cancelled') notify.error(`${viewTitle(view)} of ${shortSha(commit.sha)} is unavailable: ${e.message}`);
+        return undefined;
       });
     },
   );

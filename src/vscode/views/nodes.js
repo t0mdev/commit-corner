@@ -47,8 +47,6 @@ class TreeProvider {
     }
     this.fillStats(children || []);
     this.trackCommitFiles(children || []);
-    // A merge's sections draw themselves again when git has counted them.
-    for (const c of children || []) if (c instanceof MergeViewNode) c.provider = this;
     return withTimeSeparators(children || []);
   }
 
@@ -366,13 +364,17 @@ class CommitNode {
   async getChildren() {
     // Kept: a viewed mark redraws this row (its count), which asks for the files again.
     if (!this.children) {
-      const { parent, files } = await this.repo.getCommitFiles(this.sha);
+      const { parent, files } = await this.repo.getCommitFiles(this.sha, this.commit);
       // (A merge's viewed count, like the graph's, is of its first-parent changes.)
       this.files = files;
-      const sides = this.commit.parents.length > 1 ? await merges.parentSides(this.repo, this.commit) : [];
-      this.children = this.commit.parents.length > 1
-        ? merges.mergeViews(this.commit).map((view) => new MergeViewNode(this, view, view === 'parent1' ? files : undefined, sides))
-        : fileNodes(this.repo, files, { leftRef: parent || EMPTY_TREE, rightRef: this.sha, sha: this.sha, parent: this, commitViewed: this.sha, contextValue: 'file:commit' });
+      if (this.commit.parents.length > 1) {
+        // A merge's sections, each drawn once in its state: what git finds is worked out here
+        // (this row shows progress meanwhile; the resolution is shared and kept, counts too).
+        const sides = await merges.parentSides(this.repo, this.commit);
+        const sections = merges.mergeViews(this.commit).map((view) => new MergeViewNode(this, view, view === 'parent1' ? files : undefined, sides));
+        await Promise.all(sections.map((x) => x.prepare()));
+        this.children = sections;
+      } else this.children = fileNodes(this.repo, files, { leftRef: parent || EMPTY_TREE, rightRef: this.sha, sha: this.sha, parent: this, commitViewed: this.sha, contextValue: 'file:commit' });
     }
     return this.children;
   }
@@ -380,11 +382,9 @@ class CommitNode {
 
 /**
  * One view of a merge commit (merges.js) under its row: Merge Resolution (open), Changes vs
- * Parent 1 and 2 (closed until you open them). Its files open against that view's side.
+ * Parent 1 and 2 (closed until you open them; Parent 1 open for a clean merge). Its files open
+ * against that view's side.
  */
-/** Numbers the merge sections' rows (their tree ids). */
-let mergeViewIds = 0;
-
 class MergeViewNode {
   /** @param {CommitNode} commitNode @param {string} view @param {object[]} [files] already known @param {string[]} [sides] merges.parentSides */
   constructor(commitNode, view, files, sides = []) {
@@ -397,10 +397,6 @@ class MergeViewNode {
     this.parent = commitNode;
     this.files = files;
     this.result = undefined;
-    /** Makes the row's id (with its open state): set by TreeProvider when it lists the row. */
-    this.uid = ++mergeViewIds;
-    /** @type {TreeProvider|undefined} */
-    this.provider = undefined;
   }
 
   /** The view's files (once): {files, left, leftLabel, exact} or {error}. */
@@ -419,37 +415,35 @@ class MergeViewNode {
     return this.loading;
   }
 
-  /** Draw the merge's rows again (theirs ids change with their open state, so VS Code takes it). */
-  redraw() {
-    if (this.provider) this.provider._onDidChangeTreeData.fire(this.parent);
+  /** Before the row is drawn: the resolution's files, or a closed section's count. */
+  async prepare() {
+    if (this.view === 'resolution' || this.files) await this.load();
+    else {
+      this.count = await merges.countView(this.repo, this.commit, this.view).then((c) => c.count, (e) => {
+        log().warn(`Merge ${shortSha(this.sha)}, ${this.view}: ${e.message}`);
+        this.countError = e.message;
+        return null;
+      });
+    }
   }
 
   getTreeItem() {
     const resolution = this.view === 'resolution';
     const r = this.result;
-    // Not known yet: drawn at once, drawn again when git has it (no row waits for a merge done
-    // again); a closed section says how many files it has (git counts them without listing them).
-    if (!r && (resolution || this.files) && !this.loading) this.load().then(() => this.redraw());
-    if (!r && !resolution && !this.files && this.count === undefined && !this.counting) {
-      this.counting = merges.countView(this.repo, this.commit, this.view).then((c) => c.count, () => null).then((n) => {
-        this.count = n;
-        this.redraw();
-      });
-    }
     const n = r && r.files ? r.files.length : typeof this.count === 'number' ? this.count : undefined;
-    // Open: the resolution (while it is worked out too), or for a clean merge (nothing to
-    // resolve, or no resolution to have) what it brought in.
+    // Open: the resolution, or for a clean merge (nothing to resolve, or no resolution to have)
+    // what it brought in.
     let open = resolution;
     if (this.view === 'parent1') {
       const res = this.parent.children && this.parent.children.find((x) => x.view === 'resolution');
       open = !res || !!(res.result && (res.result.error || !res.result.files.length));
     }
-    const state = (r && r.error) || n === 0 ? vscode.TreeItemCollapsibleState.None : open ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed;
+    const error = (r && r.error) || this.countError;
+    const state = error || n === 0 ? vscode.TreeItemCollapsibleState.None : open ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed;
     const item = new vscode.TreeItem(merges.viewTitle(this.view), state);
-    item.id = `merge-view:${this.uid}:${state}`;
     const side = resolution ? '' : `${shortSha(this.commit.parents[Number(this.view.slice(6)) - 1])} · `;
-    item.description = r && r.error ? 'unavailable' : n === undefined ? `${side}counting…` : `${side}${merges.countText(this.view, n, r && r.exact)}`;
-    item.tooltip = `${merges.viewDetail(this.commit, this.view, this.sides)}${r && r.exact === false ? `\n(${merges.APPROXIMATE})` : ''}${r && r.error ? `\n\n${r.error}` : ''}`;
+    item.description = error ? `${side}unavailable` : `${side}${merges.countText(this.view, n || 0, r && r.exact)}`;
+    item.tooltip = `${merges.viewDetail(this.commit, this.view, this.sides)}${r && r.exact === false ? `\n(${merges.APPROXIMATE})` : ''}${error ? `\n\nUnavailable: ${error}` : ''}`;
     item.iconPath = new vscode.ThemeIcon(resolution ? 'git-compare' : 'diff');
     item.contextValue = n ? 'mergeView' : 'mergeView:empty';
     return item;

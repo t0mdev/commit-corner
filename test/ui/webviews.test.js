@@ -356,9 +356,9 @@ suite('A merge in the graph', () => {
     await until(() => evaluate(page, `document.querySelectorAll('.details .merge-head').length === 3 && !document.querySelector('.details .merge-sections').textContent.includes('counting')`), 'three sections, counted')
       .catch(async (e) => assert.fail(`${e.message}: ${await evaluate(page, `document.querySelector('.details').textContent.slice(0, 400)`)}`));
     const heads = await evaluate(page, `[...document.querySelectorAll('.details .merge-toggle')].map((b) => [b.textContent, b.getAttribute('aria-expanded')])`);
-    // (" · approximate" with git older than 2.38; each parent's commit after its count.)
-    assert.match(heads[2][0], / · 2 files · [0-9a-f]{7} “side”$/);
-    assert.deepStrictEqual(heads.map(([t, open]) => [t.replace(/ · approximate$/, '').replace(/ · [0-9a-f]{7} “[^”]*”$/, ''), open]), [['Merge Resolution · 1 file', 'true'], ['Changes vs Parent 1 · 1 file', 'false'], ['Changes vs Parent 2 · 2 files', 'false']]);
+    // (" · approximate" with git older than 2.38; each parent named by its commit before the count.)
+    assert.match(heads[2][0], /^Changes vs Parent 2 · [0-9a-f]{7} “side” · 2 files$/);
+    assert.deepStrictEqual(heads.map(([t, open]) => [t.replace(/ · approximate$/, '').replace(/ · [0-9a-f]{7} “[^”]*”/, ''), open]), [['Merge Resolution · 1 file', 'true'], ['Changes vs Parent 1 · 1 file', 'false'], ['Changes vs Parent 2 · 2 files', 'false']]);
     const resolved = await evaluate(page, `[...document.querySelectorAll('.details .merge-sections .file')].map((f) => f.textContent)`);
     assert.strictEqual(resolved.length, 1);
     assert.match(resolved[0], /mr\.txt.*conflict/);
@@ -383,6 +383,7 @@ suite('A merge in the graph', () => {
     const box = await until(() => evaluate(page, `(() => { const row = ${rowOf('Merge for the graph')}; const b = row && document.getElementById(row.getAttribute('aria-owns') || ''); return b && b.querySelectorAll('.file-line.folder').length >= 3 && !b.textContent.includes('counting') ? '#' + b.id : ''; })()`), 'the sections');
     const folders = await evaluate(page, `[...document.querySelectorAll('${box} .file-line.folder')].map((f) => [f.textContent, f.getAttribute('aria-expanded')])`);
     assert.deepStrictEqual([folders[0][0].replace(/ · approximate$/, ''), folders[0][1]], ['Merge Resolution · 1 file', 'true']);
+    assert.match(folders[2][0], /^Changes vs Parent 2 · [0-9a-f]{7} · 2 files$/);
     assert.deepStrictEqual(await evaluate(page, `[...document.querySelectorAll('${box} .file-line.file')].map((f) => f.dataset.fkey)`), ['@resolution:mr.txt']);
     await evaluate(page, `([...document.querySelectorAll('${box} .file-line.folder')].find((f) => f.dataset.key === '#parent2').click(), true)`);
     await until(() => evaluate(page, `document.querySelectorAll('${box} .file-line.file[data-fkey^="@parent2:"]').length === 2`), 'parent 2\'s files in the list');

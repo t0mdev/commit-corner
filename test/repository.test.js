@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const { createRepo, makeTempDir } = require('./helpers/repo');
 const { Repository, INDEX, WORKTREE } = require('../src/git/repository');
@@ -351,8 +352,9 @@ for (const [name, how] of [['merge-tree --write-tree (git >= 2.38)', 'mergeTree'
     const { r, repo } = await setup(t);
     const m = mergeScenario(r);
     const [p1, p2] = r.git('log', '-1', '--format=%P', m).split(' ');
-    const loose = r.git('count-objects');
-    await repo.prepareScratchObjects();
+    const tmp = makeTempDir('cc-remerge-');
+    t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+    repo.tempRoot = tmp;
     const merged = await repo[how](p1, p2);
     assert.match(merged.tree, /^[0-9a-f]{40}$/);
     assert.deepEqual(merged.conflicts.sort(), ['d', 'f']);
@@ -364,12 +366,13 @@ for (const [name, how] of [['merge-tree --write-tree (git >= 2.38)', 'mergeTree'
     assert.equal(await repo.showText(merged.tree, 'd'), 'mod\n');
     const files = await repo.diffFiles(merged.tree, m);
     assert.deepEqual(files.map((x) => `${x.status} ${x.path}`), ['M f', 'M g']);
-    // Nothing of the real index or working tree changed; no temporary files are left; the
-    // objects it made are in the scratch folder, not the repository's (which git alone cannot see).
+    // Nothing of the real index or working tree changed; no temporary files are left; its objects
+    // are the repository's own (git sees them too), and the repository is sound.
     assert.equal(r.git('status', '--porcelain'), '');
-    assert.deepEqual(fs.readdirSync(path.join(r.dir, '.git')).filter((x) => x.startsWith('commit-corner-') && x !== 'commit-corner-objects'), []);
-    assert.equal(r.git('count-objects'), loose);
-    assert.throws(() => r.git('cat-file', '-e', merged.tree));
+    assert.deepEqual(fs.readdirSync(tmp), []);
+    assert.deepEqual(fs.readdirSync(path.join(r.dir, '.git')).filter((x) => x.startsWith('commit-corner-')), []);
+    r.git('cat-file', '-e', merged.tree);
+    r.git('fsck', '--no-dangling');
   });
 }
 
@@ -418,7 +421,7 @@ function twoSides(r, base, main, side, result) {
   r.commit('side', side);
   r.git('switch', '-q', 'main');
   r.commit('main', main);
-  try { r.git('merge', '-q', '--no-ff', 'side', '-m', 'merge side'); } catch { /* conflicts */ }
+  try { r.git('merge', '-q', '--no-ff', '--no-commit', 'side'); } catch { /* conflicts */ }
   return r.commit('merge side', result);
 }
 
@@ -430,7 +433,6 @@ test('resolve fallback: a binary conflict keeps the first parent, add/add merges
     { bin: 'a\0side', text: '1s\n2\n3\n', added: 'side\n' },
     { bin: 'a\0main', text: '1s\n2\n3m\n', added: 'main\n' });
   const [p1, p2] = r.git('log', '-1', '--format=%P', m).split(' ');
-  await repo.prepareScratchObjects();
   const merged = await repo.resolveMergeTree(p1, p2);
   assert.deepEqual(merged.conflicts.sort(), ['added', 'bin']);
   assert.equal(await repo.showText(merged.tree, 'bin'), 'a\0main');
@@ -453,7 +455,6 @@ test('resolve fallback: symlinks changed on both sides keep the first parent\'s 
   const p2 = link('side', 'side link');
   r.git('switch', '-q', 'main');
   const p1 = link('main', 'main link');
-  await repo.prepareScratchObjects();
   const merged = await repo.resolveMergeTree(p1, p2);
   assert.deepEqual(merged.conflicts, ['ln']);
   assert.match((await repo.exec(['ls-tree', merged.tree, 'ln'])).stdout, /^120000 /);
@@ -470,7 +471,6 @@ test('resolve fallback: a mode change on one side and an edit on the other keep 
   r.git('switch', '-q', 'main');
   const p1 = r.commit('edit', { run: '1\n2\n3 edited\n' });
   const p2 = r.git('rev-parse', 'side');
-  await repo.prepareScratchObjects();
   const merged = await repo.resolveMergeTree(p1, p2);
   assert.deepEqual(merged.conflicts, []);
   const entry = (await repo.exec(['ls-tree', merged.tree, 'run'])).stdout.trim();
@@ -486,10 +486,11 @@ test('resolve fallback: over 1000 files changed on both sides is an error, not a
   const p2 = r.commit('side', files('side'));
   r.git('switch', '-q', 'main');
   const p1 = r.commit('main', files('main'));
-  await repo.prepareScratchObjects();
-  await assert.rejects(repo.resolveMergeTree(p1, p2), /1001 files were changed on both sides: too many/);
-  await new Promise((res) => setTimeout(res, 50));
-  assert.deepEqual(fs.readdirSync(path.join(r.dir, '.git')).filter((x) => x.startsWith('commit-corner-remerge-')), []);
+  const tmp = makeTempDir('cc-remerge-');
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  repo.tempRoot = tmp;
+  await assert.rejects(repo.resolveMergeTree(p1, p2), /1001 files changed on both sides, too many/);
+  assert.deepEqual(fs.readdirSync(tmp), []);
 });
 
 test('getMergeResolution: one run for callers at the same time; one giving up does not stop it for the other; all giving up stops it', async (t) => {
@@ -513,13 +514,15 @@ test('getMergeResolution: one run for callers at the same time; one giving up do
   // A fresh commit's run, everyone gone: stopped, nothing kept, no temporary files.
   r.git('switch', '-q', '-c', 'again', `${m}^1`);
   r.git('merge', '-q', '--no-ff', '-s', 'ours', `${m}^2`, '-m', 'again');
+  const tmp = makeTempDir('cc-remerge-');
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  repo.tempRoot = tmp;
   const all = new AbortController();
   const c = repo.getMergeResolution('HEAD', { signal: all.signal });
-  all.abort();
-  await assert.rejects(c, (e) => e.code === 'Cancelled');
-  await new Promise((res) => setTimeout(res, 100));
-  assert.equal(repo.knownMergeResolution(r.git('rev-parse', 'HEAD')), undefined);
-  assert.deepEqual(fs.readdirSync(path.join(r.dir, '.git')).filter((x) => x.startsWith('commit-corner-remerge-')), []);
+  setTimeout(() => all.abort(), 5); // (in the middle of it, wherever that is)
+  await c.then(() => {}, (e) => assert.equal(e.code, 'Cancelled'));
+  await new Promise((res) => setTimeout(res, 300));
+  assert.deepEqual(fs.readdirSync(tmp), []);
 });
 
 test('getMergeResolution in a shallow clone without the merge base says so', async (t) => {
@@ -530,4 +533,23 @@ test('getMergeResolution in a shallow clone without the merge base says so', asy
   r.git('clone', '-q', '--depth', '2', `file://${r.dir}`, dir); // the merge and its parents, not their base
   const shallow = await Repository.open(dir);
   await assert.rejects(shallow.getMergeResolution('HEAD'), /shallow/);
+});
+
+test('after viewing a merge resolution, the same merge made again (or fetched) keeps every object in the repository', async (t) => {
+  // A merge with an extra edit, whose automatic merge this clone never made (so git's merge
+  // result exists only once Merge Resolution made it): then merged again here.
+  const { r } = await setup(t);
+  const m = twoSides(r, { f: '1\n2\n3\n' }, { f: '1m\n2\n3\n' }, { f: '1\n2\n3s\n' }, { f: '1m\n2\n3s\nextra\n' });
+  const dir = makeTempDir();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  r.git('clone', '-q', '--no-local', r.dir, dir);
+  const repo = await Repository.open(dir);
+  const res = await repo.getMergeResolution(m);
+  assert.deepEqual(res.files.map((x) => x.path), ['f']);
+  const run = (...a) => repo.exec(a, { writes: true });
+  await run('reset', '-q', '--hard', `${m}^1`);
+  await run('-c', 'user.name=T', '-c', 'user.email=t@x', 'merge', '-q', '--no-ff', '--no-edit', `${m}^2`);
+  // Plain git (no environment of ours) finds everything the new merge needs.
+  execFileSync('git', ['fsck', '--no-dangling'], { cwd: dir });
+  execFileSync('git', ['show', 'HEAD:f'], { cwd: dir });
 });

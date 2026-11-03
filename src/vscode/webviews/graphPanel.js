@@ -645,6 +645,11 @@ class GraphPanel {
         if (this.genCts) this.genCts.cancel();
         break;
       case 'filesClosed': {
+        // A merge's row closed: what git still works out for it stops (unless others wait for it).
+        if (typeof m.sha === 'string' && this.rowControllers && this.rowControllers.has(m.sha)) {
+          this.rowControllers.get(m.sha).abort();
+          this.rowControllers.delete(m.sha);
+        }
         if (m.sha !== WORKTREE_SHA || !this.wtOpen) break;
         this.wtOpen = false;
         this.wtJustCommitted = false;
@@ -902,9 +907,19 @@ class GraphPanel {
       if (commit.parents.length > 1) {
         this.withMarks(sha, files); // (its viewed count is of these)
         if (!repo.knownMergeResolution(sha)) post({ parent, files: [], merge: merges.pendingSections(commit) });
-        post({ parent, files: [], merge: await this.mergeSections(repo, commit, files) });
+        // Stopped when the row is closed (filesClosed) or opened again.
+        if (!this.rowControllers) this.rowControllers = new Map();
+        if (this.rowControllers.has(sha)) this.rowControllers.get(sha).abort();
+        const controller = new AbortController();
+        this.rowControllers.set(sha, controller);
+        try {
+          post({ parent, files: [], merge: await this.mergeSections(repo, commit, files, controller.signal) });
+        } finally {
+          if (this.rowControllers.get(sha) === controller) this.rowControllers.delete(sha);
+        }
       } else post({ parent, files: this.withMarks(sha, files) });
     } catch (e) {
+      if (e && e.code === 'Cancelled') return; // (a merge's row closed meanwhile)
       log().warn(`Graph files of ${sha}${o.view ? ` (${pageView(o.view)})` : ''}: ${e.message}`);
       post({ files: undefined, view: pageView(o.view), error: `Could not list the files: ${e.message}` });
     }
@@ -1058,8 +1073,10 @@ class GraphPanel {
         const merge = commit.parents.length > 1;
         // A merge: the details at once with its views as sections still counting (merges.js), then
         // the sections as git found them (the resolution open). Its own file list is not shown.
-        post({ type: 'details', kind: 'commit', shas: real, commit, parent, files: merge ? [] : marked, merge: merge ? merges.pendingSections(commit) : undefined, signature, summary: changeSummary(files), me: await this.userEmail() });
-        if (merge) post({ type: 'mergeSections', sha: commit.sha, merge: await this.mergeSections(repo, commit, files, controller.signal) });
+        const known = merge && repo.knownMergeResolution(commit.sha);
+        const sections = known ? await this.mergeSections(repo, commit, files, controller.signal) : undefined;
+        post({ type: 'details', kind: 'commit', shas: real, commit, parent, files: merge ? [] : marked, merge: merge ? sections || merges.pendingSections(commit) : undefined, signature, summary: changeSummary(files), me: await this.userEmail() });
+        if (merge && !known) post({ type: 'mergeSections', sha: commit.sha, merge: await this.mergeSections(repo, commit, files, controller.signal) });
       } else if (real.length > 1) {
         const { commits, files, exact, failed, approximate } = await repo.getMultiCommitChanges(real, { signal: controller.signal });
         post({ type: 'details', kind: 'multi', shas: real, commits: commits.map((c) => c.commit), files, exact, failed, approximate, summary: changeSummary(files) });

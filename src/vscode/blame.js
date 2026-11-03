@@ -142,7 +142,8 @@ class BlameController {
     if (uri.scheme === SCHEME) {
       const q = fromGitUri(uri);
       const repo = this.manager.getRepository(q.repo);
-      if (!repo || q.empty || !q.ref || q.ref.startsWith(':')) return undefined;
+      // (Not a merge resolution's "automatic merge" side: a tree made for viewing, no history.)
+      if (!repo || q.empty || !q.ref || q.ref.startsWith(':') || q.rev === 'automatic merge') return undefined;
       return { repo, rel: q.path, rev: q.ref };
     }
     return undefined;

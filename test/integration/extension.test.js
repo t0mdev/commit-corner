@@ -188,11 +188,9 @@ suite('Commit Corner in VS Code', () => {
     const repo = api.manager.repositories[0];
     const merge = makeMerge();
     const sections = await new CommitNode(repo, await repo.getCommit(merge)).getChildren();
-    // Drawn at once (counting), drawn again when git has the answer.
-    const first = sections.map((s) => s.getTreeItem());
-    assert.match(first[0].description, /counting/);
-    await Promise.all(sections.map((s) => s.loading || s.counting));
+    // Each drawn once, in its state (git's answers are in by the time the rows are listed).
     const items = sections.map((s) => s.getTreeItem());
+    assert.ok(items.every((i) => i.id === undefined), 'no ids: VS Code keeps what you opened across refreshes');
     assert.deepStrictEqual(items.map((i) => i.label), ['Merge Resolution', 'Changes vs Parent 1', 'Changes vs Parent 2']);
     assert.deepStrictEqual(items.map((i) => i.collapsibleState), [vscode.TreeItemCollapsibleState.Expanded, vscode.TreeItemCollapsibleState.Collapsed, vscode.TreeItemCollapsibleState.Collapsed]);
     assert.match(items[0].description, /^1 file/);

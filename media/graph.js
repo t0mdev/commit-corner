@@ -914,10 +914,13 @@
     for (const sec of e.merge) {
       const key = `#${sec.view}`;
       const open = !e.collapsed.has(key);
-      lines.push({ kind: 'folder', text: `${sec.title} · ${sec.error ? 'unavailable' : sec.countText || ''}`, depth: 0, key, open, mergeView: sec.view, count: sec.count, title: `${sec.detail}${sec.note ? `\n(${sec.note})` : ''}${sec.error ? `\n${sec.error}` : ''}` });
+      // "Changes vs Parent 1 · 80f222b · 3 files"; the narrow sidebar: "vs Parent 1 · 3 files".
+      const title = settings.compact ? sec.title.replace(/^Merge /, '').replace(/^Changes /, '') : sec.title;
+      const side = sec.view !== 'resolution' && sec.left && !settings.compact ? ` · ${String(sec.left).slice(0, 7)}` : '';
+      lines.push({ kind: 'folder', text: `${title}${side} · ${sec.error ? 'unavailable' : sec.countText || ''}`, depth: 0, key, open, mergeView: sec.view, count: sec.count, title: `${sec.title}: ${sec.detail}${sec.note ? `\n(${sec.note})` : ''}${sec.error ? `\n${sec.error}` : ''}` });
       if (!open) continue;
       if (sec.error) lines.push({ kind: 'note', text: sec.error, depth: 1 });
-      else if (!sec.files) lines.push({ kind: 'note', text: 'Loading files…', depth: 1 });
+      else if (!sec.files) lines.push({ kind: 'note', text: sec.pending && sec.view === 'resolution' ? 'Merging the parents again…' : 'Loading files…', depth: 1 });
       else if (!sec.files.length) lines.push({ kind: 'note', text: sec.view === 'resolution' ? 'A clean merge: nothing beyond git\'s automatic merge' : 'No files changed', depth: 1 });
       else lines.push(...fileTreeLines(sec.files, e.collapsed, 1, `${key}/`));
     }
@@ -995,7 +998,8 @@
       vscode.postMessage({ type: 'files', sha: r.sha });
     } else {
       expanded.delete(r.sha);
-      if (r.sha === WORKTREE_SHA) vscode.postMessage({ type: 'filesClosed', sha: r.sha });
+      // (Uncommitted changes: the row may go; a merge: what git still works out for it stops.)
+      if (r.sha === WORKTREE_SHA || (r.parents || []).length > 1) vscode.postMessage({ type: 'filesClosed', sha: r.sha });
     }
     // Kept when the view is hidden and shown again (the webview is re-created then).
     persist({ expanded: [...expanded.keys()].slice(-20) });
@@ -2451,11 +2455,20 @@
   /** Index of the focused control in the details pane, to restore focus after re-rendering it. */
   function detailsFocusIndex() {
     if (!detailsPane.contains(document.activeElement)) return -1;
+    // A control with a key (a merge's section header) is found again by it: buttons may appear
+    // before it meanwhile (counts arriving).
+    const key = document.activeElement.dataset && document.activeElement.dataset.focusKey;
+    if (key) return { key };
     return [...detailsPane.querySelectorAll('button, .file')].indexOf(document.activeElement);
   }
 
   function restoreDetailsFocus(index) {
-    if (index < 0) return;
+    if (index === -1) return;
+    if (typeof index === 'object') {
+      const again = [...detailsPane.querySelectorAll('[data-focus-key]')].find((x) => x.dataset.focusKey === index.key);
+      (again || scroller).focus();
+      return;
+    }
     const items = [...detailsPane.querySelectorAll('button, .file')];
     (items[Math.min(index, items.length - 1)] || scroller).focus();
   }
@@ -2479,9 +2492,19 @@
       toggle.type = 'button';
       const chev = el('span', `twisty${open ? ' open' : ''}`);
       chev.appendChild(ui.icon('chevron', { size: 11 }));
-      toggle.append(chev, ui.icon(sec.view === 'resolution' ? 'compare' : 'diff', { size: 13 }), el('span', 'merge-title', sec.title), el('span', 'dim', ` · ${sec.error ? 'unavailable' : sec.countText || ''}`));
+      // "Changes vs Parent 1 · 80f222b “subject” · 3 files", as the other surfaces order it.
+      toggle.append(chev, ui.icon(sec.view === 'resolution' ? 'compare' : 'diff', { size: 13 }), el('span', 'merge-title', sec.title));
       if (sec.side) toggle.appendChild(el('span', 'dim merge-side', ` · ${sec.side}`));
-      toggle.title = `${sec.detail}${sec.note ? `\n(${sec.note})` : ''}`;
+      toggle.appendChild(el('span', 'dim', ` · ${sec.error ? 'unavailable' : sec.countText || ''}`));
+      toggle.title = `${sec.detail}${sec.note ? `\n(${sec.note})` : ''}${sec.error ? `\n${sec.error}` : ''}${sec.count ? '\nA: all its files in the multi-diff editor' : ''}`;
+      toggle.dataset.focusKey = `merge:${sec.view}`;
+      toggle.addEventListener('keydown', (e) => {
+        if (chordKeys.has(e)) return;
+        if (e.key.toLowerCase() === 'a' && !e.ctrlKey && !e.metaKey && !e.altKey && sec.count) {
+          e.preventDefault();
+          vscode.postMessage({ type: 'openCommit', sha, view: sec.view });
+        }
+      });
       toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
       toggle.addEventListener('click', () => {
         detailsOpen.pending = false; // (your choice now, kept when the counts arrive)
@@ -2496,11 +2519,15 @@
         renderDetails(shownDetails);
       });
       head.appendChild(toggle);
-      if (sec.count) head.appendChild(button('', `Open the ${sec.count} file${sec.count === 1 ? '' : 's'} of ${sec.title} in the multi-diff editor`, () => vscode.postMessage({ type: 'openCommit', sha, view: sec.view }), 'diff'));
+      if (sec.count) {
+        const all = button('', `Open the ${sec.count} file${sec.count === 1 ? '' : 's'} of ${sec.title} in the multi-diff editor (A)`, () => vscode.postMessage({ type: 'openCommit', sha, view: sec.view }), 'diff');
+        all.dataset.focusKey = `mergeAll:${sec.view}`;
+        head.appendChild(all);
+      }
       box.appendChild(head);
       if (!open) continue;
       if (sec.error) box.appendChild(el('div', 'note', sec.error));
-      else if (!sec.files) box.appendChild(el('div', 'note', 'Loading files…'));
+      else if (!sec.files) box.appendChild(el('div', 'note', sec.pending && sec.view === 'resolution' ? 'Merging the parents again…' : 'Loading files…'));
       else if (!sec.files.length) box.appendChild(el('div', 'note', sec.view === 'resolution' ? 'A clean merge: it changed nothing beyond git\'s automatic merge of its parents.' : 'No files changed.'));
       else box.appendChild(fileList(sec.files, 'commit', { sha, parent: sec.left, view: sec.view }, { title: false }));
     }
@@ -2581,7 +2608,7 @@
       const what = el('div', 'card-line');
       const copy = button('', 'Copy the full SHA', () => vscode.postMessage({ type: 'copy', text: c.sha }), 'copy');
       const sum = summaryLine(m.summary);
-      if (m.merge) sum.prepend(el('span', 'dim', 'vs Parent 1: ')); // (the sections below have their own counts)
+      if (m.merge) sum.prepend(el('span', 'dim', 'vs Parent 1 · ')); // (the sections below have their own counts)
       what.append(ui.icon('commit'), el('code', 'sha-chip', c.sha.slice(0, 10)), copy, sum);
       pane.appendChild(what);
       const meta = el('div', 'meta');
@@ -2866,7 +2893,12 @@
         const d = shownDetails;
         if ((m.requestId !== undefined && m.requestId !== detailsRequest) || !d || d.kind !== 'commit' || d.commit.sha !== m.sha) break;
         if (detailsOpen.sha === m.sha && detailsOpen.pending) detailsOpen = { sha: undefined, views: new Set() }; // (opened as git says)
-        d.merge = m.merge;
+        // A section opened (and asked for) while counting keeps its request or files.
+        const before = new Map((d.merge || []).map((x) => [x.view, x]));
+        d.merge = m.merge.map((x) => {
+          const b = before.get(x.view);
+          return !x.files && b && (b.asked || b.files) ? { ...x, asked: b.asked, files: b.files } : x;
+        });
         renderDetails(d);
         break;
       }
@@ -2961,8 +2993,13 @@
           // open are open until you choose; one open without its files asks for them.
           const pending = m.merge.some((x) => x.pending);
           if (!e.collapsed || (e.mergePending && !e.mergeTouched)) e.collapsed = new Set(m.merge.filter((x) => !x.open).map((x) => `#${x.view}`));
+          // (After the counting ones: a section asked for meanwhile keeps its request or files.)
+          const before = e.mergePending ? new Map((e.merge || []).map((x) => [x.view, x])) : new Map();
           e.mergePending = pending;
-          e.merge = m.merge;
+          e.merge = m.merge.map((x) => {
+            const b = before.get(x.view);
+            return !x.files && b && (b.asked || b.files) ? { ...x, asked: b.asked, files: b.files } : x;
+          });
           askForOpenSections(m.sha, e.merge, (v) => !e.collapsed.has(`#${v}`));
         } else {
           e.merge = undefined;

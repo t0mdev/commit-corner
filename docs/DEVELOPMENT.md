@@ -139,14 +139,15 @@ These hold everywhere and have tests (`test/regressions.test.js`):
   rebase-todo editor and the `commitcorner:` file system only use open
   repositories.
 - **Looking changes nothing.** Merge Resolution merges a merge's parents
-  again (`merge-tree --write-tree`; on git < 2.38 a private index, `merge-file`
-  and `hash-object`) without the real index, working tree or refs. The objects
-  it makes go to `<git dir>/commit-corner-objects` (`GIT_OBJECT_DIRECTORY`,
-  the repository's objects as an alternate), which every read of the
-  extension sees (`GIT_ALTERNATE_OBJECT_DIRECTORIES`) and git alone does not:
-  no unreachable loose objects in the repository for `gc` to warn about. It is
-  emptied when a session finds it older than a week; temporary folders
-  (`commit-corner-remerge-*`) left by an interrupted session go after an hour.
+  again (`merge-tree --write-tree`; on git < 2.38 a private index in a
+  private temporary folder, `merge-file` and `hash-object`) without the real
+  index, working tree or refs. Like `git merge-tree`, it writes the objects it
+  makes (only conflicted files and the trees above them are new) into the
+  repository's object store, unreachable, for `gc` to remove. Never a
+  separate object folder seen through `GIT_ALTERNATE_OBJECT_DIRECTORIES`: git
+  does not write an object it finds in an alternate, so a later commit or
+  fetch of the same content would reference an object the repository lacks
+  (a test makes the same merge again after viewing it and runs `git fsck`).
   As with `git merge`, merge drivers set up in your git config run when
   `.gitattributes` names them (on git >= 2.38; the fallback runs none); a
   repository cannot define a driver's command itself.

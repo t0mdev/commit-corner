@@ -45,15 +45,6 @@ function lexists(p) {
 /** Namespace for fetched pull request refs: invisible to branch lists, visible to git. */
 const PR_REF_PREFIX = 'refs/commit-corner/pr';
 
-/**
- * A GIT_ALTERNATE_OBJECT_DIRECTORIES value for `dir` (git's repository variables are never
- * inherited, see exec.js). A path with the list separator (or a quote) in it is quoted, as git
- * reads it.
- */
-function alternates(dir) {
-  return dir.includes(path.delimiter) || dir.startsWith('"') ? `"${dir.replace(/["\\]/g, '\\$&')}"` : dir;
-}
-
 /** The error of git work stopped on purpose (code Cancelled). */
 function cancelledError() {
   return new GitError({ args: ['merge-tree'], exitCode: null, stdout: '', stderr: 'Cancelled' });
@@ -142,7 +133,7 @@ class Repository extends EventEmitter {
    * behind the user's back.
    */
   exec(args, opts = {}) {
-    const env = { ...(opts.writes ? {} : { GIT_OPTIONAL_LOCKS: '0' }), ...this.objectsEnv(), ...opts.env };
+    const env = opts.writes ? opts.env : { GIT_OPTIONAL_LOCKS: '0', ...opts.env };
     return git(args, { cwd: this.root, ...opts, env });
   }
 
@@ -474,7 +465,7 @@ class Repository extends EventEmitter {
     const spec = ref === INDEX ? `:0:${relPath}` : `${ref}:${relPath}`;
     if (/^([0-9a-f]{40}|[0-9a-f]{64})([~^]\d*)*$/.test(ref)) {
       // Fixed revision: use the shared batch reader (one process for many files).
-      if (!this.blobs) this.blobs = new BlobReader(this.root, this.objectsEnv());
+      if (!this.blobs) this.blobs = new BlobReader(this.root);
       try {
         const blob = await this.blobs.read(spec);
         if (blob !== null) return blob;
@@ -2057,8 +2048,12 @@ class Repository extends EventEmitter {
    * (conflict markers left in), and compared with the commit: a clean merge has no files.
    * git >= 2.38: `merge-tree --write-tree`, as `git merge` merges (renames, several merge bases,
    * merge attributes): exact. Older git: approximate (see resolveMergeTree).
-   * The objects it makes go to a scratch object folder (scratchObjectsEnv), never the
-   * repository's; the index, the working tree and refs are not touched. One run per commit,
+   * Like `git merge-tree`, it writes the objects it makes (only the conflicted files and the
+   * trees above them are new) into the repository's object store, where gc removes them in
+   * time; the index, the working tree and refs are not touched. (A separate object folder seen
+   * through GIT_ALTERNATE_OBJECT_DIRECTORIES would be worse: git does not write an object it
+   * finds in an alternate, so a later commit or fetch of the same content would lose it.)
+   * One run per commit,
    * shared by everyone asking at the time (stopped once all of them gave up), remembered for
    * the session.
    * @param {{signal?: AbortSignal, commit?: import('./parse').Commit}} [opts]
@@ -2072,7 +2067,6 @@ class Repository extends EventEmitter {
     }
     if (!this.mergeResolutions) this.mergeResolutions = new Map();
     return this.sharedTask(this.mergeResolutions, commit.sha, async (signal) => {
-      await this.prepareScratchObjects();
       const [p1, p2] = commit.parents;
       const merged = versionAtLeast(await getVersion(), 2, 38) ? await this.mergeTree(p1, p2, signal) : await this.resolveMergeTree(p1, p2, signal);
       const files = await this.diffFiles(merged.tree, commit.sha, { blobs: true, signal });
@@ -2125,76 +2119,26 @@ class Repository extends EventEmitter {
         if (signal.aborted) return leave();
         signal.addEventListener('abort', leave, { once: true });
       }
-      current.promise.then((r) => {
+      const done = (fn) => (v) => {
         if (settled) return;
         settled = true;
         current.waiters--;
-        resolve(r);
-      }, (e) => {
-        if (settled) return;
-        settled = true;
-        current.waiters--;
-        reject(e);
-      });
+        if (signal) signal.removeEventListener('abort', leave);
+        fn(v);
+      };
+      current.promise.then(done(resolve), done(reject));
     });
-  }
-
-  /**
-   * Objects made only to be looked at (a merge done again) go to their own folder, not the
-   * repository's object store (as `git show --remerge-diff` keeps its own): no unreachable loose
-   * objects pile up there for gc to complain about. Every read of this repository sees them
-   * (GIT_ALTERNATE_OBJECT_DIRECTORIES, see exec); the folder is emptied when a session finds
-   * it older than a week.
-   */
-  get scratchObjectsDir() {
-    return path.join(this.commonDir || this.gitDir, 'commit-corner-objects');
-  }
-
-  async prepareScratchObjects() {
-    if (this.scratchObjectsReady) return;
-    const dir = this.scratchObjectsDir;
-    try {
-      const st = await fs.promises.lstat(dir);
-      if (!st.isDirectory() || Date.now() - st.mtimeMs > 7 * 864e5) await fs.promises.rm(dir, { recursive: true, force: true });
-    } catch { /* not there yet */ }
-    await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 });
-    // Left behind by a session that ended in the middle of redoing a merge.
-    for (const name of await fs.promises.readdir(this.gitDir).catch(() => [])) {
-      if (!name.startsWith('commit-corner-remerge-')) continue;
-      const p = path.join(this.gitDir, name);
-      const st = await fs.promises.lstat(p).catch(() => undefined);
-      if (st && Date.now() - st.mtimeMs > 36e5) await fs.promises.rm(p, { recursive: true, force: true }).catch(() => {});
-    }
-    this.scratchObjectsReady = true;
-    // The batch reader started without them: the next read starts one that sees them.
-    if (this.blobs) {
-      this.blobs.dispose();
-      this.blobs = undefined;
-    }
-  }
-
-  /** Environment for any git command here: the scratch objects readable (once they exist). */
-  objectsEnv() {
-    return this.scratchObjectsReady ? { GIT_ALTERNATE_OBJECT_DIRECTORIES: alternates(this.scratchObjectsDir) } : {};
-  }
-
-  /** Environment for commands that make scratch objects: written there, the repository's read. */
-  scratchObjectsEnv() {
-    return {
-      GIT_OBJECT_DIRECTORY: this.scratchObjectsDir,
-      GIT_ALTERNATE_OBJECT_DIRECTORIES: alternates(path.join(this.commonDir || this.gitDir, 'objects')),
-    };
   }
 
   /** A shallow clone without the merge's base: say so rather than merge as if unrelated. */
   async checkNotShallow() {
     const { stdout } = await this.exec(['rev-parse', '--is-shallow-repository'], { allowFailure: true });
-    if (stdout.trim() === 'true') throw new Error('this clone is shallow and does not have the commit the merge is based on (fetch more history, e.g. git fetch --deepen=100).');
+    if (stdout.trim() === 'true') throw new Error('this clone is shallow and lacks the commit the merge is based on: fetch more history (e.g. git fetch --deepen=100).');
   }
 
   /** git's merge of two commits as a tree: `merge-tree --write-tree` (git >= 2.38). */
   async mergeTree(ours, theirs, signal) {
-    const run = (extra) => this.exec(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', ...extra, ours, theirs], { allowFailure: true, signal, env: this.scratchObjectsEnv() });
+    const run = (extra) => this.exec(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', ...extra, ours, theirs], { allowFailure: true, signal });
     let res = await run([]);
     // A merge of unrelated histories (allowed when it was made): merge them the same way.
     if (res.exitCode > 1 && /unrelated histories/i.test(res.stderr)) {
@@ -2228,9 +2172,16 @@ class Repository extends EventEmitter {
       await this.checkNotShallow();
       base = this.emptyTree;
     }
-    // A private folder for the temporary index and files (removed below, or by a later session).
-    const tmp = await fs.promises.mkdtemp(path.join(this.gitDir, 'commit-corner-remerge-'));
-    const env = { ...this.scratchObjectsEnv(), GIT_INDEX_FILE: path.join(tmp, 'index') };
+    // Files changed only on one side would come over the network one at a time in a partial
+    // clone (blob by blob): refuse rather than surprise.
+    if ((await this.getConfig('extensions.partialClone').catch(() => undefined)) || (await this.getConfig('remote.origin.promisor').catch(() => undefined)) === 'true') {
+      throw new Error('this is a partial clone: merging again with git older than 2.38 would download the files one by one (update git to see it).');
+    }
+    // A private folder (0700) for the temporary index and files, on the system's temporary disk
+    // (fast also when the repository is on a slow one); removed below.
+    const tmp = await fs.promises.mkdtemp(path.join(this.tempRoot || os.tmpdir(), 'commit-corner-remerge-'));
+    const env = { GIT_INDEX_FILE: path.join(tmp, 'index') };
+    let failed = false; // one worker failing (or Stop): the others end too, before cleaning up
     try {
       // Plumbing on a private index file: no locks on the real index, safe outside the write queue.
       await this.exec(['read-tree', '-i', '-m', '--aggressive', base, ours, theirs], { env, writes: true, signal });
@@ -2238,7 +2189,7 @@ class Repository extends EventEmitter {
       if (!unmerged.size) return { tree: (await this.exec(['write-tree'], { env, writes: true, signal })).stdout.trim(), conflicts: [], exact: false };
       const isFile = (e) => !e || e.mode === '100644' || e.mode === '100755';
       const both = [...unmerged].filter(([, st]) => st[2] && st[3] && isFile(st[1]) && isFile(st[2]) && isFile(st[3]));
-      if (both.length > 1000) throw new Error(`${both.length} files were changed on both sides: too many to merge again with git older than 2.38 (git 2.38 or newer does it).`);
+      if (both.length > 1000) throw new Error(`${both.length} files changed on both sides, too many to merge again with git older than 2.38 (update git to see it).`);
       // Their contents: sizes first, then all of them through one process.
       const ids = [...new Set(both.flatMap(([, st]) => [st[1], st[2], st[3]].filter(Boolean).map((e) => e.sha)))];
       const sizes = await this.objectSizes(ids, env, signal);
@@ -2246,15 +2197,18 @@ class Repository extends EventEmitter {
       const mergeable = both.filter(([, st]) => fits(st));
       const wanted = [...new Set(mergeable.flatMap(([, st]) => [st[1], st[2], st[3]].filter(Boolean).map((e) => e.sha)))];
       const total = wanted.reduce((n, id) => n + sizes.get(id), 0);
-      if (total > 64 * 1024 * 1024) throw new Error(`the files changed on both sides are too large (${Math.round(total / 1048576)} MB) to merge again with git older than 2.38 (git 2.38 or newer does it).`);
+      if (total > 64 * 1024 * 1024) throw new Error(`the files changed on both sides are too large (${Math.round(total / 1048576)} MB) to merge again with git older than 2.38 (update git to see it).`);
       const blobs = await this.readObjects(wanted, env, signal);
       const style = String((await this.getConfig('merge.conflictStyle').catch(() => undefined)) || '').toLowerCase();
       const styleArgs = style === 'zdiff3' && versionAtLeast(await getVersion(), 2, 35) ? ['--zdiff3'] : /^z?diff3$/.test(style) ? ['--diff3'] : [];
+      // merge-file reads merge.conflictStyle itself (and dies on a style it does not know, such as
+      // zdiff3 before 2.35): the style is given above, explicitly.
+      const mergeFile = ['-c', 'merge.conflictStyle=merge', 'merge-file', '-p', ...styleArgs, '-L', ours, '-L', base, '-L', theirs];
       const empty = Buffer.alloc(0);
       const merged = new Map(); // path -> {out: file with the result, conflicts: number}
       let next = 0;
       const worker = async () => {
-        while (next < mergeable.length) {
+        while (next < mergeable.length && !failed) {
           stop();
           const n = next++;
           const [file, st] = mergeable[n];
@@ -2262,16 +2216,27 @@ class Repository extends EventEmitter {
           if (!sides.every((b) => b && !b.includes(0))) continue; // binary (or unreadable): ours
           const inputs = ['o', 'b', 't'].map((x) => path.join(tmp, `${n}${x}`));
           await Promise.all(inputs.map((p, i) => fs.promises.writeFile(p, sides[i], { mode: 0o600, flag: 'wx' })));
-          const res = await this.exec(['merge-file', '-p', ...styleArgs, '-L', ours, '-L', base, '-L', theirs, ...inputs], { buffer: true, allowFailure: true, signal });
-          await Promise.all(inputs.map((p) => fs.promises.rm(p, { force: true })));
-          // Exit code: the number of conflicts (0 merged cleanly); 255 or a signal: an error.
-          if (res.exitCode === null || res.exitCode < 0 || res.exitCode >= 128) continue;
+          const res = await this.exec([...mergeFile, ...inputs], { buffer: true, allowFailure: true, signal });
+          // (An antivirus holding one: the folder goes at the end anyway.)
+          await Promise.all(inputs.map((p) => fs.promises.rm(p, { force: true }).catch(() => {})));
+          // Exit code: the number of conflicts (0 merged cleanly); 255: not mergeable as text
+          // (binary), the first parent's version stays; anything else: git failed.
+          if (res.exitCode === 255) continue;
+          if (res.exitCode === null || res.exitCode < 0 || res.exitCode >= 128) {
+            stop();
+            throw new Error(`git merge-file failed: ${res.stderr.toString().trim().split('\n')[0] || `exit code ${res.exitCode}`}`);
+          }
           const out = path.join(tmp, `${n}r`);
           await fs.promises.writeFile(out, res.stdout, { mode: 0o600, flag: 'wx' });
           merged.set(file, { out, conflicts: res.exitCode });
         }
       };
-      await Promise.all(Array.from({ length: Math.min(8, mergeable.length) }, worker));
+      const results = await Promise.allSettled(Array.from({ length: Math.min(8, mergeable.length) }, () => worker().catch((e) => {
+        failed = true;
+        throw e;
+      })));
+      const bad = results.find((x) => x.status === 'rejected');
+      if (bad) throw bad.reason;
       stop();
       const outs = [...merged.values()];
       const hashed = outs.length ? (await this.exec(['hash-object', '-w', '--no-filters', '--stdin-paths'], { env, input: `${outs.map((m) => m.out).join('\n')}\n`, writes: true, signal })).stdout.split('\n') : [];
@@ -2295,7 +2260,8 @@ class Repository extends EventEmitter {
       const { stdout } = await this.exec(['write-tree'], { env, writes: true, signal });
       return { tree: stdout.trim(), conflicts, exact: false };
     } finally {
-      fs.promises.rm(tmp, { recursive: true, force: true }).catch(() => {});
+      failed = true;
+      await fs.promises.rm(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(() => {});
     }
   }
 
