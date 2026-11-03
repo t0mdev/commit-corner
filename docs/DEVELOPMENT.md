@@ -143,7 +143,11 @@ These hold everywhere and have tests (`test/regressions.test.js`):
   private temporary folder, `merge-file` and `hash-object`) without the real
   index, working tree or refs. Like `git merge-tree`, it writes the objects it
   makes (only conflicted files and the trees above them are new) into the
-  repository's object store, unreachable, for `gc` to remove. Never a
+  repository's object store, unreachable, for `gc` to remove: none for a clean
+  merge, a few dozen for a typical one, about two per conflicted file for a big
+  one; viewing it again adds none. Viewing hundreds of conflicted merges within
+  gc's two-week prune window can pass `gc.auto` (git then suggests
+  `git prune`), as `git merge-tree` itself would. Never a
   separate object folder seen through `GIT_ALTERNATE_OBJECT_DIRECTORIES`: git
   does not write an object it finds in an alternate, so a later commit or
   fetch of the same content would reference an object the repository lacks

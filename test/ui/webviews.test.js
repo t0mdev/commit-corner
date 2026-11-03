@@ -369,6 +369,12 @@ suite('A merge in the graph', () => {
     const ctx = await evaluate(page, `JSON.parse(document.querySelectorAll('.details .merge-sections .files')[1].querySelector('.file').dataset.vscodeContext)`);
     assert.strictEqual(ctx.view, 'parent2');
     assert.strictEqual(ctx.parent, git('rev-parse', `${merge}^2`));
+    // The keyboard goes through the sections as through a tree: ↓ past a section's last file is
+    // the next header, ← on a file its own header.
+    await key(page, '.details .merge-sections .file[data-focus-key="file:resolution:mr.txt"]', 'ArrowDown');
+    assert.strictEqual(await evaluate(page, `document.activeElement.dataset.focusKey`), 'merge:parent1');
+    await key(page, '.details .merge-sections .file[data-focus-key^="file:parent2:"]', 'ArrowLeft');
+    assert.strictEqual(await evaluate(page, `document.activeElement.dataset.focusKey`), 'merge:parent2');
     // The details again (a ref moved): parent 2 is still open, with its files (not "Loading…").
     const loads = Number(await evaluate(page, `document.body.dataset.loads || 0`));
     git('branch', 'moved-for-merge');

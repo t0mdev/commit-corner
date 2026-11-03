@@ -999,7 +999,7 @@
     } else {
       expanded.delete(r.sha);
       // (Uncommitted changes: the row may go; a merge: what git still works out for it stops.)
-      if (r.sha === WORKTREE_SHA || (r.parents || []).length > 1) vscode.postMessage({ type: 'filesClosed', sha: r.sha });
+      vscode.postMessage({ type: 'filesClosed', sha: r.sha });
     }
     // Kept when the view is hidden and shown again (the webview is re-created then).
     persist({ expanded: [...expanded.keys()].slice(-20) });
@@ -2380,6 +2380,8 @@
     for (const f of files) {
       const item = el('div', 'file');
       item.tabIndex = 0;
+      // A merge section's file: found again by its view and path when the pane is redrawn.
+      if (extra && extra.view) item.dataset.focusKey = `file:${extra.view}:${f.path}`;
       item.setAttribute('role', 'button');
       item.setAttribute('aria-label', `${f.status} ${f.path}`);
       if (kind !== 'multi') item.title = `${f.path}${f.added !== undefined && f.added !== null ? ` — +${f.added} −${f.deleted || 0}` : ''}\n${fileKeysHint(kind === 'worktree')}`;
@@ -2420,6 +2422,12 @@
           e.preventDefault();
           const sib = e.key === 'ArrowDown' ? item.nextElementSibling : item.previousElementSibling;
           if (sib && sib.classList.contains('file')) sib.focus();
+          // A merge's section, as a tree: past its last file the next section, above its first
+          // its own header.
+          else if (extra && extra.view) mergeHead(extra.view, e.key === 'ArrowDown' ? 1 : 0);
+        } else if (e.key === 'ArrowLeft' && extra && extra.view) {
+          e.preventDefault();
+          mergeHead(extra.view, 0);
         }
       });
       list.appendChild(item);
@@ -2496,13 +2504,28 @@
       toggle.append(chev, ui.icon(sec.view === 'resolution' ? 'compare' : 'diff', { size: 13 }), el('span', 'merge-title', sec.title));
       if (sec.side) toggle.appendChild(el('span', 'dim merge-side', ` · ${sec.side}`));
       toggle.appendChild(el('span', 'dim', ` · ${sec.error ? 'unavailable' : sec.countText || ''}`));
-      toggle.title = `${sec.detail}${sec.note ? `\n(${sec.note})` : ''}${sec.error ? `\n${sec.error}` : ''}${sec.count ? '\nA: all its files in the multi-diff editor' : ''}`;
+      toggle.title = `${sec.detail}${sec.note ? `\n(${sec.note})` : ''}${sec.error ? `\n${sec.error}` : ''}\nEnter: open or close · ↑ ↓: between sections and files${sec.count ? ' · A: all its files in the multi-diff editor' : ''}`;
       toggle.dataset.focusKey = `merge:${sec.view}`;
       toggle.addEventListener('keydown', (e) => {
         if (chordKeys.has(e)) return;
         if (e.key.toLowerCase() === 'a' && !e.ctrlKey && !e.metaKey && !e.altKey && sec.count) {
           e.preventDefault();
           vscode.postMessage({ type: 'openCommit', sha, view: sec.view });
+        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          // ↓ into its files (open) or to the next header; ↑ to the previous section's end.
+          e.preventDefault();
+          const heads = [...detailsPane.querySelectorAll('.merge-toggle')];
+          const at = heads.indexOf(toggle);
+          if (e.key === 'ArrowDown') {
+            const first = toggle.closest('.merge-head').nextElementSibling;
+            const file = first && first.classList.contains('files') ? first.querySelector('.file') : null;
+            (file || heads[at + 1] || toggle).focus();
+          } else if (at > 0) {
+            const prev = heads[at - 1];
+            const list = prev.closest('.merge-head').nextElementSibling;
+            const files = list && list.classList.contains('files') ? list.querySelectorAll('.file') : [];
+            (files.length ? files[files.length - 1] : prev).focus();
+          }
         }
       });
       toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -2541,6 +2564,14 @@
       sec.asked = true;
       vscode.postMessage({ type: 'files', sha, view: sec.view });
     }
+  }
+
+  /** Focus a merge section's header in the details pane: `view`'s own (0) or the next one (1). */
+  function mergeHead(view, step) {
+    const heads = [...detailsPane.querySelectorAll('.merge-toggle')];
+    const at = heads.findIndex((h) => h.dataset.focusKey === `merge:${view}`);
+    const target = heads[at + step];
+    if (target) target.focus();
   }
 
   /** A merge section's files arrived: into its expanded row and the details pane. */
@@ -2897,7 +2928,7 @@
         const before = new Map((d.merge || []).map((x) => [x.view, x]));
         d.merge = m.merge.map((x) => {
           const b = before.get(x.view);
-          return !x.files && b && (b.asked || b.files) ? { ...x, asked: b.asked, files: b.files } : x;
+          return !x.files && !x.error && b && (b.asked || b.files) ? { ...x, asked: b.asked, files: b.files } : x;
         });
         renderDetails(d);
         break;
@@ -2998,7 +3029,7 @@
           e.mergePending = pending;
           e.merge = m.merge.map((x) => {
             const b = before.get(x.view);
-            return !x.files && b && (b.asked || b.files) ? { ...x, asked: b.asked, files: b.files } : x;
+            return !x.files && !x.error && b && (b.asked || b.files) ? { ...x, asked: b.asked, files: b.files } : x;
           });
           askForOpenSections(m.sha, e.merge, (v) => !e.collapsed.has(`#${v}`));
         } else {

@@ -553,3 +553,23 @@ test('after viewing a merge resolution, the same merge made again (or fetched) k
   execFileSync('git', ['fsck', '--no-dangling'], { cwd: dir });
   execFileSync('git', ['show', 'HEAD:f'], { cwd: dir });
 });
+
+test('resolve fallback: a conflict style git does not know (zdiff3 before 2.35) does not stop it', async (t) => {
+  const { r, repo } = await setup(t);
+  const m = mergeScenario(r);
+  r.git('config', 'merge.conflictStyle', 'zdiff3');
+  const [p1, p2] = r.git('log', '-1', '--format=%P', m).split(' ');
+  const merged = await repo.resolveMergeTree(p1, p2);
+  assert.deepEqual(merged.conflicts.sort(), ['d', 'f']);
+  // diff3 markers (zdiff3 where git has it): the base section is there.
+  assert.match(await repo.showText(merged.tree, 'f'), /^\|\|\|\|\|\|\| /m);
+});
+
+test('resolve fallback: a partial clone (a promisor remote of any name) is refused, not fetched file by file', async (t) => {
+  const { r, repo } = await setup(t);
+  const m = mergeScenario(r);
+  r.git('config', 'remote.upstream.url', 'https://example.invalid/x.git');
+  r.git('config', 'remote.upstream.promisor', 'yes');
+  const [p1, p2] = r.git('log', '-1', '--format=%P', m).split(' ');
+  await assert.rejects(repo.resolveMergeTree(p1, p2), /partial clone/);
+});

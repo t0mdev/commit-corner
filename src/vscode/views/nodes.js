@@ -369,7 +369,9 @@ class CommitNode {
       this.files = files;
       if (this.commit.parents.length > 1) {
         // A merge's sections, each drawn once in its state: what git finds is worked out here
-        // (this row shows progress meanwhile; the resolution is shared and kept, counts too).
+        // (this row shows progress meanwhile; the resolution is shared and kept, counts too, so
+        // closing the row early wastes nothing: the next look takes it; git < 2.38 refuses the
+        // merges that would take long, see resolveMergeTree).
         const sides = await merges.parentSides(this.repo, this.commit);
         const sections = merges.mergeViews(this.commit).map((view) => new MergeViewNode(this, view, view === 'parent1' ? files : undefined, sides));
         await Promise.all(sections.map((x) => x.prepare()));

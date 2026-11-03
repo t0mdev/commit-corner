@@ -60,6 +60,12 @@ function viewDetail(commit, view, sides = []) {
   return i === 0 ? `Everything the merge brought in, against ${p}` : `Everything that differs from the merged-in branch ${p}: mostly what the other side changed`;
 }
 
+/** Whether a merge's sections are known without git work (its resolution and counts kept). */
+function sectionsKnown(repo, commit) {
+  if (commit.parents.length === 2 && !repo.knownMergeResolution(commit.sha)) return false;
+  return commit.parents.slice(1).every((p) => repo.knownChangeCount(p, commit.sha) !== undefined);
+}
+
 /** A merge's sections for a page before git has counted them (titles, sides by SHA). */
 function pendingSections(commit) {
   return mergeViews(commit).map((view) => {
@@ -68,11 +74,11 @@ function pendingSections(commit) {
   });
 }
 
-/** "2 files", "no files: a clean merge", with what makes it approximate. */
+/** "2 files", "clean merge", with what makes it approximate. */
 function countText(view, n, exact) {
   const files = `${n} file${n === 1 ? '' : 's'}`;
   if (view !== 'resolution') return files;
-  return `${n ? files : 'no files: a clean merge'}${exact === false ? ' · approximate' : ''}`;
+  return `${n ? files : 'clean merge'}${exact === false ? ' · approximate' : ''}`;
 }
 
 /**
@@ -108,7 +114,8 @@ async function filesAgainst(repo, sha, base) {
     const r = await repo.getMergeResolution(sha, { commit }).catch(() => undefined);
     if (r && r.tree === base) return { files: r.files, leftLabel: AUTO_LABEL };
   }
-  // (Kept a little: N pressed through a big parent-2 list diffs once.)
+  // (Kept a little: N pressed through a big parent-2 list diffs once. Fixed SHAs, so never
+  // stale; callers read the list, never change it.)
   const key = `${repo.root}\0${base}\0${sha}`;
   let files = againstCache.get(key);
   if (!files) {
@@ -178,7 +185,7 @@ function pickMergeView(repo, commit) {
       const text = typeof got === 'string' ? got : 'unavailable';
       // Most merges are clean (and a resolution may be unavailable): then Enter takes what the
       // merge brought in.
-      if (item.view === 'resolution' && (/^no files/.test(text) || typeof got !== 'string') && !moved) active = 'parent1';
+      if (item.view === 'resolution' && (/^clean merge/.test(text) || typeof got !== 'string') && !moved) active = 'parent1';
       const side = item.view === 'resolution' ? '' : `${shortSha(commit.parents[parentIndex(item.view)])} · `;
       items = items.map((x) => (x.view === item.view ? { ...x, description: `${side}${text}`, ...(typeof got === 'string' ? {} : { detail: escapeIcons(`Unavailable: ${got.unavailable || 'git could not tell'}`) }) } : x));
       show();
@@ -239,4 +246,4 @@ async function openMergeView(repo, commit, view) {
   })));
 }
 
-module.exports = { AUTO_LABEL, APPROXIMATE, mergeViews, isMergeView, viewTitle, viewDetail, parentSides, filesAgainst, pendingSections, countText, mergeViewFiles, countView, pickMergeView, openMergeView };
+module.exports = { AUTO_LABEL, APPROXIMATE, mergeViews, isMergeView, viewTitle, viewDetail, parentSides, filesAgainst, pendingSections, sectionsKnown, countText, mergeViewFiles, countView, pickMergeView, openMergeView };

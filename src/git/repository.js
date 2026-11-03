@@ -45,6 +45,22 @@ function lexists(p) {
 /** Namespace for fetched pull request refs: invisible to branch lists, visible to git. */
 const PR_REF_PREFIX = 'refs/commit-corner/pr';
 
+/**
+ * Temporary folders of an earlier session that ended in the middle of merging again (they hold
+ * copies of repository files): removed once per session when older than an hour.
+ */
+let remergeSwept = false;
+async function sweepRemergeFolders(root) {
+  if (remergeSwept) return;
+  remergeSwept = true;
+  for (const name of await fs.promises.readdir(root).catch(() => [])) {
+    if (!name.startsWith('commit-corner-remerge-')) continue;
+    const p = path.join(root, name);
+    const st = await fs.promises.lstat(p).catch(() => undefined);
+    if (st && st.isDirectory() && Date.now() - st.mtimeMs > 36e5) await fs.promises.rm(p, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 /** The error of git work stopped on purpose (code Cancelled). */
 function cancelledError() {
   return new GitError({ args: ['merge-tree'], exitCode: null, stdout: '', stderr: 'Cancelled' });
@@ -2130,10 +2146,23 @@ class Repository extends EventEmitter {
     });
   }
 
+  /**
+   * A partial clone (some contents only on a promisor remote): `extensions.partialClone`, any
+   * remote marked promisor (clone --filter on older git sets only that, for any remote name), or
+   * a promisor pack.
+   */
+  async isPartialClone() {
+    if (await this.getConfig('extensions.partialClone').catch(() => undefined)) return true;
+    const res = await this.exec(['config', '--bool', '--get-regexp', '^remote\\..*\\.promisor$'], { allowFailure: true });
+    if (res.stdout.split('\n').some((l) => / true$/.test(l))) return true;
+    const packs = await fs.promises.readdir(path.join(this.commonDir || this.gitDir, 'objects', 'pack')).catch(() => []);
+    return packs.some((f) => f.endsWith('.promisor'));
+  }
+
   /** A shallow clone without the merge's base: say so rather than merge as if unrelated. */
   async checkNotShallow() {
     const { stdout } = await this.exec(['rev-parse', '--is-shallow-repository'], { allowFailure: true });
-    if (stdout.trim() === 'true') throw new Error('this clone is shallow and lacks the commit the merge is based on: fetch more history (e.g. git fetch --deepen=100).');
+    if (stdout.trim() === 'true') throw new Error('this clone is shallow and lacks the commit the merge is based on; fetch more history (e.g. git fetch --deepen=100).');
   }
 
   /** git's merge of two commits as a tree: `merge-tree --write-tree` (git >= 2.38). */
@@ -2172,21 +2201,24 @@ class Repository extends EventEmitter {
       await this.checkNotShallow();
       base = this.emptyTree;
     }
-    // Files changed only on one side would come over the network one at a time in a partial
-    // clone (blob by blob): refuse rather than surprise.
-    if ((await this.getConfig('extensions.partialClone').catch(() => undefined)) || (await this.getConfig('remote.origin.promisor').catch(() => undefined)) === 'true') {
-      throw new Error('this is a partial clone: merging again with git older than 2.38 would download the files one by one (update git to see it).');
-    }
     // A private folder (0700) for the temporary index and files, on the system's temporary disk
     // (fast also when the repository is on a slow one); removed below.
+    await sweepRemergeFolders(this.tempRoot || os.tmpdir());
     const tmp = await fs.promises.mkdtemp(path.join(this.tempRoot || os.tmpdir(), 'commit-corner-remerge-'));
     const env = { GIT_INDEX_FILE: path.join(tmp, 'index') };
+    // (A split index would leave its shared part in the repository's git folder.)
+    const idx = ['-c', 'core.splitIndex=false'];
     let failed = false; // one worker failing (or Stop): the others end too, before cleaning up
     try {
       // Plumbing on a private index file: no locks on the real index, safe outside the write queue.
-      await this.exec(['read-tree', '-i', '-m', '--aggressive', base, ours, theirs], { env, writes: true, signal });
+      await this.exec([...idx, 'read-tree', '-i', '-m', '--aggressive', base, ours, theirs], { env, writes: true, signal });
       const unmerged = P.parseUnmerged((await this.exec(['ls-files', '-u', '-z'], { env, signal })).stdout);
-      if (!unmerged.size) return { tree: (await this.exec(['write-tree'], { env, writes: true, signal })).stdout.trim(), conflicts: [], exact: false };
+      if (!unmerged.size) return { tree: (await this.exec([...idx, 'write-tree'], { env, writes: true, signal })).stdout.trim(), conflicts: [], exact: false };
+      // The files changed on both sides would come over the network one at a time in a partial
+      // clone (blob by blob): refuse rather than surprise (a merge with none needs no contents).
+      if (await this.isPartialClone()) {
+        throw new Error('this is a partial clone: merging again with git older than 2.38 would download the files one by one (update git to see it).');
+      }
       const isFile = (e) => !e || e.mode === '100644' || e.mode === '100755';
       const both = [...unmerged].filter(([, st]) => st[2] && st[3] && isFile(st[1]) && isFile(st[2]) && isFile(st[3]));
       if (both.length > 1000) throw new Error(`${both.length} files changed on both sides, too many to merge again with git older than 2.38 (update git to see it).`);
@@ -2201,9 +2233,11 @@ class Repository extends EventEmitter {
       const blobs = await this.readObjects(wanted, env, signal);
       const style = String((await this.getConfig('merge.conflictStyle').catch(() => undefined)) || '').toLowerCase();
       const styleArgs = style === 'zdiff3' && versionAtLeast(await getVersion(), 2, 35) ? ['--zdiff3'] : /^z?diff3$/.test(style) ? ['--diff3'] : [];
-      // merge-file reads merge.conflictStyle itself (and dies on a style it does not know, such as
-      // zdiff3 before 2.35): the style is given above, explicitly.
-      const mergeFile = ['-c', 'merge.conflictStyle=merge', 'merge-file', '-p', ...styleArgs, '-L', ours, '-L', base, '-L', theirs];
+      // merge-file needs no repository and gets the style above explicitly: it runs outside any,
+      // without the user's config (it reads merge.conflictStyle itself and dies on a style it does
+      // not know, such as zdiff3 before 2.35, before any -c could override it).
+      const mergeFile = ['merge-file', '-p', ...styleArgs, '-L', ours, '-L', base, '-L', theirs];
+      const outside = { cwd: tmp, env: { GIT_CONFIG_NOSYSTEM: '1', HOME: tmp, XDG_CONFIG_HOME: tmp, GIT_CONFIG_GLOBAL: path.join(tmp, 'none'), GIT_CEILING_DIRECTORIES: path.dirname(tmp) } };
       const empty = Buffer.alloc(0);
       const merged = new Map(); // path -> {out: file with the result, conflicts: number}
       let next = 0;
@@ -2216,12 +2250,12 @@ class Repository extends EventEmitter {
           if (!sides.every((b) => b && !b.includes(0))) continue; // binary (or unreadable): ours
           const inputs = ['o', 'b', 't'].map((x) => path.join(tmp, `${n}${x}`));
           await Promise.all(inputs.map((p, i) => fs.promises.writeFile(p, sides[i], { mode: 0o600, flag: 'wx' })));
-          const res = await this.exec([...mergeFile, ...inputs], { buffer: true, allowFailure: true, signal });
+          const res = await git([...mergeFile, ...inputs], { ...outside, buffer: true, allowFailure: true, signal });
           // (An antivirus holding one: the folder goes at the end anyway.)
           await Promise.all(inputs.map((p) => fs.promises.rm(p, { force: true }).catch(() => {})));
-          // Exit code: the number of conflicts (0 merged cleanly); 255: not mergeable as text
-          // (binary), the first parent's version stays; anything else: git failed.
-          if (res.exitCode === 255) continue;
+          // Exit code: the number of conflicts (0 merged cleanly); 255 with "binary": not mergeable
+          // as text, the first parent's version stays; anything else (255 too): git failed.
+          if (res.exitCode === 255 && /Cannot merge binary/i.test(String(res.stderr))) continue;
           if (res.exitCode === null || res.exitCode < 0 || res.exitCode >= 128) {
             stop();
             throw new Error(`git merge-file failed: ${res.stderr.toString().trim().split('\n')[0] || `exit code ${res.exitCode}`}`);
@@ -2256,8 +2290,8 @@ class Repository extends EventEmitter {
         // A mode of 0 drops the path's stages; then the merged version at stage 0.
         lines.push(`0 ${'0'.repeat(pick.sha.length)}\t${file}`, `${pick.mode} ${pick.sha} 0\t${file}`);
       }
-      await this.exec(['update-index', '-z', '--index-info'], { env, input: `${lines.join('\0')}\0`, writes: true, signal });
-      const { stdout } = await this.exec(['write-tree'], { env, writes: true, signal });
+      await this.exec([...idx, 'update-index', '-z', '--index-info'], { env, input: `${lines.join('\0')}\0`, writes: true, signal });
+      const { stdout } = await this.exec([...idx, 'write-tree'], { env, writes: true, signal });
       return { tree: stdout.trim(), conflicts, exact: false };
     } finally {
       failed = true;
@@ -2296,6 +2330,11 @@ class Repository extends EventEmitter {
       at = nl + 1 + size + 1;
     }
     return out;
+  }
+
+  /** countChanges' remembered answer for two fixed SHAs, else undefined (no git work). */
+  knownChangeCount(from, to) {
+    return this.changeCounts ? this.changeCounts.get(`${from} ${to}`) : undefined;
   }
 
   /** How many files differ between two revisions (or trees), counted like diffFiles lists them; remembered for fixed SHAs. */
