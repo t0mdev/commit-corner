@@ -59,7 +59,7 @@ function revisionOf(manager, uri) {
     return undefined;
   }
   const repo = manager.getRepository(q.repo);
-  return repo && typeof q.path === 'string' ? { repo, path: q.path, ref: q.empty ? null : q.ref, commit: isFullSha(q.commit) ? q.commit : undefined, anchor: q.anchor } : undefined;
+  return repo && typeof q.path === 'string' ? { repo, path: q.path, ref: q.empty ? null : q.ref, commit: isFullSha(q.commit) ? q.commit : undefined, base: isFullSha(q.base) ? q.base : undefined, anchor: q.anchor } : undefined;
 }
 
 /** The two sides of the active diff tab (or the one editor), as URIs. */
@@ -202,17 +202,20 @@ function viewColumnOf(node) {
   return node && node.viewColumn === vscode.ViewColumn.Beside ? vscode.ViewColumn.Beside : undefined;
 }
 
-/** File `file` of commit `sha` with its blob ids (what its viewed mark keys on), looked up when the row had none. */
-async function withBlobs(repo, sha, file) {
+/**
+ * File `file` of commit `sha` with its blob ids (what its viewed mark keys on), looked up when
+ * the row had none: in the commit's own changes, or against `base` (a merge's other views).
+ */
+async function withBlobs(repo, sha, file, base) {
   if (file.oldBlob && file.newBlob) return file;
-  const { files } = await repo.getCommitFiles(sha);
+  const files = isFullSha(base) ? await repo.diffFiles(base, sha, { blobs: true }) : (await repo.getCommitFiles(sha)).files;
   return files.find((x) => x.path === file.path);
 }
 
 /** Mark a file of a commit opened (or, `on` false, not viewed): only a file the commit has. */
-async function markOpened(repo, sha, file, on = true) {
+async function markOpened(repo, sha, file, on = true, base = undefined) {
   if (!isFullSha(sha) || !file || typeof file.path !== 'string') return;
-  const f = await withBlobs(repo, sha, file);
+  const f = await withBlobs(repo, sha, file, base);
   if (f) viewed.markCommitFiles(sha, [f], on);
 }
 
@@ -237,6 +240,10 @@ function treeOrder(files) {
 }
 
 /** Open file `f` of commit `sha` (parent: its first parent) as a diff, marked as a file of that commit. */
+/**
+ * A file of commit `sha` against `parent` (its first parent, or for a merge another view's side:
+ * then `o.base` is set, and `o.leftLabel` names it).
+ */
 async function openCommitFileDiff(repo, sha, parent, f, o = {}) {
   await openDiff(repo, {
     path: f.path,
@@ -248,6 +255,8 @@ async function openCommitFileDiff(repo, sha, parent, f, o = {}) {
     preview: o.preview,
     viewColumn: o.viewColumn,
     commit: sha,
+    base: o.base,
+    leftLabel: o.leftLabel,
   });
 }
 
@@ -432,29 +441,41 @@ function register(ctx) {
     let repo;
     let sha;
     let current;
+    let base; // a merge's resolution or other parent: the next file of that list
     if (node && isFullSha(node.sha) && typeof node.repoRoot === 'string') {
       repo = manager.getRepository(node.repoRoot);
       sha = node.sha;
       current = node.path;
+      if (isFullSha(node.base)) base = node.base;
     } else {
       const r = activeUris().map((u) => revisionOf(manager, u)).find((x) => x && x.commit);
       if (r) {
         repo = r.repo;
         sha = r.commit;
         current = r.path;
+        base = r.base;
       }
     }
     if (!repo || !sha) {
       vscode.window.setStatusBarMessage('Next Unviewed File works in a diff opened from a commit\'s files', 4000);
       return;
     }
-    const { parent, files } = await repo.getCommitFiles(sha);
+    let parent;
+    let files;
+    let leftLabel;
+    if (base) {
+      // Not one of the commit's parents: the automatic merge of its resolution.
+      const commit = await repo.getCommit(sha);
+      if (!commit.parents.includes(base)) leftLabel = require('../merges').AUTO_LABEL;
+      parent = base;
+      files = await repo.diffFiles(base, sha, { blobs: true });
+    } else ({ parent, files } = await repo.getCommitFiles(sha));
     const next = nextUnviewedOf(sha, files, current);
     if (!next) {
-      vscode.window.setStatusBarMessage(`All ${files.length} file${files.length === 1 ? '' : 's'} of ${shortSha(sha)} are viewed`, 4000);
+      vscode.window.setStatusBarMessage(`All ${files.length} file${files.length === 1 ? '' : 's'} ${leftLabel ? `of the merge resolution of ${shortSha(sha)}` : base ? `of ${shortSha(sha)} against ${shortSha(base)}` : `of ${shortSha(sha)}`} are viewed`, 4000);
       return;
     }
-    await openCommitFileDiff(repo, sha, parent, next);
+    await openCommitFileDiff(repo, sha, parent, next, { base, leftLabel });
     viewed.markCommitFiles(sha, [next]);
   });
 }

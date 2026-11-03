@@ -330,3 +330,78 @@ test('reflog and tags', async (t) => {
   await repo.deleteTag('v1');
   assert.equal((await repo.getRefs()).filter((x) => x.type === 'tag').length, 1);
 });
+
+/** A merge that resolves a conflict (f), edits a file nobody changed (g, an "evil" merge),
+ * merges a file both sides changed apart (h) and keeps a file one side deleted (d). */
+function mergeScenario(r) {
+  r.commit('base', { f: 'a\nb\nc\n', g: 'x\n', h: '1\n2\n3\n4\n5\n6\n7\n', d: 'del\n' });
+  r.git('switch', '-q', '-c', 'side');
+  r.commit('side 1', { f: 'a\nB2\nc\n', h: '1\n2x\n3\n4\n5\n6\n7\n', d: 'mod\n' });
+  r.commit('side 2', { s: 'side\n' });
+  r.git('switch', '-q', 'main');
+  r.commit('main 1', { f: 'a\nB1\nc\n', g: 'x\ny\n', h: '1\n2\n3\n4\n5\n6x\n7\n', d: null });
+  try { r.git('merge', '-q', '--no-ff', 'side', '-m', 'merge side'); } catch { /* conflicts */ }
+  return r.commit('merge side', { f: 'a\nRESOLVED\nc\n', g: 'x\ny\nevil\n', h: '1\n2x\n3\n4\n5\n6x\n7\n', d: 'mod\n', s: 'side\n' });
+}
+
+for (const [name, how] of [['merge-tree --write-tree (git >= 2.38)', 'mergeTree'], ['the resolve fallback (git < 2.38)', 'resolveMergeTree']]) {
+  test(`merge resolution with ${name}: only the resolved conflict and the extra edit`, async (t) => {
+    const { getVersion, versionAtLeast } = require('../src/git/exec');
+    if (how === 'mergeTree' && !versionAtLeast(await getVersion(), 2, 38)) return t.skip('needs git 2.38');
+    const { r, repo } = await setup(t);
+    const m = mergeScenario(r);
+    const [p1, p2] = r.git('log', '-1', '--format=%P', m).split(' ');
+    const merged = await repo[how](p1, p2);
+    assert.match(merged.tree, /^[0-9a-f]{40}$/);
+    assert.deepEqual(merged.conflicts.sort(), ['d', 'f']);
+    assert.equal(merged.exact, how === 'mergeTree');
+    // git's own merge: the conflict with markers, the clean three-way merge, the changed side of d.
+    const f = r.git('show', `${merged.tree}:f`);
+    assert.match(f, new RegExp(`^a\\n<<<<<<< ${p1}\\nB1\\n=======\\nB2\\n>>>>>>> ${p2}\\nc$`));
+    assert.equal(r.git('show', `${merged.tree}:h`), '1\n2x\n3\n4\n5\n6x\n7');
+    assert.equal(r.git('show', `${merged.tree}:d`), 'mod');
+    const files = await repo.diffFiles(merged.tree, m);
+    assert.deepEqual(files.map((x) => `${x.status} ${x.path}`), ['M f', 'M g']);
+    // Nothing of the real index or working tree changed; no temporary files are left.
+    assert.equal(r.git('status', '--porcelain'), '');
+    assert.deepEqual(fs.readdirSync(path.join(r.dir, '.git')).filter((x) => x.startsWith('commit-corner-')), []);
+  });
+}
+
+test('getMergeResolution: files with blobs, remembered; a clean merge has none; not for octopus or plain commits', async (t) => {
+  const { r, repo } = await setup(t);
+  const m = mergeScenario(r);
+  const res = await repo.getMergeResolution(m);
+  assert.deepEqual(res.files.map((x) => x.path), ['f', 'g']);
+  assert.ok(res.files.every((x) => /^[0-9a-f]{40}$/.test(x.oldBlob) && /^[0-9a-f]{40}$/.test(x.newBlob)));
+  assert.equal(res.parents.length, 2);
+  assert.equal(await repo.getMergeResolution(m), res);
+  assert.equal(await repo.countChanges(res.tree, m), 2);
+  assert.equal(await repo.countChanges(res.parents[0], m), 5); // what the merge brought into main: d, f, g, h, s
+  r.git('switch', '-q', '-c', 'clean', 'main~1');
+  r.git('switch', '-q', '-c', 'other', 'main~1');
+  r.commit('other', { o: 'o\n' });
+  r.git('switch', '-q', 'clean');
+  r.commit('clean side', { c: 'c\n' });
+  r.git('merge', '-q', '--no-ff', 'other', '-m', 'clean merge');
+  assert.deepEqual((await repo.getMergeResolution('HEAD')).files, []);
+  await assert.rejects(repo.getMergeResolution('HEAD~1'), /not a merge commit/);
+  r.git('switch', '-q', '-c', 'o1', 'HEAD~1');
+  r.commit('o1', { o1: '1\n' });
+  r.git('switch', '-q', '-c', 'o2', 'clean~1');
+  r.commit('o2', { o2: '2\n' });
+  r.git('merge', '-q', 'o1', 'other', '-m', 'octopus');
+  await assert.rejects(repo.getMergeResolution('HEAD'), /merges 3 parents/);
+});
+
+test('getMergeResolution of a merge of unrelated histories', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { a: 'a\n' });
+  r.git('switch', '-q', '--orphan', 'other');
+  r.git('rm', '-rqf', '--ignore-unmatch', '.');
+  r.commit('other', { o: 'o\n' });
+  r.git('switch', '-q', 'main');
+  r.git('merge', '-q', '--allow-unrelated-histories', 'other', '-m', 'join');
+  assert.deepEqual((await repo.getMergeResolution('HEAD')).files, []);
+  assert.deepEqual((await repo.resolveMergeTree('HEAD^1', 'HEAD^2')).conflicts, []);
+});

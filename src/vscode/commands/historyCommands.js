@@ -5,6 +5,7 @@ const notify = require('../notify');
 const { WORKTREE, EMPTY_TREE } = require('../../git/repository');
 const { githubWebUrl, githubFileUrl, githubCommitUrl, githubPullUrl } = require('../../git/remoteUrl');
 const { openDiff, openMultiDiff, openAtRevision } = require('../diffs');
+const merges = require('../merges');
 const { pickRef, pickCommit } = require('../pickers');
 const { shortSha, formatDate, config, selectedShas, escapeIcons } = require('../util');
 const { fromGitUri, SCHEME } = require('../uri');
@@ -36,15 +37,20 @@ function fileTarget(manager, uri) {
 }
 
 /**
- * Open all changes of one commit (vs. its first parent) in the multi-diff editor.
+ * Open all changes of one commit in the multi-diff editor. A merge commit asks which of its
+ * views (Merge Resolution, vs parent 1, vs parent 2, see merges.js), unless `opts.view` says.
  * @param {import('../../git/repository').Repository} repo
+ * @param {{view?: string}} [opts]
  */
-async function showCommit(repo, sha, parentIndex = 0) {
-  const { commit, parent: firstParent, files: firstFiles } = await repo.getCommitFiles(sha);
-  // Merge commits: optionally against another parent (what the merged branch brought in).
-  const parent = parentIndex ? commit.parents[parentIndex] : firstParent;
-  const files = parentIndex && parent ? await repo.diffFiles(parent, commit.sha) : firstFiles;
-  await openMultiDiff(repo, `${shortSha(commit.sha)}${parentIndex ? ` (vs parent ${parentIndex + 1})` : ''} — ${commit.subject}`, files.map((f) => ({
+async function showCommit(repo, sha, opts = {}) {
+  const commit = await repo.getCommit(sha);
+  if (commit.parents.length > 1) {
+    const view = merges.isMergeView(commit, opts.view) ? opts.view : await merges.pickMergeView(repo, commit);
+    if (view) await merges.openMergeView(repo, commit, view);
+    return;
+  }
+  const { parent, files } = await repo.getCommitFiles(commit.sha);
+  await openMultiDiff(repo, `${shortSha(commit.sha)} — ${commit.subject}`, files.map((f) => ({
     path: f.path,
     leftRef: f.status === 'A' ? null : parent || EMPTY_TREE,
     leftPath: f.origPath || f.path,
@@ -104,19 +110,25 @@ function register(ctx) {
       return;
     }
     const sha = shas[0] || await pickCommit(repo, 'Show the changes of a commit');
-    if (sha) await showCommit(repo, sha);
+    // A merge's section in a tree (or the graph) says which of its views.
+    if (sha) await showCommit(repo, sha, { view: node && node.view });
   });
 
-  cmd('commitCorner.showCommitParent2', async (node) => {
+  /** A merge's views straight away: its resolution, or everything against its second parent. */
+  const mergeViewCommand = (view) => async (node) => {
     const repo = await manager.pick(node);
-    if (!repo || !node || !node.sha) return;
-    const c = await repo.getCommit(node.sha);
-    if (c.parents.length < 2) {
-      notify.info('That commit is not a merge commit.');
+    if (!repo) return;
+    const sha = node && typeof node.sha === 'string' ? node.sha : await pickCommit(repo, view === 'resolution' ? 'Show the merge resolution of a merge commit' : 'Show the changes of a merge commit against its second parent');
+    if (!sha) return;
+    const c = await repo.getCommit(sha);
+    if (!merges.isMergeView(c, view)) {
+      notify.info(c.parents.length < 2 ? `${shortSha(c.sha)} is not a merge commit.` : `${shortSha(c.sha)} merges ${c.parents.length} parents: Merge Resolution needs a merge of two.`);
       return;
     }
-    await showCommit(repo, c.sha, 1);
-  });
+    await merges.openMergeView(repo, c, view);
+  };
+  cmd('commitCorner.showMergeResolution', mergeViewCommand('resolution'));
+  cmd('commitCorner.showCommitParent2', mergeViewCommand('parent2'));
 
   cmd('commitCorner.showCommits', async (node, nodes) => {
     const repo = await manager.pick(node);
@@ -175,9 +187,12 @@ function register(ctx) {
       title: node.title,
       preserveFocus: !!node.preserveFocus,
       commit: isFullSha(node.viewedSha) ? node.viewedSha : undefined,
+      // A merge's resolution or second parent: Next Unviewed File stays in that list.
+      base: isFullSha(node.base) ? node.base : undefined,
+      leftLabel: node.leftLabel === merges.AUTO_LABEL ? merges.AUTO_LABEL : undefined,
     });
     // A file of one commit: opened, it is no longer bold (here and in the graph).
-    if (isFullSha(node.viewedSha)) await require('./fileCommands').markOpened(repo, node.viewedSha, { path: node.path, oldBlob: node.oldBlob, newBlob: node.newBlob });
+    if (isFullSha(node.viewedSha)) await require('./fileCommands').markOpened(repo, node.viewedSha, { path: node.path, oldBlob: node.oldBlob, newBlob: node.newBlob }, true, isFullSha(node.base) ? node.base : undefined);
   });
 
   cmd('commitCorner.openFileAtCommit', async (node) => {

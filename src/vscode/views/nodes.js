@@ -6,9 +6,10 @@ const { EMPTY_TREE, WORKTREE } = require('../../git/repository');
 const { shortSha, formatDate, tinyAge, absoluteDate, statusIcon, STATUS_LABELS, escapeMarkdown, config, commandLink, log } = require('../util');
 const { avatarUri } = require('../avatars');
 const viewed = require('../viewed');
+const merges = require('../merges');
 
 /** Commands a commit tooltip may link to. */
-const TOOLTIP_COMMANDS = ['commitCorner.showCommit', 'commitCorner.showGraph', 'commitCorner.copySha', 'commitCorner.openCommitOnGitHub', 'commitCorner.openPullRequestOnGitHub'];
+const TOOLTIP_COMMANDS = ['commitCorner.showCommit', 'commitCorner.showMergeResolution', 'commitCorner.showGraph', 'commitCorner.copySha', 'commitCorner.openCommitOnGitHub', 'commitCorner.openPullRequestOnGitHub'];
 const { pullRequestOfSubject } = require('../../git/remoteUrl');
 
 /** "+470 −39" or "" when unknown. */
@@ -281,7 +282,10 @@ function commitTooltip(c, repoRoot) {
     md.isTrusted = { enabledCommands: TOOLTIP_COMMANDS };
     const node = { repoRoot, sha: c.sha };
     md.appendMarkdown(`\n\n---\n\n${[
-      commandLink('$(diff-multiple) Show Changes', 'commitCorner.showCommit', node),
+      // A merge: Show Changes asks which of its views; its resolution is one click away too.
+      ...(c.parents && c.parents.length > 1
+        ? [commandLink('$(diff-multiple) Show Changes…', 'commitCorner.showCommit', node), ...(c.parents.length === 2 ? [commandLink('$(git-compare) Merge Resolution', 'commitCorner.showMergeResolution', node)] : [])]
+        : [commandLink('$(diff-multiple) Show Changes', 'commitCorner.showCommit', node)]),
       commandLink('$(git-merge) Show in Graph', 'commitCorner.showGraph', { repoRoot, revealSha: c.sha }),
       commandLink('$(copy) Copy SHA', 'commitCorner.copySha', node),
       commandLink('$(github) Open on GitHub', 'commitCorner.openCommitOnGitHub', node),
@@ -345,7 +349,7 @@ class CommitNode {
       label: `${c.subject || 'no message'}, ${formatDate(c.authorDate)} by ${c.authorName}${c.stats && c.stats.files ? `, ${c.stats.files} file${c.stats.files === 1 ? '' : 's'}, ${c.stats.added} added, ${c.stats.deleted} deleted` : ''}${c.parents.length > 1 ? ', merge commit' : ''}`,
     };
     item.iconPath = avatarUri(c.authorName, c.authorEmail) || new vscode.ThemeIcon(c.parents.length > 1 ? 'git-merge' : 'git-commit');
-    item.contextValue = this.opts.contextValue || (this.opts.change ? 'commit:file' : 'commit');
+    item.contextValue = this.opts.contextValue || (this.opts.change ? 'commit:file' : c.parents.length > 1 ? 'commit:merge' : 'commit');
     if (this.opts.change) {
       const ch = this.opts.change;
       item.command = {
@@ -361,10 +365,70 @@ class CommitNode {
     // Kept: a viewed mark redraws this row (its count), which asks for the files again.
     if (!this.children) {
       const { parent, files } = await this.repo.getCommitFiles(this.sha);
+      // (A merge's viewed count, like the graph's, is of its first-parent changes.)
       this.files = files;
-      this.children = fileNodes(this.repo, files, { leftRef: parent || EMPTY_TREE, rightRef: this.sha, sha: this.sha, parent: this, commitViewed: this.sha, contextValue: 'file:commit' });
+      this.children = this.commit.parents.length > 1
+        ? merges.mergeViews(this.commit).map((view) => new MergeViewNode(this, view, view === 'parent1' ? files : undefined))
+        : fileNodes(this.repo, files, { leftRef: parent || EMPTY_TREE, rightRef: this.sha, sha: this.sha, parent: this, commitViewed: this.sha, contextValue: 'file:commit' });
     }
     return this.children;
+  }
+}
+
+/**
+ * One view of a merge commit (merges.js) under its row: Merge Resolution (open), Changes vs
+ * Parent 1 and 2 (closed until you open them). Its files open against that view's side.
+ */
+class MergeViewNode {
+  /** @param {CommitNode} commitNode @param {string} view @param {object[]} [files] already known */
+  constructor(commitNode, view, files) {
+    this.repo = commitNode.repo;
+    this.repoRoot = commitNode.repoRoot;
+    this.commit = commitNode.commit;
+    this.sha = commitNode.sha;
+    this.view = view;
+    this.parent = commitNode;
+    this.files = files;
+    this.result = undefined;
+  }
+
+  /** The view's files (once): {files, left, leftLabel, exact} or {error}. */
+  async load() {
+    if (!this.result && this.view === 'parent1' && this.files) this.result = { files: this.files, left: this.commit.parents[0] };
+    if (!this.result) {
+      this.result = await merges.mergeViewFiles(this.repo, this.commit, this.view).catch((e) => {
+        log().warn(`Merge ${shortSha(this.sha)}, ${this.view}: ${e.message}`);
+        return { error: e.message };
+      });
+    }
+    return this.result;
+  }
+
+  async getTreeItem() {
+    const resolution = this.view === 'resolution';
+    // The resolution is listed open, so it is known before its row is drawn.
+    const r = resolution || this.files ? await this.load() : this.result;
+    // A closed section says how many files it has (git counts them without listing them).
+    if (!r && this.count === undefined) this.count = await merges.countView(this.repo, this.commit, this.view).then((c) => c.count, () => null);
+    const n = r && r.files ? r.files.length : this.count === null ? undefined : this.count;
+    const item = new vscode.TreeItem(merges.viewTitle(this.view),
+      (r && r.error) || n === 0 ? vscode.TreeItemCollapsibleState.None : resolution ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
+    const side = resolution ? '' : `${shortSha(this.commit.parents[Number(this.view.slice(6)) - 1])} · `;
+    item.description = r && r.error ? 'unavailable' : n === undefined ? side.replace(/ · $/, '') : `${side}${merges.countText(this.view, n, r && r.exact)}`;
+    item.tooltip = `${merges.viewDetail(this.commit, this.view)}${r && r.exact === false ? `\n(${merges.APPROXIMATE})` : ''}${r && r.error ? `\n\n${r.error}` : ''}`;
+    item.iconPath = new vscode.ThemeIcon(resolution ? 'git-compare' : 'diff');
+    item.contextValue = n ? 'mergeView' : 'mergeView:empty';
+    return item;
+  }
+
+  async getChildren() {
+    const r = await this.load();
+    if (!r.files) return [];
+    this.files = r.files;
+    return fileNodes(this.repo, r.files, {
+      leftRef: r.left, rightRef: this.sha, sha: this.sha, parent: this, commitViewed: this.sha, contextValue: 'file:commit',
+      ...(this.view === 'parent1' ? {} : { base: r.left }), ...(r.leftLabel ? { leftLabel: r.leftLabel } : {}),
+    });
   }
 }
 
@@ -393,6 +457,9 @@ class FileNode {
     this.diffLabel = refs.diffLabel;
     /** A file of this commit: bold until you open it (see viewed.commitFileUnviewed). */
     this.commitViewed = refs.commitViewed;
+    /** A merge's resolution or other parent: the left side when it is not the first parent. */
+    this.base = refs.base;
+    this.leftLabel = refs.leftLabel;
   }
 
   /** The URIs its diff shows (to tell whether that diff is the editor you are looking at). */
@@ -400,8 +467,9 @@ class FileNode {
     const { uriAt } = require('../diffs');
     const leftRef = this.status === 'A' ? null : this.leftRef || EMPTY_TREE; // (this.parent is the tree node above, not a commit)
     // A commit's file opens tagged with its commit (Next Unviewed File knows where it is).
-    const extra = this.commitViewed ? { commit: this.commitViewed } : undefined;
-    return [uriAt(this.repo, leftRef, this.leftPath, extra), uriAt(this.repo, this.status === 'D' ? null : this.rightRef || this.sha, this.rightPath, extra)].map(String);
+    const extra = this.commitViewed ? { commit: this.commitViewed, ...(this.base ? { base: this.base } : {}) } : undefined;
+    const leftExtra = this.leftLabel ? { ...extra, label: this.leftLabel } : extra;
+    return [uriAt(this.repo, leftRef, this.leftPath, leftExtra), uriAt(this.repo, this.status === 'D' ? null : this.rightRef || this.sha, this.rightPath, extra)].map(String);
   }
 
   getTreeItem() {
@@ -411,13 +479,15 @@ class FileNode {
     const dir = path.posix.dirname(this.path);
     const stats = this.change.added !== undefined && this.change.added !== null ? `+${this.change.added} −${this.change.deleted}` : this.change.binary ? 'binary' : '';
     // In a folder tree the folder is the parent row; flat lists name it next to the file.
-    item.description = [dir === '.' || this.inTree ? '' : dir, stats].filter(Boolean).join('  ');
+    // In a merge resolution: git's merge had a conflict here (else the merge edited it).
+    item.description = [dir === '.' || this.inTree ? '' : dir, stats, this.change.conflict ? 'conflict' : ''].filter(Boolean).join('  ');
     // The fragment keeps the file icon/theme but stops the working file's current
     // Explorer decorations (M, U, …) from showing on a historical entry.
     // A commit's file carries its viewed-mark key: not opened yet, it gets a dot (viewed.js).
     item.resourceUri = vscode.Uri.file(this.repo.absolute(this.path)).with({ fragment: 'commit-corner-history', query: this.commitViewed ? `vk=${viewed.ChangeMarks.key(this.commitViewed, this.change)}` : '' });
     item.iconPath = statusIcon(this.status);
-    item.tooltip = `${STATUS_LABELS[this.status] || this.status}: ${this.origPath ? `${this.origPath} → ` : ''}${this.path}${unviewed ? '\n● Not viewed (the dot goes when you open it)' : ''}`;
+    const why = this.change.conflict ? '\nResolved a conflict of git\'s automatic merge' : this.leftLabel ? '\nEdited in the merge beyond git\'s automatic merge' : '';
+    item.tooltip = `${STATUS_LABELS[this.status] || this.status}: ${this.origPath ? `${this.origPath} → ` : ''}${this.path}${why}${unviewed ? '\n● Not viewed (the dot goes when you open it)' : ''}`;
     // A commit's file not viewed yet: its menu offers Mark as Viewed (else Mark as Not Viewed).
     item.contextValue = unviewed ? `${this.contextValue}:new` : this.contextValue;
     if (this.viewed) item.checkboxState = viewed.checkbox(viewed.get(), this.viewed.scope, this.path, this.viewed.fingerprint);
@@ -425,7 +495,7 @@ class FileNode {
       command: 'commitCorner.openCommitFile',
       title: 'Open Changes',
       // In a list you check off (Viewed), the keyboard stays in the list: Enter shows, Space ticks.
-      arguments: [{ repoRoot: this.repoRoot, sha: this.sha, path: this.rightPath, origPath: this.leftPath, status: this.status, leftRef: this.leftRef, rightRef: this.rightRef, preserveFocus: !!this.viewed, viewedSha: this.commitViewed, oldBlob: this.change.oldBlob, newBlob: this.change.newBlob,
+      arguments: [{ repoRoot: this.repoRoot, sha: this.sha, path: this.rightPath, origPath: this.leftPath, status: this.status, leftRef: this.leftRef, rightRef: this.rightRef, preserveFocus: !!this.viewed, viewedSha: this.commitViewed, oldBlob: this.change.oldBlob, newBlob: this.change.newBlob, base: this.base, leftLabel: this.leftLabel,
         title: this.diffLabel ? `${name} (${this.diffLabel}, ${(STATUS_LABELS[this.status] || 'changed').toLowerCase()})` : undefined }],
     };
     return item;
@@ -515,4 +585,4 @@ function buildFolderTree(nodes) {
   return root.children;
 }
 
-module.exports = { TreeProvider, MessageNode, GroupNode, CommitNode, FileNode, FolderNode, TimeSeparatorNode, fileNodes, fingerprintOf, commitTooltip, withTimeSeparators, timeRangeOf };
+module.exports = { TreeProvider, MessageNode, GroupNode, CommitNode, MergeViewNode, FileNode, FolderNode, TimeSeparatorNode, fileNodes, fingerprintOf, commitTooltip, withTimeSeparators, timeRangeOf };

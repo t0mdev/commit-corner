@@ -339,3 +339,44 @@ suite('The editor graph opens diffs beside itself', () => {
     assert.ok(await evaluate(page, `!!document.querySelector('.files-block .file-line.file')`), 'and its page is alive');
   });
 });
+
+suite('A merge in the graph', () => {
+  const rowOf = (subject) => `[...document.querySelectorAll('.row')].find((r) => (r.querySelector('.subject') || {}).textContent === ${JSON.stringify(subject)})`;
+  const graph = () => webview('graph.js', "!document.body.classList.contains('in-sidebar') && document.querySelectorAll('.row').length > 2");
+
+  test('the details pane shows Merge Resolution open, a parent\'s changes when opened', async () => {
+    const merge = require('../helpers/merge').makeMerge(root(), 'Merge for the graph');
+    git('update-ref', 'refs/heads/merged-ui', merge);
+    await vscode.commands.executeCommand('commitCorner.showGraph');
+    const page = await graph();
+    await vscode.commands.executeCommand('commitCorner.refresh');
+    await until(() => evaluate(page, `!!${rowOf('Merge for the graph')}`), 'the merge row');
+    await evaluate(page, `(${rowOf('Merge for the graph')}.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })), true)`);
+    await until(() => evaluate(page, `document.querySelectorAll('.details .merge-head').length === 3`), 'three sections')
+      .catch(async (e) => assert.fail(`${e.message}: ${await evaluate(page, `document.querySelector('.details').textContent.slice(0, 400)`)}`));
+    const heads = await evaluate(page, `[...document.querySelectorAll('.details .merge-toggle')].map((b) => [b.textContent, b.getAttribute('aria-expanded')])`);
+    // (" · approximate" with git older than 2.38.)
+    assert.deepStrictEqual(heads.map(([t, open]) => [t.replace(/ · approximate$/, ''), open]), [['Merge Resolution · 1 file', 'true'], ['Changes vs Parent 1 · 1 file', 'false'], ['Changes vs Parent 2 · 2 files', 'false']]);
+    const resolved = await evaluate(page, `[...document.querySelectorAll('.details .merge-sections .file')].map((f) => f.textContent)`);
+    assert.strictEqual(resolved.length, 1);
+    assert.match(resolved[0], /mr\.txt.*conflict/);
+    // Parent 2 opened: its files are fetched and listed under it.
+    await evaluate(page, `(document.querySelectorAll('.details .merge-toggle')[2].click(), true)`);
+    await until(() => evaluate(page, `(() => { const l = document.querySelectorAll('.details .merge-sections .files'); return l.length === 2 && l[1].querySelectorAll('.file').length === 2; })()`), 'parent 2\'s files');
+    // Its file opens against parent 2 (the context menu's data names that side and view).
+    const ctx = await evaluate(page, `JSON.parse(document.querySelectorAll('.details .merge-sections .files')[1].querySelector('.file').dataset.vscodeContext)`);
+    assert.strictEqual(ctx.view, 'parent2');
+    assert.strictEqual(ctx.parent, git('rev-parse', `${merge}^2`));
+  });
+
+  test('expanded in the list: one section per view, a closed one loads when opened', async () => {
+    const page = await graph();
+    await evaluate(page, `(() => { const row = ${rowOf('Merge for the graph')}; if (!row.querySelector('.twisty.open')) row.querySelector('.twisty').click(); return true; })()`);
+    const box = await until(() => evaluate(page, `(() => { const row = ${rowOf('Merge for the graph')}; const b = row && document.getElementById(row.getAttribute('aria-owns') || ''); return b && b.querySelectorAll('.file-line.folder').length >= 3 ? '#' + b.id : ''; })()`), 'the sections');
+    const folders = await evaluate(page, `[...document.querySelectorAll('${box} .file-line.folder')].map((f) => [f.textContent, f.getAttribute('aria-expanded')])`);
+    assert.deepStrictEqual([folders[0][0].replace(/ · approximate$/, ''), folders[0][1]], ['Merge Resolution · 1 file', 'true']);
+    assert.deepStrictEqual(await evaluate(page, `[...document.querySelectorAll('${box} .file-line.file')].map((f) => f.dataset.fkey)`), ['@resolution:mr.txt']);
+    await evaluate(page, `([...document.querySelectorAll('${box} .file-line.folder')].find((f) => f.dataset.key === '#parent2').click(), true)`);
+    await until(() => evaluate(page, `document.querySelectorAll('${box} .file-line.file[data-fkey^="@parent2:"]').length === 2`), 'parent 2\'s files in the list');
+  });
+});

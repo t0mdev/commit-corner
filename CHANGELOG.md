@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Merge Resolution**: what a merge commit itself changed, beyond git's automatic merge of its parents: the conflicts it resolved (marked *conflict*, the markers on the left side) and anything else edited while merging. git merges the parents again for it (`merge-tree`, nothing in your working tree or index changes); a clean merge says so. With git older than 2.38 the merge is redone without rename detection and marked approximate.
+- **Opening a merge asks which changes**: *Show Changes* on a merge commit offers Merge Resolution (Enter), Changes vs Parent 1 (what the merge brought in) and Changes vs Parent 2, with their file counts. The graph's expanded row and details pane and the trees list the three as sections under the merge, Merge Resolution open, the others loaded when you open them. *Show Merge Resolution* is in a merge's menus and hover card; *Show Changes Against Second Parent* is only offered on merges now.
+- Next Unviewed File (`N`) in a merge's resolution or second-parent diff goes to the next file of that list.
+
 ## 1.4.0
 
 - **Shortcuts changed** (after `Ctrl+Alt+G`, `Cmd+Alt+G` on macOS): the keys used most while reviewing an agent's work are single letters now.

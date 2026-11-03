@@ -96,6 +96,61 @@ suite('Commit Corner in VS Code', () => {
     }, 'a multi-diff editor');
   });
 
+  /** A merge with one resolved conflict, made without touching the working tree (helpers/merge.js). */
+  const makeMerge = () => require('../helpers/merge').makeMerge(root());
+
+  const activeMultiDiff = () => {
+    const t = vscode.window.tabGroups.activeTabGroup.activeTab;
+    return t && t.input instanceof vscode.TabInputTextMultiDiff ? t.input : undefined;
+  };
+
+  test('Show Merge Resolution: only the resolved file, against git\'s automatic merge', async () => {
+    const repo = api.manager.repositories[0];
+    const merge = makeMerge();
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await vscode.commands.executeCommand('commitCorner.showMergeResolution', { repoRoot: repo.root, sha: merge });
+    const input = await until(activeMultiDiff, 'a multi-diff editor');
+    assert.deepStrictEqual(input.textDiffs.map((d) => path.basename(d.modified.fsPath)), ['mr.txt']);
+    const left = JSON.parse(input.textDiffs[0].original.query);
+    assert.strictEqual(left.rev, 'automatic merge');
+    assert.match((await vscode.workspace.openTextDocument(input.textDiffs[0].original)).getText(), /^a\n<<<<<<< [0-9a-f]{40}\nB1\n=======\nB2\n>>>>>>> [0-9a-f]{40}\nc\n$/);
+    assert.strictEqual(JSON.parse(input.textDiffs[0].modified.query).ref, merge);
+  });
+
+  test('Show Changes on a merge asks which view; Enter opens the resolution', async () => {
+    const repo = api.manager.repositories[0];
+    const merge = makeMerge();
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    const shown = vscode.commands.executeCommand('commitCorner.showCommit', { repoRoot: repo.root, sha: merge });
+    await sleep(800); // the picker is up (its counts may still be coming)
+    await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+    await shown;
+    const input = await until(activeMultiDiff, 'a multi-diff editor');
+    assert.strictEqual(JSON.parse(input.textDiffs[0].original.query).rev, 'automatic merge');
+  });
+
+  test('a merge in a tree: Merge Resolution open, the parents\' changes closed with their counts', async () => {
+    const { CommitNode } = require('../../src/vscode/views/nodes');
+    const repo = api.manager.repositories[0];
+    const merge = makeMerge();
+    const sections = await new CommitNode(repo, await repo.getCommit(merge)).getChildren();
+    const items = await Promise.all(sections.map((s) => s.getTreeItem()));
+    assert.deepStrictEqual(items.map((i) => i.label), ['Merge Resolution', 'Changes vs Parent 1', 'Changes vs Parent 2']);
+    assert.deepStrictEqual(items.map((i) => i.collapsibleState), [vscode.TreeItemCollapsibleState.Expanded, vscode.TreeItemCollapsibleState.Collapsed, vscode.TreeItemCollapsibleState.Collapsed]);
+    assert.match(items[0].description, /^1 file/);
+    assert.match(items[2].description, /^[0-9a-f]{7} · 2 files$/);
+    const [file] = await sections[0].getChildren();
+    const fileItem = file.getTreeItem();
+    assert.match(fileItem.description, /conflict/);
+    const [arg] = fileItem.command.arguments;
+    assert.strictEqual(arg.leftLabel, 'automatic merge');
+    assert.match(arg.base, /^[0-9a-f]{40}$/);
+    // Its diff says which list it is from: Next Unviewed File stays in the resolution.
+    const [leftUri, rightUri] = file.openUris().map((u) => vscode.Uri.parse(u));
+    assert.strictEqual(JSON.parse(leftUri.query).rev, 'automatic merge');
+    assert.strictEqual(JSON.parse(rightUri.query).base, arg.base);
+  });
+
   test('a file at a revision is labelled with its short SHA (resourceLabelFormatters)', async () => {
     const { toGitUri } = require('../../src/vscode/uri');
     const repo = api.manager.repositories[0];

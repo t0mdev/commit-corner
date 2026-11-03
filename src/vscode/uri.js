@@ -28,6 +28,8 @@ function toGitUri(repoRoot, relPath, ref, extra) {
   if (extra && extra.anchor) query.anchor = extra.anchor;
   // `commit`: the diff shows a file of this commit (its next unviewed file is a key away).
   if (extra && extra.commit) query.commit = extra.commit;
+  // `base`: …against this side, not the commit's first parent (a merge's other views).
+  if (extra && extra.commit && extra.base) query.base = extra.base;
   return vscode.Uri.file(abs).with({ scheme: SCHEME, query: JSON.stringify(query) });
 }
 
@@ -42,7 +44,7 @@ function revLabel(ref) {
   return (m ? m[1].slice(0, 7) + m[2] : ref).replace(/\//g, '\u2215');
 }
 
-/** @returns {{repo:string, path:string, ref:string, empty?:boolean, anchor?:string, commit?:string}} */
+/** @returns {{repo:string, path:string, ref:string, empty?:boolean, anchor?:string, commit?:string, base?:string}} */
 function fromGitUri(uri) {
   try {
     return JSON.parse(uri.query);

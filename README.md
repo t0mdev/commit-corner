@@ -149,6 +149,18 @@ new tags (open them in the graph).
     says so.
   - **Range diff**: everything from the oldest commit's parent to the newest commit.
   - Cherry-pick or revert the whole selection (applied in the right order).
+- **Merge commits** in three views: **Merge Resolution** shows only what the
+  merge itself changed: git merges the two parents again (as `git merge`
+  does, without touching your working tree or index) and compares that with
+  the commit, so you see the resolved
+  conflicts (marked *conflict*, the markers on the left) and anything else
+  edited while merging; a clean merge shows nothing. **Changes vs Parent 1**
+  is everything the merge brought in, **Changes vs Parent 2** everything the
+  other side had. Under a merge, the graph (expanded row and details pane) and
+  the trees list the three as sections, Merge Resolution open; *Show Changes*
+  on a merge asks which (with file counts, Enter takes the resolution);
+  *Show Merge Resolution* is in its menu and hover. Merges of more than two
+  parents offer the parents' changes only.
 - Details pane: avatar, author, age and date, SHA (copy), change summary,
   full message, committer, signature status (GPG/SSH), parents, refs, and the
   changed files with per-file bars and line stats. Click a file to open its diff.
@@ -763,8 +775,10 @@ which needs a few dev-only packages and network access:
 Tests that need a human eye are in `docs/SMOKE_TEST.md`.
 
 Requires git ≥ 2.27. A few features use newer git when available:
-`merge-tree --write-tree` (2.38) for merge previews (older versions use the
-legacy merge-tree output), and `stash --staged` (2.35).
+`merge-tree --write-tree` (2.38) for merge previews and Merge Resolution
+(older versions use the legacy merge-tree output for previews and redo a
+merge without rename detection, which they mark as approximate), and
+`stash --staged` (2.35).
 
 ## Support and contributions
 

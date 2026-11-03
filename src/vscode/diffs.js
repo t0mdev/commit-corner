@@ -44,17 +44,19 @@ function refLabel(ref) {
 
 /**
  * @param {import('../git/repository').Repository} repo
- * @param {{leftRef:string|null, leftPath?:string|null, rightRef:string|null, rightPath?:string|null, path:string, title?:string, preview?:boolean, selection?:vscode.Range, anchor?:string, commit?:string, viewColumn?:vscode.ViewColumn}} o
+ * @param {{leftRef:string|null, leftPath?:string|null, rightRef:string|null, rightPath?:string|null, path:string, title?:string, preview?:boolean, selection?:vscode.Range, anchor?:string, commit?:string, base?:string, leftLabel?:string, viewColumn?:vscode.ViewColumn}} o
+ *        commit: the diff shows a file of this commit; base: against this side rather than its
+ *        first parent (a merge's resolution or second parent); leftLabel: the left side's name
  */
 async function openDiff(repo, o) {
   const leftPath = o.leftPath === undefined ? o.path : o.leftPath;
   const rightPath = o.rightPath === undefined ? o.path : o.rightPath;
   // commit: a file of that commit (Next Unviewed File and Open Working File know where they are).
-  const extra = o.anchor || o.commit ? { ...(o.anchor ? { anchor: o.anchor } : {}), ...(o.commit ? { commit: o.commit } : {}) } : undefined;
-  const left = uriAt(repo, o.leftRef, leftPath, extra);
+  const extra = o.anchor || o.commit ? { ...(o.anchor ? { anchor: o.anchor } : {}), ...(o.commit ? { commit: o.commit } : {}), ...(o.commit && o.base ? { base: o.base } : {}) } : undefined;
+  const left = uriAt(repo, o.leftRef, leftPath, o.leftLabel ? { ...extra, label: o.leftLabel } : extra);
   const right = uriAt(repo, o.rightRef, rightPath, extra);
   const name = path.posix.basename(o.path);
-  const title = o.title || `${name} (${refLabel(o.leftRef)} ↔ ${refLabel(o.rightRef)})`;
+  const title = o.title || `${name} (${o.leftLabel && o.leftRef !== null ? o.leftLabel : refLabel(o.leftRef)} ↔ ${refLabel(o.rightRef)})`;
   const options = { preview: o.preview !== false, preserveFocus: !!o.preserveFocus };
   if (o.selection) options.selection = o.selection;
   // From the editor graph: beside it, so the graph (and its keyboard) stays.

@@ -429,6 +429,12 @@
         "icon": "$(diff-multiple)"
       },
       {
+        "command": "commitCorner.showMergeResolution",
+        "title": "Show Merge Resolution",
+        "category": "Commit Corner",
+        "icon": "$(git-compare)"
+      },
+      {
         "command": "commitCorner.showCommitParent2",
         "title": "Show Changes Against Second Parent (Merge)",
         "category": "Commit Corner"
@@ -786,6 +792,11 @@
       {
         "command": "commitCorner.graph.showCommit",
         "title": "Show Changes",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.showMergeResolution",
+        "title": "Show Merge Resolution",
         "category": "Commit Corner"
       },
       {
@@ -2138,6 +2149,10 @@
           "when": "false"
         },
         {
+          "command": "commitCorner.graph.showMergeResolution",
+          "when": "false"
+        },
+        {
           "command": "commitCorner.graph.showRange",
           "when": "false"
         },
@@ -2396,6 +2411,10 @@
         {
           "command": "commitCorner.cherryPickNoCommit",
           "when": "false"
+        },
+        {
+          "command": "commitCorner.showMergeResolution",
+          "when": "commitCorner.hasRepository"
         },
         {
           "command": "commitCorner.showCommitParent2",
@@ -3725,7 +3744,7 @@
         },
         {
           "command": "commitCorner.showCommit",
-          "when": "viewItem =~ /^commit$/",
+          "when": "viewItem =~ /^commit(:merge)?$/",
           "group": "inline@1"
         },
         {
@@ -3994,9 +4013,24 @@
           "group": "2_commit@4b"
         },
         {
+          "command": "commitCorner.showMergeResolution",
+          "when": "viewItem == commit:merge && !listMultiSelection",
+          "group": "1_show@1a"
+        },
+        {
           "command": "commitCorner.showCommitParent2",
-          "when": "viewItem =~ /^commit/ && !listMultiSelection",
+          "when": "viewItem == commit:merge && !listMultiSelection",
           "group": "1_show@1b"
+        },
+        {
+          "command": "commitCorner.showCommit",
+          "when": "viewItem == mergeView",
+          "group": "inline@1"
+        },
+        {
+          "command": "commitCorner.showCommit",
+          "when": "viewItem == mergeView",
+          "group": "1_show@1"
         },
         {
           "command": "commitCorner.createPullRequest",
@@ -4140,12 +4174,12 @@
         },
         {
           "command": "commitCorner.markCommitViewed",
-          "when": "viewItem =~ /^commit$/ && config.commitCorner.markUnviewedFiles",
+          "when": "viewItem =~ /^commit(:merge)?$/ && config.commitCorner.markUnviewedFiles",
           "group": "8_viewed@1"
         },
         {
           "command": "commitCorner.markCommitUnviewed",
-          "when": "viewItem =~ /^commit$/ && config.commitCorner.markUnviewedFiles",
+          "when": "viewItem =~ /^commit(:merge)?$/ && config.commitCorner.markUnviewedFiles",
           "group": "8_viewed@2"
         },
         {
@@ -4194,6 +4228,11 @@
           "command": "commitCorner.graph.showCommit",
           "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit'",
           "group": "1_show@1"
+        },
+        {
+          "command": "commitCorner.graph.showMergeResolution",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && merge",
+          "group": "1_show@1a"
         },
         {
           "command": "commitCorner.graph.showRange",

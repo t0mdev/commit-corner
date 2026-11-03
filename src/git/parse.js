@@ -578,6 +578,22 @@ function parseShortstat(text) {
   return m ? { files: Number(m[1]), added: Number(m[2] || 0), deleted: Number(m[3] || 0) } : { files: 0, added: 0, deleted: 0 };
 }
 
+/**
+ * Parse `git ls-files -u -z` (the unmerged entries of an index): per path, its stages
+ * 1 (base), 2 (ours) and 3 (theirs), each `{mode, sha}`; a side that deleted the file has none.
+ * @returns {Map<string, {1?: {mode:string, sha:string}, 2?: {mode:string, sha:string}, 3?: {mode:string, sha:string}}>}
+ */
+function parseUnmerged(text) {
+  const out = new Map();
+  for (const entry of text.split('\0')) {
+    const m = /^(\d{6}) ([0-9a-f]{40,64}) ([123])\t([^]+)$/.exec(entry);
+    if (!m) continue;
+    if (!out.has(m[4])) out.set(m[4], {});
+    out.get(m[4])[m[3]] = { mode: m[1], sha: m[2] };
+  }
+  return out;
+}
+
 /** Commits of `git log --shortstat` (framedLog), each with a `stats` field. */
 function parseLogWithStats(text, framed) {
   return framed.split(text).map(({ commit, tail }) => Object.assign(commit, { stats: parseShortstat(tail) }));
@@ -585,6 +601,7 @@ function parseLogWithStats(text, framed) {
 
 module.exports = {
   oneLine,
+  parseUnmerged,
   unquoteC,
   HEX_SHA,
   parseShortstat,

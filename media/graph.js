@@ -438,7 +438,7 @@
     const vc = viewedCounts.get(r.sha);
     const viewedAll = !multi && !!vc && vc[0] >= vc[1];
     const viewedAny = multi || (!!vc && vc[0] > 0);
-    return JSON.stringify({ webviewSection: 'commit', surface: settings.surface, sha: r.sha, multi, wip: !!wipBySha[r.sha], onHead: on(r.sha), viewedAll, viewedAny, ...(multi ? { selection: sel, allOnHead: sel.every(on) } : {}), preventDefaultContextMenuItems: true });
+    return JSON.stringify({ webviewSection: 'commit', surface: settings.surface, sha: r.sha, multi, merge: !multi && (r.parents || []).length === 2, wip: !!wipBySha[r.sha], onHead: on(r.sha), viewedAll, viewedAny, ...(multi ? { selection: sel, allOnHead: sel.every(on) } : {}), preventDefaultContextMenuItems: true });
   }
 
   /** The loaded commits reachable from HEAD (worked out again when rows or HEAD change). */
@@ -878,6 +878,7 @@
     const e = rows[i] && expanded.get(rows[i].sha);
     if (!e) return [];
     if (!e.files) return [{ kind: 'note', text: e.error || 'Loading files…', depth: 0 }];
+    if (e.merge) return e.lines || (e.lines = mergeLines(e));
     if (!e.files.length) {
       return rows[i].sha === WORKTREE_SHA
         ? [...commitBoxLines(e), { kind: 'note', text: 'No uncommitted changes', depth: 0 }]
@@ -901,6 +902,36 @@
       } else e.lines = fileTreeLines(e.files, e.collapsed);
     }
     return e.lines;
+  }
+
+  /**
+   * A merge's files: one section per view (Merge resolution open, the parents closed; a closed
+   * one's files are asked for when it is opened), each its own folder tree.
+   */
+  function mergeLines(e) {
+    if (!e.collapsed) e.collapsed = new Set();
+    const lines = [];
+    for (const sec of e.merge) {
+      const key = `#${sec.view}`;
+      const open = !e.collapsed.has(key);
+      lines.push({ kind: 'folder', text: `${sec.title} · ${sec.error ? 'unavailable' : sec.countText || ''}`, depth: 0, key, open, mergeView: sec.view, title: `${sec.detail}${sec.note ? `\n(${sec.note})` : ''}${sec.error ? `\n${sec.error}` : ''}` });
+      if (!open) continue;
+      if (sec.error) lines.push({ kind: 'note', text: sec.error, depth: 1 });
+      else if (!sec.files) lines.push({ kind: 'note', text: 'Loading files…', depth: 1 });
+      else if (!sec.files.length) lines.push({ kind: 'note', text: sec.view === 'resolution' ? 'A clean merge: nothing beyond git\'s automatic merge' : 'No files changed', depth: 1 });
+      else lines.push(...fileTreeLines(sec.files, e.collapsed, 1, `${key}/`));
+    }
+    return lines;
+  }
+
+  /** Every file a merge's sections list so far (each says its view), else the commit's files. */
+  function entryFiles(e) {
+    return e.merge ? e.merge.flatMap((sec) => sec.files || []) : e.files || [];
+  }
+
+  /** A file line's key: its path, with its group (uncommitted) or a merge's view. */
+  function fileKeyOf(f) {
+    return `${f.group || (f.view ? `@${f.view}` : '')}:${f.path}`;
   }
 
   /**
@@ -1036,7 +1067,8 @@
         div.setAttribute('role', 'treeitem');
         div.setAttribute('aria-level', String(line.depth + 2));
         div.setAttribute('aria-expanded', line.open ? 'true' : 'false');
-        div.setAttribute('aria-label', `${line.group ? '' : 'Folder '}${line.text}`);
+        div.setAttribute('aria-label', `${line.group || line.mergeView ? '' : 'Folder '}${line.text}`);
+        if (line.title) div.title = `${line.title}\nEnter or ←/→: open or close`;
         const toggle = () => toggleFolder(i, line.key);
         div.addEventListener('click', toggle);
         const inGroup = wt && !line.group && /^#(\w+)\/(.+)$/.exec(line.key);
@@ -1057,24 +1089,26 @@
         div.setAttribute('aria-label', `${what} ${f.path}${lineInfo}`);
         div.title = `${what}: ${f.origPath && f.origPath !== f.path ? `${f.origPath} → ` : ''}${f.path}${lineInfo.replace(/^, /, ' — ')}\n${fileKeysHint(wt)}`;
         // keep: Space previews and leaves the keyboard here (step through files); Enter/click go there.
+        // A merge's file opens against its section's side (f.base); a commit's against its parent.
+        const parent = f.base || (e && e.parent);
         const open = (keep) => vscode.postMessage(r.sha === WORKTREE_SHA
           ? { type: 'openFile', kind: 'worktree', file: f, keepFocus: keep === true }
-          : { type: 'openFile', kind: 'commit', file: f, sha: r.sha, parent: e && e.parent, keepFocus: keep === true });
+          : { type: 'openFile', kind: 'commit', file: f, sha: r.sha, parent, view: f.view, keepFocus: keep === true });
         div.addEventListener('click', () => open(false));
         const acts = wt ? fileActions(i, f) : undefined;
         if (acts) {
           div.appendChild(acts.el);
           div.setAttribute('aria-label', `${div.getAttribute('aria-label')}, ${f.group === 'staged' ? 'staged' : f.group === 'merge' ? 'conflicted' : 'not staged'}. ${acts.hint}`);
         }
-        div.dataset.fkey = `${f.group || ''}:${f.path}`;
-        decorateFile(div, f, r.sha, e && e.parent);
+        div.dataset.fkey = fileKeyOf(f);
+        decorateFile(div, f, r.sha, parent);
         if (!wt) {
-          const ca = commitFileActions(r.sha, f, e && e.parent);
+          const ca = commitFileActions(r.sha, f, parent);
           div.appendChild(ca.el);
           div.setAttribute('aria-label', `${div.getAttribute('aria-label')}. ${ca.hint}`);
         } else if (acts) acts.el.prepend(actButton('goToFile', 'Open the working file (O)', () => fileAction('openWorking', r.sha, f)));
         div.addEventListener('keydown', (ev) => {
-          if (fileKey(ev, r.sha, f, e && e.parent, div)) return;
+          if (fileKey(ev, r.sha, f, parent, div)) return;
           onFileKey(ev, div, i, open, undefined, acts);
         });
       }
@@ -1217,7 +1251,7 @@
 
   /** Ask the host to do something with a file row (the file commands; see GraphPanel.fileAction). */
   function fileAction(action, sha, f, parent) {
-    vscode.postMessage({ type: 'fileAction', action, sha, parent, file: { path: f.path, origPath: f.origPath, status: f.status, group: f.group } });
+    vscode.postMessage({ type: 'fileAction', action, sha, parent, view: f.view, file: { path: f.path, origPath: f.origPath, status: f.status, group: f.group } });
   }
 
   /**
@@ -1227,7 +1261,7 @@
   function decorateFile(div, f, sha, parent) {
     const wt = sha === WORKTREE_SHA;
     div.dataset.vscodeContext = JSON.stringify({
-      webviewSection: 'file', surface: settings.surface, sha, parent, path: f.path, origPath: f.origPath, status: f.status, group: f.group,
+      webviewSection: 'file', surface: settings.surface, sha, parent, view: f.view, path: f.path, origPath: f.origPath, status: f.status, group: f.group,
       wtFile: wt, deleted: f.status === 'D', unviewed: !!f.unviewed, preventDefaultContextMenuItems: true,
     });
     if (!f.vk) return;
@@ -1330,22 +1364,25 @@
       // A commit's files: in the order of its whole tree, folders closed or not.
       const i = Number(box.id.replace('files-', ''));
       const e = rows[i] && expanded.get(rows[i].sha);
-      const order = e && e.files ? fileTreeLines(e.files).filter((l) => l.kind === 'file').map((l) => l.file) : [];
+      // A merge: the files of the same section (view).
+      const view = (/^@(\w+):/.exec(from.dataset.fkey || '') || [])[1];
+      const files = e ? entryFiles(e).filter((f) => f.view === view) : [];
+      const order = fileTreeLines(files).filter((l) => l.kind === 'file').map((l) => l.file);
       const unviewed = (f) => (vkState.has(f.vk) ? !vkState.get(f.vk) : !!f.unviewed);
-      const k = order.findIndex((f) => `${f.group || ''}:${f.path}` === from.dataset.fkey);
+      const k = order.findIndex((f) => fileKeyOf(f) === from.dataset.fkey);
       const next = [...order.slice(k + 1), ...order.slice(0, Math.max(0, k))].find(unviewed);
       if (!next) return allViewed();
-      let line = box.querySelector(`[data-fkey="${CSS.escape(`:${next.path}`)}"]`);
+      let line = box.querySelector(`[data-fkey="${CSS.escape(fileKeyOf(next))}"]`);
       if (!line && e.collapsed && e.collapsed.size) {
-        // In a closed folder: open the folders, then it is there.
-        e.collapsed.clear();
+        // In a closed folder: open the folders (of that section), then it is there.
+        for (const key of [...e.collapsed]) if (!view || key.startsWith(`#${view}/`)) e.collapsed.delete(key);
         e.lines = undefined;
         relayout();
         const again = liveFiles.get(i);
-        line = again && again.el.querySelector(`[data-fkey="${CSS.escape(`:${next.path}`)}"]`);
+        line = again && again.el.querySelector(`[data-fkey="${CSS.escape(fileKeyOf(next))}"]`);
       }
       if (line) return openFrom(line);
-      return vscode.postMessage({ type: 'openFile', kind: 'commit', file: next, sha: rows[i].sha, parent: e.parent, keepFocus: true });
+      return vscode.postMessage({ type: 'openFile', kind: 'commit', file: next, sha: rows[i].sha, parent: next.base || e.parent, view: next.view, keepFocus: true });
     }
     // The uncommitted files and the details pane: the list as shown.
     const scope = from.closest('.files-block, .files');
@@ -1649,8 +1686,15 @@
   function toggleFolder(i, key) {
     const e = rows[i] && expanded.get(rows[i].sha);
     if (!e || !key) return;
-    if (e.collapsed.has(key)) e.collapsed.delete(key);
-    else e.collapsed.add(key);
+    if (e.collapsed.has(key)) {
+      e.collapsed.delete(key);
+      // A merge's section opened for the first time: its files.
+      const sec = e.merge && e.merge.find((x) => `#${x.view}` === key);
+      if (sec && !sec.files && !sec.error && !sec.asked) {
+        sec.asked = true;
+        vscode.postMessage({ type: 'files', sha: rows[i].sha, view: sec.view });
+      }
+    } else e.collapsed.add(key);
     e.lines = undefined;
     relayout();
     const box = liveFiles.get(i);
@@ -2296,7 +2340,8 @@
     return button(label, title, () => vscode.postMessage({ type: 'command', command, args }), iconName);
   }
 
-  function fileList(files, kind, extra) {
+  /** o.title false: no "N files changed" line (a merge's section says its count itself). */
+  function fileList(files, kind, extra, o = {}) {
     const list = el('div', 'files');
     const title = el('div', 'files-title');
     title.append(ui.icon('files'), el('span', '', `${files.length} file${files.length === 1 ? '' : 's'} changed`));
@@ -2307,7 +2352,7 @@
       s.append(el('span', 'add', ` +${add}`), el('span', 'del', ` −${del}`));
       title.appendChild(s);
     }
-    list.appendChild(title);
+    if (o.title !== false) list.appendChild(title);
     for (const f of files) {
       const item = el('div', 'file');
       item.tabIndex = 0;
@@ -2328,6 +2373,12 @@
       } else if (f.binary) item.appendChild(el('span', 'stats', 'binary'));
       if (f.group) item.appendChild(el('span', 'group', f.group));
       if (f.commits && f.commits.length > 1) item.appendChild(el('span', 'group', `${f.commits.length} commits`));
+      // A merge's resolution: git's merge had a conflict in this file (else the merge edited it).
+      if (f.conflict) {
+        const chip = el('span', 'group', 'conflict');
+        chip.title = 'git\'s automatic merge had a conflict here: this is how it was resolved';
+        item.appendChild(chip);
+      }
       // Space keeps the keyboard in the list (N steps through the files), Enter and a click go there.
       const open = (keep) => vscode.postMessage({ type: 'openFile', kind, file: f, ...extra, keepFocus: keep === true });
       item.addEventListener('click', () => open());
@@ -2393,7 +2444,74 @@
     (items[Math.min(index, items.length - 1)] || scroller).focus();
   }
 
+  /** The details shown (to redraw them when a merge's section opens or its files arrive). */
+  let shownDetails;
+  /** The merge sections open in the details pane, for the merge shown. */
+  let detailsOpen = { sha: undefined, views: new Set() };
+
+  /** A merge's views as sections: a header (▸ title · count, "open all") and its files. */
+  function mergeSections(m) {
+    const sha = m.commit.sha;
+    if (detailsOpen.sha !== sha) detailsOpen = { sha, views: new Set(['resolution']) };
+    const box = el('div', 'merge-sections');
+    for (const sec of m.merge) {
+      const open = detailsOpen.views.has(sec.view);
+      const head = el('div', 'merge-head');
+      const toggle = el('button', 'merge-toggle');
+      toggle.type = 'button';
+      const chev = el('span', `twisty${open ? ' open' : ''}`);
+      chev.appendChild(ui.icon('chevron', { size: 11 }));
+      toggle.append(chev, el('span', 'merge-title', sec.title), el('span', 'dim', ` · ${sec.error ? 'unavailable' : sec.countText || ''}`));
+      toggle.title = `${sec.detail}${sec.note ? `\n(${sec.note})` : ''}`;
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.addEventListener('click', () => {
+        if (open) detailsOpen.views.delete(sec.view);
+        else {
+          detailsOpen.views.add(sec.view);
+          if (!sec.files && !sec.error && !sec.asked) {
+            sec.asked = true;
+            vscode.postMessage({ type: 'files', sha, view: sec.view });
+          }
+        }
+        renderDetails(shownDetails);
+      });
+      head.appendChild(toggle);
+      if (sec.count) head.appendChild(button('', `Open the ${sec.count} file${sec.count === 1 ? '' : 's'} of ${sec.title} in the multi-diff editor`, () => vscode.postMessage({ type: 'openCommit', sha, view: sec.view }), 'diff'));
+      box.appendChild(head);
+      if (!open) continue;
+      if (sec.error) box.appendChild(el('div', 'note', sec.error));
+      else if (!sec.files) box.appendChild(el('div', 'note', 'Loading files…'));
+      else if (!sec.files.length) box.appendChild(el('div', 'note', sec.view === 'resolution' ? 'A clean merge: it changed nothing beyond git\'s automatic merge of its parents.' : 'No files changed.'));
+      else box.appendChild(fileList(sec.files, 'commit', { sha, parent: sec.left, view: sec.view }, { title: false }));
+      if (sec.note) box.appendChild(el('div', 'note', `Approximate: ${sec.note.replace(/^approximate: /, '')}.`));
+    }
+    return box;
+  }
+
+  /** A merge section's files arrived: into its expanded row and the details pane. */
+  function mergeFilesArrived(m) {
+    if (m.repoRoot && m.repoRoot !== repoRoot) return;
+    const e = expanded.get(m.sha);
+    const sec = e && e.merge && e.merge.find((x) => x.view === m.view);
+    if (sec) {
+      Object.assign(sec, { files: m.files, error: m.error, asked: false });
+      if (m.view === 'parent1' && m.files) {
+        countFromFiles(m.sha, m.files); // a merge's viewed count is of its first-parent files
+        refreshViewedBadges();
+      }
+      e.lines = undefined;
+      relayout();
+    }
+    const d = shownDetails;
+    const dsec = d && d.kind === 'commit' && d.merge && d.commit.sha === m.sha && d.merge.find((x) => x.view === m.view);
+    if (dsec) {
+      Object.assign(dsec, { files: m.files, error: m.error, asked: false });
+      renderDetails(d);
+    }
+  }
+
   function renderDetails(m) {
+    shownDetails = m;
     const focusIndex = detailsFocusIndex();
     const pane = el('div', 'details-inner');
     if (m.kind === 'none') {
@@ -2466,7 +2584,9 @@
       if (body) pane.appendChild(el('pre', 'body', body));
       const bar = el('div', 'actions');
       bar.append(
-        button('Open All Changes', 'Open every changed file in the multi-diff editor', () => vscode.postMessage({ type: 'openCommit', sha: c.sha }), 'diff'),
+        m.merge
+          ? button('Open Changes…', 'A merge: choose Merge Resolution, or everything against parent 1 or 2', () => vscode.postMessage({ type: 'openCommit', sha: c.sha }), 'diff')
+          : button('Open All Changes', 'Open every changed file in the multi-diff editor', () => vscode.postMessage({ type: 'openCommit', sha: c.sha }), 'diff'),
         action('Checkout', 'Check out this commit (detached HEAD)', 'commitCorner.checkoutDetached', { sha: c.sha }, 'check'),
         action('Branch…', 'Create a branch here', 'commitCorner.createBranch', { sha: c.sha }, 'branch'),
         action('Cherry-pick', 'Apply this commit onto the current branch', 'commitCorner.cherryPick', { sha: c.sha }, 'commit'),
@@ -2477,8 +2597,8 @@
       const pr = /\(#(\d+)\)\s*$/.exec(c.subject) || /^Merge pull request #(\d+)\b/.exec(c.subject);
       if (pr && onGitHub) bar.appendChild(action(`PR #${pr[1]}`, `Open pull request #${pr[1]} on github.com`, 'commitCorner.openPullRequestOnGitHub', { number: Number(pr[1]) }, 'pr'));
       pane.appendChild(bar);
-      if (c.parents.length > 1) pane.appendChild(el('div', 'note', 'Merge commit: changes are shown against the first parent.'));
-      pane.appendChild(fileList(m.files, 'commit', { sha: c.sha, parent: m.parent }));
+      if (m.merge) pane.appendChild(mergeSections(m));
+      else pane.appendChild(fileList(m.files, 'commit', { sha: c.sha, parent: m.parent }));
     } else if (m.kind === 'multi') {
       const h = el('h2', 'with-icon');
       h.append(ui.icon('commit', { size: 16 }), el('span', '', `${m.shas.length} commits selected`));
@@ -2782,18 +2902,30 @@
         collapseAll();
         break;
       case 'files': {
+        if (m.view) {
+          mergeFilesArrived(m);
+          break;
+        }
         // The changed files of an expanded commit (or of the working tree).
         const e = expanded.get(m.sha);
         if (!e || (m.repoRoot && m.repoRoot !== repoRoot)) break;
         // The same list again (a poll, a save that changed no file's status): nothing to redraw.
-        const filesKey = JSON.stringify([m.files || [], m.parent, m.error]);
+        const filesKey = JSON.stringify([m.files || [], m.parent, m.error, m.merge]);
         if (filesKey === e.filesKey && e.lines && !e.refocus) {
           if (m.sha === WORKTREE_SHA && !e.draft) takeDraft(m.scmMessage);
           break;
         }
         e.filesKey = filesKey;
         e.files = m.files || [];
-        countFromFiles(m.sha, e.files);
+        if (m.merge) {
+          // A merge: its sections, the parents' closed until opened (files kept when it comes again).
+          const before = new Map((e.merge || []).map((x) => [x.view, x]));
+          e.merge = m.merge.map((x) => (!x.files && before.has(x.view) && before.get(x.view).files ? { ...x, files: before.get(x.view).files } : x));
+          if (!e.collapsed) e.collapsed = new Set(m.merge.filter((x) => x.view !== 'resolution').map((x) => `#${x.view}`));
+        } else {
+          e.merge = undefined;
+          countFromFiles(m.sha, e.files);
+        }
         refreshViewedBadges();
         e.parent = m.parent;
         e.error = m.error;

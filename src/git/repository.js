@@ -2037,6 +2037,118 @@ class Repository extends EventEmitter {
     return { conflicts: P.parseLegacyMergeTree(stdout), exact: false };
   }
 
+  /**
+   * What a merge commit changed beyond git's own merge of its two parents: the conflicts it
+   * resolved and any other edits made while merging. git's merge is done again, as a tree
+   * (conflict markers left in), and compared with the commit: a clean merge has no files.
+   * git >= 2.38: `merge-tree --write-tree`, as `git merge` merges (renames, several merge bases,
+   * merge attributes): exact. Older git: approximate (see resolveMergeTree).
+   * Writes objects (the tree, merged files) but never the index, the working tree or refs.
+   * Remembered per commit for this session.
+   * @param {{signal?: AbortSignal}} [opts]
+   * @returns {Promise<{tree:string, files:object[], conflicts:string[], exact:boolean, parents:string[]}>}
+   */
+  async getMergeResolution(sha, opts = {}) {
+    checkRevs(sha);
+    const commit = await this.getCommit(sha);
+    if (commit.parents.length !== 2) {
+      throw new Error(commit.parents.length < 2 ? `${commit.sha.slice(0, 7)} is not a merge commit.` : `${commit.sha.slice(0, 7)} merges ${commit.parents.length} parents; Merge Resolution needs a merge of two.`);
+    }
+    if (!this.mergeResolutions) this.mergeResolutions = new Map();
+    const known = this.mergeResolutions.get(commit.sha);
+    if (known) return known;
+    const [p1, p2] = commit.parents;
+    const merged = versionAtLeast(await getVersion(), 2, 38) ? await this.mergeTree(p1, p2, opts.signal) : await this.resolveMergeTree(p1, p2, opts.signal);
+    const files = await this.diffFiles(merged.tree, commit.sha, { blobs: true, signal: opts.signal });
+    const result = { ...merged, files, parents: commit.parents };
+    this.mergeResolutions.set(commit.sha, result);
+    if (this.mergeResolutions.size > 100) this.mergeResolutions.delete(this.mergeResolutions.keys().next().value);
+    return result;
+  }
+
+  /** git's merge of two commits as a tree: `merge-tree --write-tree` (git >= 2.38). */
+  async mergeTree(ours, theirs, signal) {
+    const run = (extra) => this.exec(['merge-tree', '--write-tree', '--name-only', '--no-messages', '-z', ...extra, ours, theirs], { allowFailure: true, signal });
+    let res = await run([]);
+    // A merge of unrelated histories (allowed when it was made): merge them the same way.
+    if (res.exitCode > 1 && /unrelated histories/i.test(res.stderr)) res = await run(['--allow-unrelated-histories']);
+    const tree = res.stdout.split('\0', 1)[0].trim();
+    if ((res.exitCode !== 0 && res.exitCode !== 1) || !/^[0-9a-f]{40,64}$/.test(tree)) {
+      throw new Error(`git could not merge the parents again: ${(res.stderr.trim().split('\n')[0] || `exit code ${res.exitCode}`).replace(/^fatal: /, '')}`);
+    }
+    return { tree, conflicts: P.parseWriteTreeConflicts(res.stdout, res.exitCode, true), exact: true };
+  }
+
+  /**
+   * git's merge of two commits as a tree on git < 2.38, as the "resolve" strategy does it, in a
+   * private index: a three-way read-tree from the (first) merge base, then each file both
+   * sides changed merged by `git merge-file` (conflict markers left in, labelled as
+   * merge-tree labels them). Approximate: no rename detection, one merge base, no merge
+   * drivers. A file that cannot be merged as text (binary, a link, a submodule, very large, or
+   * past the first 300) keeps the first parent's version, as git does; deleted on one side and
+   * changed on the other, it keeps the changed one.
+   */
+  async resolveMergeTree(ours, theirs, signal) {
+    const bases = await this.exec(['merge-base', '--all', ours, theirs], { allowFailure: true, signal });
+    const base = bases.exitCode === 0 && bases.stdout.trim() ? bases.stdout.trim().split('\n')[0] : this.emptyTree;
+    const tmpIndex = this.tempIndexPath('remerge');
+    const env = { GIT_INDEX_FILE: tmpIndex };
+    const scratch = [0, 1, 2].map((i) => `${tmpIndex}-${i}`); // ours, base, theirs for merge-file
+    try {
+      // Plumbing on a private index file: no locks on the real index, safe outside the write queue.
+      await this.exec(['read-tree', '-i', '-m', '--aggressive', base, ours, theirs], { env, writes: true, signal });
+      const unmerged = P.parseUnmerged((await this.exec(['ls-files', '-u', '-z'], { env, signal })).stdout);
+      if (!unmerged.size) return { tree: (await this.exec(['write-tree'], { env, writes: true, signal })).stdout.trim(), conflicts: [], exact: false };
+      const style = String((await this.getConfig('merge.conflictStyle').catch(() => undefined)) || '').toLowerCase();
+      const styleArgs = style === 'zdiff3' && versionAtLeast(await getVersion(), 2, 35) ? ['--zdiff3'] : /^z?diff3$/.test(style) ? ['--diff3'] : [];
+      const isFile = (e) => !e || e.mode === '100644' || e.mode === '100755';
+      const read = async (e) => {
+        if (!e) return Buffer.alloc(0);
+        const res = await this.exec(['cat-file', 'blob', e.sha], { buffer: true, maxBytes: 8 * 1024 * 1024, signal });
+        return res.truncated ? undefined : res.stdout;
+      };
+      const lines = [];
+      const conflicts = [];
+      let merges = 0;
+      for (const [file, st] of unmerged) {
+        let pick;
+        if (st[2] && st[3] && isFile(st[1]) && isFile(st[2]) && isFile(st[3]) && merges++ < 300) {
+          const sides = await Promise.all([st[2], st[1], st[3]].map((e) => read(e).catch(() => undefined)));
+          if (sides.every((b) => b && !b.includes(0))) {
+            await Promise.all(scratch.map((p, i) => fs.promises.writeFile(p, sides[i], { mode: 0o600 })));
+            const res = await this.exec(['merge-file', '-p', ...styleArgs, '-L', ours, '-L', base, '-L', theirs, ...scratch], { buffer: true, allowFailure: true, signal });
+            // Exit code: the number of conflicts (0 merged cleanly); 255 or a signal: an error.
+            if (res.exitCode !== null && res.exitCode >= 0 && res.exitCode < 128) {
+              const { stdout: blob } = await this.exec(['hash-object', '-w', '--stdin'], { input: res.stdout, writes: true, signal });
+              pick = { mode: st[2].mode === st[3].mode ? st[2].mode : st[1] && st[2].mode === st[1].mode ? st[3].mode : st[2].mode, sha: blob.trim() };
+              if (res.exitCode > 0) conflicts.push(file);
+            }
+          }
+        }
+        if (!pick) {
+          pick = st[2] && st[3] ? st[2] : st[2] || st[3];
+          if (st[2] && st[3]) conflicts.push(file);
+          else if (st[1]) conflicts.push(file); // changed on one side, deleted on the other
+        }
+        // A mode of 0 drops the path's stages; then the merged version at stage 0.
+        lines.push(`0 ${'0'.repeat(pick.sha.length)}\t${file}`, `${pick.mode} ${pick.sha} 0\t${file}`);
+      }
+      await this.exec(['update-index', '-z', '--index-info'], { env, input: `${lines.join('\0')}\0`, writes: true, signal });
+      const { stdout } = await this.exec(['write-tree'], { env, writes: true, signal });
+      return { tree: stdout.trim(), conflicts, exact: false };
+    } finally {
+      for (const p of [tmpIndex, ...scratch]) fs.promises.rm(p, { force: true }).catch(() => {});
+    }
+  }
+
+  /** How many files differ between two revisions (or trees), counted like diffFiles lists them. */
+  async countChanges(from, to, opts = {}) {
+    from = this.tree(from);
+    checkRevs(from, to);
+    const { stdout } = await this.exec(['diff', '-M', '--no-ext-diff', '--no-textconv', '--name-only', '-z', from, to, '--'], { signal: opts.signal });
+    return stdout.split('\0').filter(Boolean).length;
+  }
+
   // ---------------------------------------------------------------------------
   // Remotes
 

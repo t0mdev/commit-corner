@@ -9,6 +9,12 @@ const { config, debounce, showError, shortSha, log, validMessageShas, escapeIcon
 const { openDiff, openMultiDiff } = require('../diffs');
 const { showCommit, showCommits, showRange } = require('../commands/historyCommands');
 const viewed = require('../viewed');
+const merges = require('../merges');
+
+/** A merge view named by the page (merges.js), else undefined. */
+const pageView = (v) => (typeof v === 'string' && /^(resolution|parent[1-9])$/.test(v) ? v : undefined);
+/** Where a commit's files of one view are kept (its first-parent files under the commit itself). */
+const cacheKey = (sha, view) => (view && view !== 'parent1' ? `${sha} ${view}` : sha);
 
 const VIEW_TYPE = 'commitCorner.graph';
 /** Commands the details pane may ask for; anything else from the webview is ignored. */
@@ -579,7 +585,8 @@ class GraphPanel {
       case 'openCommit':
         if (m.sha === WORKTREE_SHA) await vscode.commands.executeCommand('workbench.view.scm');
         else {
-          await showCommit(repo, m.sha);
+          // A merge's section names its view; else a merge asks which.
+          await showCommit(repo, m.sha, { view: pageView(m.view) });
           // Space in the sidebar: a preview, so the list keeps the keyboard.
           if (m.preview && this.compact) {
             await vscode.commands.executeCommand('commitCorner.graphView.focus');
@@ -623,7 +630,7 @@ class GraphPanel {
       case 'files':
         // The uncommitted changes are open: keep their list current as files change.
         if (m.sha === WORKTREE_SHA) this.wtOpen = true;
-        await this.sendFiles(m.sha);
+        await this.sendFiles(m.sha, { view: m.view });
         break;
       case 'activity':
         await vscode.commands.executeCommand('commitCorner.showActivity', { repoRoot: repo.root });
@@ -846,7 +853,7 @@ class GraphPanel {
   }
 
   /** The changed files under an expanded commit (or the working tree) in the sidebar. */
-  /** @param {{fresh?: boolean}} [o] fresh: false — the uncommitted files from the status just read */
+  /** @param {{fresh?: boolean, view?: string}} [o] fresh: false — the uncommitted files from the status just read; view: a merge's section */
   async sendFiles(sha, o = {}) {
     const repo = this.repo;
     // Tagged with the repository: the page drops a late answer about the one it showed before.
@@ -877,12 +884,46 @@ class GraphPanel {
         return;
       }
       if (typeof sha !== 'string' || !/^[0-9a-f]{40,64}$/.test(sha)) return;
-      const { parent, files } = await repo.getCommitFiles(sha);
-      post({ parent, files: this.withMarks(sha, files) });
+      const view = pageView(o.view);
+      if (view) {
+        // One section of a merge, opened.
+        const commit = await repo.getCommit(sha);
+        if (!merges.isMergeView(commit, view)) return;
+        const r = await merges.mergeViewFiles(repo, commit, view);
+        post({ view, parent: r.left, files: this.withMarks(sha, r.files, view, r.left) });
+        return;
+      }
+      const { commit, parent, files } = await repo.getCommitFiles(sha);
+      // A merge lists its views as sections (resolution open, the others when opened).
+      if (commit.parents.length > 1) post({ parent, files: [], merge: await this.mergeSections(repo, commit, files) });
+      else post({ parent, files: this.withMarks(sha, files) });
     } catch (e) {
-      log().warn(`Graph files of ${sha}: ${e.message}`);
-      post({ files: undefined, error: `Could not list the files: ${e.message}` });
+      log().warn(`Graph files of ${sha}${o.view ? ` (${pageView(o.view)})` : ''}: ${e.message}`);
+      post({ files: undefined, view: pageView(o.view), error: `Could not list the files: ${e.message}` });
     }
+  }
+
+  /**
+   * A merge's views for the page: each with what it shows and how many files; the resolution
+   * with its files (it is shown open). `firstFiles`: its first-parent files, already listed.
+   */
+  async mergeSections(repo, commit, firstFiles, signal) {
+    return Promise.all(merges.mergeViews(commit).map(async (view) => {
+      const s = { view, title: merges.viewTitle(view), detail: merges.viewDetail(commit, view), left: view === 'resolution' ? undefined : commit.parents[Number(view.slice(6)) - 1] };
+      try {
+        if (view === 'resolution') {
+          const r = await merges.mergeViewFiles(repo, commit, view, signal);
+          Object.assign(s, { left: r.left, exact: r.exact, count: r.files.length, files: this.withMarks(commit.sha, r.files, view, r.left) });
+          if (r.exact === false) s.note = merges.APPROXIMATE;
+        } else s.count = view === 'parent1' ? firstFiles.length : (await merges.countView(repo, commit, view, signal)).count;
+        s.countText = merges.countText(view, s.count, s.exact);
+      } catch (e) {
+        if (e && e.code === 'Cancelled') throw e;
+        log().warn(`Merge ${shortSha(commit.sha)}, ${view}: ${e.message}`);
+        s.error = `Unavailable: ${e.message}`;
+      }
+      return s;
+    }));
   }
 
   /** The configured user.email, to mark your own commits ("you"). */
@@ -903,8 +944,10 @@ class GraphPanel {
     }
     const node = { repoRoot: this.repo.root, sha: shas[shas.length - 1], shas };
     const one = shas.length === 1;
+    const merge = one && isSha(shas[0]) && (await this.repo.getCommit(shas[0]).catch(() => ({ parents: [] }))).parents.length === 2;
     const items = [
-      { label: one ? '$(diff-multiple) Show Changes' : `$(diff-multiple) Show Combined Changes (${shas.length})`, id: one ? 'commitCorner.showCommit' : 'commitCorner.showCommits' },
+      { label: one ? `$(diff-multiple) Show Changes${merge ? '…' : ''}` : `$(diff-multiple) Show Combined Changes (${shas.length})`, id: one ? 'commitCorner.showCommit' : 'commitCorner.showCommits' },
+      ...(merge ? [{ label: '$(git-compare) Show Merge Resolution', id: 'commitCorner.showMergeResolution' }] : []),
       ...(one ? [] : [{ label: '$(diff) Show Range Changes', id: 'commitCorner.showCommitRange' }]),
       { label: '$(git-commit) Cherry-pick', id: 'commitCorner.cherryPick' },
       { label: '$(discard) Revert…', id: 'commitCorner.revert' },
@@ -993,7 +1036,9 @@ class GraphPanel {
       }
       if (real.length === 1) {
         const [{ commit, parent, files }, signature] = await Promise.all([repo.getCommitFiles(real[0]), repo.getSignature(real[0]).catch(() => undefined)]);
-        post({ type: 'details', kind: 'commit', shas: real, commit, parent, files: this.withMarks(real[0], files), signature, summary: changeSummary(files), me: await this.userEmail() });
+        // A merge: its views as sections (merges.js), the resolution open.
+        const merge = commit.parents.length > 1 ? await this.mergeSections(repo, commit, files, controller.signal) : undefined;
+        post({ type: 'details', kind: 'commit', shas: real, commit, parent, files: this.withMarks(real[0], files), merge, signature, summary: changeSummary(files), me: await this.userEmail() });
       } else if (real.length > 1) {
         const { commits, files, exact, failed, approximate } = await repo.getMultiCommitChanges(real, { signal: controller.signal });
         post({ type: 'details', kind: 'multi', shas: real, commits: commits.map((c) => c.commit), files, exact, failed, approximate, summary: changeSummary(files) });
@@ -1028,8 +1073,11 @@ class GraphPanel {
     }
     if (m.kind === 'commit') {
       const { openCommitFileDiff, markOpened } = require('../commands/fileCommands');
-      await openCommitFileDiff(repo, m.sha, m.parent, f, { preserveFocus: keepFocus, viewColumn });
-      await markOpened(repo, m.sha, this.cachedFile(m.sha, f.path));
+      // A merge's resolution or other parent: against that side (and N stays in that list).
+      const view = pageView(m.view);
+      const base = view && view !== 'parent1' && isSha(m.parent) ? m.parent : undefined;
+      await openCommitFileDiff(repo, m.sha, m.parent, f, { preserveFocus: keepFocus, viewColumn, base, leftLabel: view === 'resolution' ? merges.AUTO_LABEL : undefined });
+      await markOpened(repo, m.sha, this.cachedFile(m.sha, f.path, undefined, view), true, base);
       return;
     }
     if (m.kind === 'multi') {
@@ -1049,19 +1097,21 @@ class GraphPanel {
    * A commit's files for the page, with their viewed-mark keys (vk) and which are not opened yet
    * (unviewed). The blob ids the marks key on stay here (filesCache), never round-trip the page.
    */
-  withMarks(sha, files) {
+  /** view, left: a merge's section (each file says which, and the side it opens against). */
+  withMarks(sha, files, view = undefined, left = undefined) {
     const on = viewed.marksUnviewed();
-    const keyed = files.map((f) => ({ ...f, vk: viewed.ChangeMarks.key(sha, f) }));
-    this.filesCache.delete(sha);
-    this.filesCache.set(sha, keyed);
+    const keyed = files.map((f) => ({ ...f, vk: viewed.ChangeMarks.key(sha, f), ...(view ? { view, base: left } : {}) }));
+    const key = cacheKey(sha, view);
+    this.filesCache.delete(key);
+    this.filesCache.set(key, keyed);
     // The 300 commits listed last (the uncommitted files stay: their marks need them).
     if (this.filesCache.size > 300) this.filesCache.delete([...this.filesCache.keys()].find((k) => k !== WORKTREE_SHA));
     return keyed.map(({ oldBlob, newBlob, ...f }) => ({ ...f, unviewed: on && !viewed.commitMarks().has(f.vk) ? true : undefined }));
   }
 
   /** File `relPath` of commit `sha` (or the uncommitted ones, by group) as last listed, else just its path. */
-  cachedFile(sha, relPath, group) {
-    const files = this.filesCache.get(sha);
+  cachedFile(sha, relPath, group, view = undefined) {
+    const files = this.filesCache.get(cacheKey(sha, view));
     return (files && files.find((f) => f.path === relPath && (group === undefined || f.group === group))) || { path: relPath };
   }
 
@@ -1097,6 +1147,7 @@ class GraphPanel {
     const marks = viewed.commitMarks();
     const counts = {};
     for (const [sha, files] of this.filesCache) {
+      if (sha.includes(' ')) continue; // a merge's other views: its count is of its first-parent files
       if (sha !== marked && !files.some((f) => keys.has(f.vk))) continue;
       const marked2 = files.filter((f) => f.vk); // what can be marked (as the page counts)
       counts[sha] = [marked2.filter((f) => marks.has(f.vk)).length, marked2.length];
@@ -1133,9 +1184,12 @@ class GraphPanel {
     const node = { repoRoot: this.repo.root, path: f.path, origPath: f.origPath || undefined, status: f.status };
     if (['merge', 'staged', 'unstaged', 'untracked'].includes(f.group)) node.group = f.group;
     if (sha) {
-      const known = this.cachedFile(sha, f.path);
+      const view = pageView(m.view);
+      const known = this.cachedFile(sha, f.path, undefined, view);
       Object.assign(node, { sha, commitViewed: sha, oldBlob: known.oldBlob, newBlob: known.newBlob });
       if (isSha(m.parent)) node.parent = m.parent;
+      if (view) node.view = view;
+      if (view && view !== 'parent1' && isSha(m.parent)) node.base = m.parent;
     }
     return node;
   }
@@ -1149,7 +1203,7 @@ class GraphPanel {
     switch (action) {
       case 'openChanges':
         // As a click does (beside the editor graph, and marked viewed).
-        if (node.sha) await this.openFile({ kind: 'commit', sha: node.sha, parent: node.parent, file: node });
+        if (node.sha) await this.openFile({ kind: 'commit', sha: node.sha, parent: node.parent, view: node.view, file: node });
         else await this.openFile({ kind: 'worktree', file: node });
         break;
       case 'openWorking': await run('commitCorner.openWorkingFile'); break;
@@ -1164,7 +1218,7 @@ class GraphPanel {
           if (known.vk) viewed.commitMarks().set([known.vk], action === 'markViewed');
           break;
         }
-        await require('../commands/fileCommands').markOpened(this.repo, node.sha, node, action === 'markViewed');
+        await require('../commands/fileCommands').markOpened(this.repo, node.sha, node, action === 'markViewed', node.base);
         break;
       case 'nextUnviewed': this.post({ type: 'nextUnviewed', sha: node.sha || WORKTREE_SHA, path: node.path, group: node.group }); break;
       case 'copyPath': await run('commitCorner.copyFilePath'); break;
@@ -1316,6 +1370,7 @@ function register(ctx) {
     await vscode.commands.executeCommand(target, node);
   });
   delegate('commitCorner.graph.showCommit', 'commitCorner.graph.openSelection');
+  delegate('commitCorner.graph.showMergeResolution', 'commitCorner.showMergeResolution');
   // The uncommitted work of the worktree at this commit (path looked up on the host).
   cmd('commitCorner.graph.worktreeChanges', async (arg) => {
     const panel = GraphPanel.forContext(arg);

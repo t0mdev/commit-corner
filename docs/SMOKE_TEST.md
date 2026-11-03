@@ -43,6 +43,7 @@ reloading the window. Use a scratch clone with a GitHub remote.
 
 ## Graph, history, PRs
 - [ ] Graph: lanes render; Ctrl+click two commits → Open Combined Diff opens the multi-diff editor.
+- [ ] A merge with a resolved conflict: its details pane lists Merge Resolution (open, the file marked *conflict*), Changes vs Parent 1 and 2 with counts; opening a file of the resolution shows the conflict markers on the left ("automatic merge" in the tab) and `N` stays in that list. Double-click the merge: the picker shows the counts, Enter opens the resolution. A clean merge: "is a clean merge" with buttons for the parents' changes.
 - [ ] Right-click a commit and a branch badge: the native context menus appear.
 - [ ] File History: select two revisions → Compare Selected Revisions.
 - [ ] Current-line blame shows after the line; the hover links work; Blame Before This Change opens the older revision.
