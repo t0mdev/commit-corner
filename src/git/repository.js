@@ -57,7 +57,10 @@ async function sweepRemergeFolders(root) {
     if (!name.startsWith('commit-corner-remerge-')) continue;
     const p = path.join(root, name);
     const st = await fs.promises.lstat(p).catch(() => undefined);
-    if (st && st.isDirectory() && Date.now() - st.mtimeMs > 36e5) await fs.promises.rm(p, { recursive: true, force: true }).catch(() => {});
+    // Only our own (mkdtemp: ours, 0700): in a shared /tmp, another user's folder could be made to
+    // lead elsewhere while it is removed.
+    const ours = st && (typeof process.getuid !== 'function' || (st.uid === process.getuid() && (st.mode & 0o077) === 0));
+    if (ours && st.isDirectory() && Date.now() - st.mtimeMs > 36e5) await fs.promises.rm(p, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -2203,16 +2206,17 @@ class Repository extends EventEmitter {
     }
     // A private folder (0700) for the temporary index and files, on the system's temporary disk
     // (fast also when the repository is on a slow one); removed below.
-    await sweepRemergeFolders(this.tempRoot || os.tmpdir());
+    sweepRemergeFolders(this.tempRoot || os.tmpdir()).catch(() => {}); // (in the background)
     const tmp = await fs.promises.mkdtemp(path.join(this.tempRoot || os.tmpdir(), 'commit-corner-remerge-'));
     const env = { GIT_INDEX_FILE: path.join(tmp, 'index') };
-    // (A split index would leave its shared part in the repository's git folder.)
-    const idx = ['-c', 'core.splitIndex=false'];
+    // (A split index would leave its shared part in the repository's git folder; a file system
+    // monitor has nothing to say about a private index.)
+    const idx = ['-c', 'core.splitIndex=false', '-c', 'core.fsmonitor=false'];
     let failed = false; // one worker failing (or Stop): the others end too, before cleaning up
     try {
       // Plumbing on a private index file: no locks on the real index, safe outside the write queue.
       await this.exec([...idx, 'read-tree', '-i', '-m', '--aggressive', base, ours, theirs], { env, writes: true, signal });
-      const unmerged = P.parseUnmerged((await this.exec(['ls-files', '-u', '-z'], { env, signal })).stdout);
+      const unmerged = P.parseUnmerged((await this.exec([...idx, 'ls-files', '-u', '-z'], { env, signal })).stdout);
       if (!unmerged.size) return { tree: (await this.exec([...idx, 'write-tree'], { env, writes: true, signal })).stdout.trim(), conflicts: [], exact: false };
       // The files changed on both sides would come over the network one at a time in a partial
       // clone (blob by blob): refuse rather than surprise (a merge with none needs no contents).
@@ -2237,7 +2241,8 @@ class Repository extends EventEmitter {
       // without the user's config (it reads merge.conflictStyle itself and dies on a style it does
       // not know, such as zdiff3 before 2.35, before any -c could override it).
       const mergeFile = ['merge-file', '-p', ...styleArgs, '-L', ours, '-L', base, '-L', theirs];
-      const outside = { cwd: tmp, env: { GIT_CONFIG_NOSYSTEM: '1', HOME: tmp, XDG_CONFIG_HOME: tmp, GIT_CONFIG_GLOBAL: path.join(tmp, 'none'), GIT_CEILING_DIRECTORIES: path.dirname(tmp) } };
+      // (GIT_DIR names no repository: git does not look for one above, whatever the paths are.)
+      const outside = { cwd: tmp, env: { GIT_DIR: path.join(tmp, 'none'), GIT_CONFIG_NOSYSTEM: '1', HOME: tmp, XDG_CONFIG_HOME: tmp, GIT_CONFIG_GLOBAL: path.join(tmp, 'none'), ...(path.dirname(tmp).includes(path.delimiter) ? {} : { GIT_CEILING_DIRECTORIES: path.dirname(tmp) }) } };
       const empty = Buffer.alloc(0);
       const merged = new Map(); // path -> {out: file with the result, conflicts: number}
       let next = 0;

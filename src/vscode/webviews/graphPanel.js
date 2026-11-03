@@ -630,7 +630,7 @@ class GraphPanel {
       case 'files':
         // The uncommitted changes are open: keep their list current as files change.
         if (m.sha === WORKTREE_SHA) this.wtOpen = true;
-        await this.sendFiles(m.sha, { view: m.view });
+        await this.sendFiles(m.sha, { view: m.view, from: m.from === 'details' ? 'details' : undefined });
         break;
       case 'activity':
         await vscode.commands.executeCommand('commitCorner.showActivity', { repoRoot: repo.root });
@@ -892,10 +892,15 @@ class GraphPanel {
       const view = pageView(o.view);
       // An expanded row's git work stops when the row is closed (filesClosed) or opened again;
       // a section opened in it goes with the row.
+      // A section of the details pane goes with the selection (its own controller).
       if (!this.rowControllers) this.rowControllers = new Map();
-      if (!view && this.rowControllers.has(sha)) this.rowControllers.get(sha).abort();
-      if (!view || !this.rowControllers.has(sha)) this.rowControllers.set(sha, new AbortController());
-      const { signal } = this.rowControllers.get(sha);
+      let signal;
+      if (view && o.from === 'details') signal = this.detailsController ? this.detailsController.signal : undefined;
+      else {
+        if (!view && this.rowControllers.has(sha)) this.rowControllers.get(sha).abort();
+        if (!view || !this.rowControllers.has(sha)) this.rowControllers.set(sha, new AbortController());
+        ({ signal } = this.rowControllers.get(sha));
+      }
       if (view) {
         // One section of a merge, opened.
         const commit = await repo.getCommit(sha);
@@ -916,7 +921,11 @@ class GraphPanel {
         post({ parent, files: [], merge: await this.mergeSections(repo, commit, files, signal) });
       } else post({ parent, files: this.withMarks(sha, files) });
     } catch (e) {
-      if (e && e.code === 'Cancelled') return; // (a merge's row closed meanwhile)
+      // (A merge's row closed or opened again, another commit selected: the page asks again if needed.)
+      if (e && e.code === 'Cancelled') {
+        if (o.view) post({ view: pageView(o.view), cancelled: true, from: o.from === 'details' ? 'details' : undefined });
+        return;
+      }
       log().warn(`Graph files of ${sha}${o.view ? ` (${pageView(o.view)})` : ''}: ${e.message}`);
       post({ files: undefined, view: pageView(o.view), error: `Could not list the files: ${e.message}` });
     }
@@ -1302,6 +1311,7 @@ class GraphPanel {
     if (GraphPanel.current === this) GraphPanel.current = undefined;
     if (GraphPanel.sidebar === this) GraphPanel.sidebar = undefined;
     if (this.detailsController) this.detailsController.abort();
+    for (const c of (this.rowControllers || new Map()).values()) c.abort();
     if (this.loadController) this.loadController.abort();
     this.disposables.forEach((d) => d.dispose());
   }

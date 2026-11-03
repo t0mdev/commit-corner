@@ -1011,7 +1011,8 @@
   function collapseAll() {
     if (!expanded.size) return;
     const hadFiles = document.activeElement && document.activeElement.closest && document.activeElement.closest('.files-block');
-    if (expanded.has(WORKTREE_SHA)) vscode.postMessage({ type: 'filesClosed', sha: WORKTREE_SHA });
+    // Every row closed: the staging area may go, a merge's git work stops.
+    for (const sha of expanded.keys()) vscode.postMessage({ type: 'filesClosed', sha });
     expanded.clear();
     persist({ expanded: [] });
     relayout();
@@ -2491,7 +2492,7 @@
     const sha = m.commit.sha;
     if (detailsOpen.sha !== sha) detailsOpen = { sha, views: new Set(m.merge.filter((x) => x.open).map((x) => x.view)), pending: m.merge.some((x) => x.pending) };
     else if (!m.merge.some((x) => x.pending)) detailsOpen.pending = false;
-    askForOpenSections(sha, m.merge, (v) => detailsOpen.views.has(v));
+    askForOpenSections(sha, m.merge, (v) => detailsOpen.views.has(v), 'details');
     const box = el('div', 'merge-sections');
     for (const sec of m.merge) {
       const open = detailsOpen.views.has(sec.view);
@@ -2504,22 +2505,26 @@
       toggle.append(chev, ui.icon(sec.view === 'resolution' ? 'compare' : 'diff', { size: 13 }), el('span', 'merge-title', sec.title));
       if (sec.side) toggle.appendChild(el('span', 'dim merge-side', ` · ${sec.side}`));
       toggle.appendChild(el('span', 'dim', ` · ${sec.error ? 'unavailable' : sec.countText || ''}`));
-      toggle.title = `${sec.detail}${sec.note ? `\n(${sec.note})` : ''}${sec.error ? `\n${sec.error}` : ''}\nEnter: open or close · ↑ ↓: between sections and files${sec.count ? ' · A: all its files in the multi-diff editor' : ''}`;
+      toggle.title = `${sec.detail}${sec.note ? `\n(${sec.note})` : ''}${sec.error ? `\n${sec.error}` : ''}\nEnter or ← →: open or close · ↑ ↓: between sections and files${sec.count ? ' · A: all its files in the multi-diff editor' : ''}`;
       toggle.dataset.focusKey = `merge:${sec.view}`;
       toggle.addEventListener('keydown', (e) => {
         if (chordKeys.has(e)) return;
         if (e.key.toLowerCase() === 'a' && !e.ctrlKey && !e.metaKey && !e.altKey && sec.count) {
           e.preventDefault();
           vscode.postMessage({ type: 'openCommit', sha, view: sec.view });
-        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-          // ↓ into its files (open) or to the next header; ↑ to the previous section's end.
+        } else if ((e.key === 'ArrowLeft' && open) || (e.key === 'ArrowRight' && !open)) {
+          // As a tree: ← closes it, → opens it (→ on an open one: into its files, below).
+          e.preventDefault();
+          flip();
+        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowRight') {
+          // ↓ (→) into its files (open) or to the next header; ↑ to the previous section's end.
           e.preventDefault();
           const heads = [...detailsPane.querySelectorAll('.merge-toggle')];
           const at = heads.indexOf(toggle);
-          if (e.key === 'ArrowDown') {
+          if (e.key !== 'ArrowUp') {
             const first = toggle.closest('.merge-head').nextElementSibling;
             const file = first && first.classList.contains('files') ? first.querySelector('.file') : null;
-            (file || heads[at + 1] || toggle).focus();
+            (file || (e.key === 'ArrowDown' && heads[at + 1]) || toggle).focus();
           } else if (at > 0) {
             const prev = heads[at - 1];
             const list = prev.closest('.merge-head').nextElementSibling;
@@ -2529,18 +2534,19 @@
         }
       });
       toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-      toggle.addEventListener('click', () => {
+      const flip = () => {
         detailsOpen.pending = false; // (your choice now, kept when the counts arrive)
         if (open) detailsOpen.views.delete(sec.view);
         else {
           detailsOpen.views.add(sec.view);
           if (!sec.files && !sec.error && !sec.asked) {
             sec.asked = true;
-            vscode.postMessage({ type: 'files', sha, view: sec.view });
+            vscode.postMessage({ type: 'files', sha, view: sec.view, from: 'details' });
           }
         }
         renderDetails(shownDetails);
-      });
+      };
+      toggle.addEventListener('click', flip);
       head.appendChild(toggle);
       if (sec.count) {
         const all = button('', `Open the ${sec.count} file${sec.count === 1 ? '' : 's'} of ${sec.title} in the multi-diff editor (A)`, () => vscode.postMessage({ type: 'openCommit', sha, view: sec.view }), 'diff');
@@ -2558,11 +2564,11 @@
   }
 
   /** Sections shown open without their files (and not counting still): ask for them. */
-  function askForOpenSections(sha, sections, isOpen) {
+  function askForOpenSections(sha, sections, isOpen, from) {
     for (const sec of sections) {
       if (sec.pending || sec.files || sec.error || sec.asked || !isOpen(sec.view)) continue;
       sec.asked = true;
-      vscode.postMessage({ type: 'files', sha, view: sec.view });
+      vscode.postMessage({ type: 'files', sha, view: sec.view, from });
     }
   }
 
@@ -2577,6 +2583,22 @@
   /** A merge section's files arrived: into its expanded row and the details pane. */
   function mergeFilesArrived(m) {
     if (m.repoRoot && m.repoRoot !== repoRoot) return;
+    // Stopped on the way (its row closed or opened again): asked again where it is still open.
+    if (m.cancelled) {
+      const e = expanded.get(m.sha);
+      const sec = e && e.merge && e.merge.find((x) => x.view === m.view);
+      if (sec && m.from !== 'details') {
+        sec.asked = false;
+        askForOpenSections(m.sha, e.merge, (v) => !e.collapsed.has(`#${v}`));
+      }
+      const d = shownDetails;
+      const dsec = m.from === 'details' && d && d.kind === 'commit' && d.merge && d.commit.sha === m.sha && d.merge.find((x) => x.view === m.view);
+      if (dsec) {
+        dsec.asked = false;
+        renderDetails(d);
+      }
+      return;
+    }
     const e = expanded.get(m.sha);
     const sec = e && e.merge && e.merge.find((x) => x.view === m.view);
     if (sec) {
