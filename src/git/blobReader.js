@@ -12,8 +12,10 @@ const { spawnGit } = require('./exec');
  * go through one-shot commands instead.
  */
 class BlobReader {
-  constructor(cwd) {
+  /** @param {string} cwd @param {object} [env] extra environment (the repository's scratch objects) */
+  constructor(cwd, env) {
     this.cwd = cwd;
+    this.env = env;
     this.proc = undefined;
     this.pending = [];
     /** Unparsed output: a list of chunks (concatenating per chunk would be quadratic for big blobs). */
@@ -34,7 +36,7 @@ class BlobReader {
   }
 
   start() {
-    const proc = spawnGit(['cat-file', '--batch'], { cwd: this.cwd });
+    const proc = spawnGit(['cat-file', '--batch'], { cwd: this.cwd, env: this.env });
     proc.stdout.on('data', (d) => {
       this.chunks.push(d);
       this.length += d.length;

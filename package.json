@@ -436,7 +436,7 @@
       },
       {
         "command": "commitCorner.showCommitParent2",
-        "title": "Show Changes Against Second Parent (Merge)",
+        "title": "Show Changes vs Parent 2",
         "category": "Commit Corner"
       },
       {
@@ -3744,7 +3744,7 @@
         },
         {
           "command": "commitCorner.showCommit",
-          "when": "viewItem =~ /^commit(:merge)?$/",
+          "when": "viewItem =~ /^commit(:merge|:octopus)?$/",
           "group": "inline@1"
         },
         {
@@ -4019,7 +4019,7 @@
         },
         {
           "command": "commitCorner.showCommitParent2",
-          "when": "viewItem == commit:merge && !listMultiSelection",
+          "when": "viewItem =~ /^commit:(merge|octopus)$/ && !listMultiSelection",
           "group": "1_show@1b"
         },
         {
@@ -4174,12 +4174,12 @@
         },
         {
           "command": "commitCorner.markCommitViewed",
-          "when": "viewItem =~ /^commit(:merge)?$/ && config.commitCorner.markUnviewedFiles",
+          "when": "viewItem =~ /^commit(:merge|:octopus)?$/ && config.commitCorner.markUnviewedFiles",
           "group": "8_viewed@1"
         },
         {
           "command": "commitCorner.markCommitUnviewed",
-          "when": "viewItem =~ /^commit(:merge)?$/ && config.commitCorner.markUnviewedFiles",
+          "when": "viewItem =~ /^commit(:merge|:octopus)?$/ && config.commitCorner.markUnviewedFiles",
           "group": "8_viewed@2"
         },
         {

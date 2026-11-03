@@ -888,15 +888,22 @@ class GraphPanel {
       if (view) {
         // One section of a merge, opened.
         const commit = await repo.getCommit(sha);
-        if (!merges.isMergeView(commit, view)) return;
+        if (!merges.isMergeView(commit, view)) {
+          post({ view, files: undefined, error: 'Not a view of this commit.' });
+          return;
+        }
         const r = await merges.mergeViewFiles(repo, commit, view);
         post({ view, parent: r.left, files: this.withMarks(sha, r.files, view, r.left) });
         return;
       }
       const { commit, parent, files } = await repo.getCommitFiles(sha);
-      // A merge lists its views as sections (resolution open, the others when opened).
-      if (commit.parents.length > 1) post({ parent, files: [], merge: await this.mergeSections(repo, commit, files) });
-      else post({ parent, files: this.withMarks(sha, files) });
+      // A merge lists its views as sections (resolution open, the others when opened): their
+      // titles at once, then what git found.
+      if (commit.parents.length > 1) {
+        this.withMarks(sha, files); // (its viewed count is of these)
+        if (!repo.knownMergeResolution(sha)) post({ parent, files: [], merge: merges.pendingSections(commit) });
+        post({ parent, files: [], merge: await this.mergeSections(repo, commit, files) });
+      } else post({ parent, files: this.withMarks(sha, files) });
     } catch (e) {
       log().warn(`Graph files of ${sha}${o.view ? ` (${pageView(o.view)})` : ''}: ${e.message}`);
       post({ files: undefined, view: pageView(o.view), error: `Could not list the files: ${e.message}` });
@@ -904,12 +911,15 @@ class GraphPanel {
   }
 
   /**
-   * A merge's views for the page: each with what it shows and how many files; the resolution
-   * with its files (it is shown open). `firstFiles`: its first-parent files, already listed.
+   * A merge's views for the page: each with what it shows, which side (`80f222b “subject”`) and
+   * how many files; `open` the one shown open: the resolution, or (a clean merge) parent 1,
+   * whose files come along. `firstFiles`: its first-parent files, already listed.
    */
   async mergeSections(repo, commit, firstFiles, signal) {
-    return Promise.all(merges.mergeViews(commit).map(async (view) => {
-      const s = { view, title: merges.viewTitle(view), detail: merges.viewDetail(commit, view), left: view === 'resolution' ? undefined : commit.parents[Number(view.slice(6)) - 1] };
+    const sides = await merges.parentSides(repo, commit, signal);
+    const sections = await Promise.all(merges.mergeViews(commit).map(async (view) => {
+      const i = view === 'resolution' ? -1 : Number(view.slice(6)) - 1;
+      const s = { view, title: merges.viewTitle(view), detail: merges.viewDetail(commit, view, sides), left: i < 0 ? undefined : commit.parents[i], side: i < 0 ? undefined : sides[i] };
       try {
         if (view === 'resolution') {
           const r = await merges.mergeViewFiles(repo, commit, view, signal);
@@ -924,6 +934,14 @@ class GraphPanel {
       }
       return s;
     }));
+    const resolution = sections.find((x) => x.view === 'resolution');
+    if (resolution && resolution.count) resolution.open = true;
+    else {
+      // Nothing to see in the resolution (a clean merge, or none to have): what it brought in.
+      const first = sections.find((x) => x.view === 'parent1');
+      Object.assign(first, { open: true, files: this.withMarks(commit.sha, firstFiles, 'parent1', commit.parents[0]) });
+    }
+    return sections;
   }
 
   /** The configured user.email, to mark your own commits ("you"). */
@@ -944,7 +962,7 @@ class GraphPanel {
     }
     const node = { repoRoot: this.repo.root, sha: shas[shas.length - 1], shas };
     const one = shas.length === 1;
-    const merge = one && isSha(shas[0]) && (await this.repo.getCommit(shas[0]).catch(() => ({ parents: [] }))).parents.length === 2;
+    const merge = one && m.merge === true; // (the page knows the row's parents; the command checks again)
     const items = [
       { label: one ? `$(diff-multiple) Show Changes${merge ? '…' : ''}` : `$(diff-multiple) Show Combined Changes (${shas.length})`, id: one ? 'commitCorner.showCommit' : 'commitCorner.showCommits' },
       ...(merge ? [{ label: '$(git-compare) Show Merge Resolution', id: 'commitCorner.showMergeResolution' }] : []),
@@ -1036,9 +1054,12 @@ class GraphPanel {
       }
       if (real.length === 1) {
         const [{ commit, parent, files }, signature] = await Promise.all([repo.getCommitFiles(real[0]), repo.getSignature(real[0]).catch(() => undefined)]);
-        // A merge: its views as sections (merges.js), the resolution open.
-        const merge = commit.parents.length > 1 ? await this.mergeSections(repo, commit, files, controller.signal) : undefined;
-        post({ type: 'details', kind: 'commit', shas: real, commit, parent, files: this.withMarks(real[0], files), merge, signature, summary: changeSummary(files), me: await this.userEmail() });
+        const marked = this.withMarks(real[0], files);
+        const merge = commit.parents.length > 1;
+        // A merge: the details at once with its views as sections still counting (merges.js), then
+        // the sections as git found them (the resolution open). Its own file list is not shown.
+        post({ type: 'details', kind: 'commit', shas: real, commit, parent, files: merge ? [] : marked, merge: merge ? merges.pendingSections(commit) : undefined, signature, summary: changeSummary(files), me: await this.userEmail() });
+        if (merge) post({ type: 'mergeSections', sha: commit.sha, merge: await this.mergeSections(repo, commit, files, controller.signal) });
       } else if (real.length > 1) {
         const { commits, files, exact, failed, approximate } = await repo.getMultiCommitChanges(real, { signal: controller.signal });
         post({ type: 'details', kind: 'multi', shas: real, commits: commits.map((c) => c.commit), files, exact, failed, approximate, summary: changeSummary(files) });
@@ -1074,9 +1095,16 @@ class GraphPanel {
     if (m.kind === 'commit') {
       const { openCommitFileDiff, markOpened } = require('../commands/fileCommands');
       // A merge's resolution or other parent: against that side (and N stays in that list).
+      // A merge's view: its side as git has it (not as the page says).
       const view = pageView(m.view);
-      const base = view && view !== 'parent1' && isSha(m.parent) ? m.parent : undefined;
-      await openCommitFileDiff(repo, m.sha, m.parent, f, { preserveFocus: keepFocus, viewColumn, base, leftLabel: view === 'resolution' ? merges.AUTO_LABEL : undefined });
+      let left = m.parent;
+      if (view) {
+        const commit = await repo.getCommit(m.sha);
+        if (!merges.isMergeView(commit, view)) return;
+        left = view === 'resolution' ? (await repo.getMergeResolution(commit.sha, { commit })).tree : commit.parents[Number(view.slice(6)) - 1];
+      }
+      const base = view && view !== 'parent1' ? left : undefined;
+      await openCommitFileDiff(repo, m.sha, left, f, { preserveFocus: keepFocus, viewColumn, base, leftLabel: view === 'resolution' ? merges.AUTO_LABEL : undefined });
       await markOpened(repo, m.sha, this.cachedFile(m.sha, f.path, undefined, view), true, base);
       return;
     }
@@ -1220,7 +1248,7 @@ class GraphPanel {
         }
         await require('../commands/fileCommands').markOpened(this.repo, node.sha, node, action === 'markViewed', node.base);
         break;
-      case 'nextUnviewed': this.post({ type: 'nextUnviewed', sha: node.sha || WORKTREE_SHA, path: node.path, group: node.group }); break;
+      case 'nextUnviewed': this.post({ type: 'nextUnviewed', sha: node.sha || WORKTREE_SHA, path: node.path, group: node.group, view: node.view }); break;
       case 'copyPath': await run('commitCorner.copyFilePath'); break;
       case 'reveal': await run('commitCorner.revealFileInExplorer'); break;
       default: break;

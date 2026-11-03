@@ -29,7 +29,9 @@ function fileTarget(manager, uri) {
   if (!uri) return undefined;
   if (uri.scheme === SCHEME) {
     const q = fromGitUri(uri);
-    return { repo: manager.getRepository(q.repo), rel: q.path, ref: q.ref };
+    // A merge resolution's "automatic merge" side is a tree made for viewing, not a commit:
+    // history and comparisons go by the file itself.
+    return { repo: manager.getRepository(q.repo), rel: q.path, ref: q.rev === merges.AUTO_LABEL ? undefined : q.ref };
   }
   const repo = manager.getRepositoryForUri(uri);
   if (!repo) return undefined;
@@ -49,7 +51,7 @@ async function showCommit(repo, sha, opts = {}) {
     if (view) await merges.openMergeView(repo, commit, view);
     return;
   }
-  const { parent, files } = await repo.getCommitFiles(commit.sha);
+  const { parent, files } = await repo.getCommitFiles(commit.sha, commit);
   await openMultiDiff(repo, `${shortSha(commit.sha)} — ${commit.subject}`, files.map((f) => ({
     path: f.path,
     leftRef: f.status === 'A' ? null : parent || EMPTY_TREE,

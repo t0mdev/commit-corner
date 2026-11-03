@@ -190,7 +190,8 @@ function register(ctx) {
       } catch {
         return undefined;
       }
-      if (q.empty || !isFullSha(q.ref)) return undefined;
+      // (Not on a merge resolution's "automatic merge" side: a tree made for viewing, no commit.)
+      if (q.empty || !isFullSha(q.ref) || q.rev === 'automatic merge') return undefined;
       repo = manager.getRepository(q.repo);
       if (!repo) return undefined;
       ref = q.ref;

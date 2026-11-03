@@ -178,7 +178,7 @@
 .files-title { font-weight: 600; margin: 8px 0 4px; }
 .merge-sections { margin-top: 6px; }
 .merge-head { display: flex; align-items: center; gap: 4px; margin: 6px 0 2px; }
-.merge-toggle { display: inline-flex; align-items: center; gap: 4px; flex: 1; min-width: 0; padding: 2px 4px; border: none; border-radius: 2px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.merge-toggle { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 2px 4px; border: none; border-radius: 2px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .merge-toggle:hover { background: var(--vscode-list-hoverBackground); }
 .merge-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
 .merge-toggle .merge-title { font-weight: 600; }

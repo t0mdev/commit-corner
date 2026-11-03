@@ -121,12 +121,66 @@ suite('Commit Corner in VS Code', () => {
     const repo = api.manager.repositories[0];
     const merge = makeMerge();
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
-    const shown = vscode.commands.executeCommand('commitCorner.showCommit', { repoRoot: repo.root, sha: merge });
-    await sleep(800); // the picker is up (its counts may still be coming)
-    await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
-    await shown;
-    const input = await until(activeMultiDiff, 'a multi-diff editor');
+    const input = await pickAndAccept({ repoRoot: repo.root, sha: merge });
     assert.strictEqual(JSON.parse(input.textDiffs[0].original.query).rev, 'automatic merge');
+  });
+
+  /** Show Changes on a commit, Enter in the picker once it is up: the multi-diff it opens. */
+  async function pickAndAccept(node) {
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    const shown = vscode.commands.executeCommand('commitCorner.showCommit', node);
+    await sleep(300); // (the counts, known already, are in)
+    // Enter until the picker took it (before it is up, Enter does nothing).
+    const input = await until(async () => {
+      await vscode.commands.executeCommand('workbench.action.acceptSelectedQuickOpenItem');
+      const d = activeMultiDiff();
+      return d && d.textDiffs.length ? d : undefined;
+    }, 'a multi-diff editor from the picker');
+    await shown;
+    return input;
+  }
+
+  test('a clean merge: Enter in the picker opens what it brought in (Changes vs Parent 1)', async () => {
+    const repo = api.manager.repositories[0];
+    const base = git('rev-parse', 'HEAD');
+    const index = path.join(require('os').tmpdir(), `cc-clean-${process.pid}`);
+    const env = { ...process.env, GIT_INDEX_FILE: index, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@x', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@x' };
+    const run = (args, input) => execFileSync('git', args, { cwd: root(), env, input, encoding: 'utf8' }).trim();
+    const commit = (parent, file, text, msg) => {
+      run(['read-tree', parent]);
+      run(['update-index', '--add', '--cacheinfo', `100644,${run(['hash-object', '-w', '--stdin'], text)},${file}`]);
+      return run(['commit-tree', run(['write-tree']), '-p', parent, '-m', msg]);
+    };
+    const one = commit(base, 'clean-one.txt', '1\n', 'one');
+    // (A changed file, not an added one: the tab lists only diffs with two sides.)
+    const two = commit(base, 'b.txt', 'b\nclean two\n', 'two');
+    run(['read-tree', one]);
+    run(['update-index', '--add', '--cacheinfo', `100644,${run(['hash-object', '-w', '--stdin'], 'b\nclean two\n')},b.txt`]);
+    const merge = run(['commit-tree', run(['write-tree']), '-p', one, '-p', two, '-m', 'Clean merge']);
+    fs.rmSync(index, { force: true });
+    assert.deepStrictEqual((await repo.getMergeResolution(merge)).files, [], 'a clean merge');
+    const input = await pickAndAccept({ repoRoot: repo.root, sha: merge });
+    assert.deepStrictEqual(input.textDiffs.map((d) => path.basename(d.modified.fsPath)), ['b.txt']);
+    assert.strictEqual(JSON.parse(input.textDiffs[0].original.query).ref, one, 'against parent 1');
+    assert.strictEqual(JSON.parse(input.textDiffs[0].modified.query).ref, merge);
+  });
+
+  test('N in a merge resolution\'s diff stays in the resolution', async () => {
+    const repo = api.manager.repositories[0];
+    const merge = makeMerge();
+    const r = await repo.getMergeResolution(merge);
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await vscode.commands.executeCommand('commitCorner.openCommitFile', { repoRoot: repo.root, sha: merge, path: 'mr.txt', status: 'M', leftRef: r.tree, viewedSha: merge, base: r.tree, leftLabel: 'automatic merge' });
+    const tab = await until(() => {
+      const t = vscode.window.tabGroups.activeTabGroup.activeTab;
+      return t && t.input instanceof vscode.TabInputTextDiff ? t : undefined;
+    }, 'the resolution diff');
+    assert.strictEqual(JSON.parse(tab.input.modified.query).base, r.tree);
+    assert.match(tab.label, /automatic merge ↔/);
+    // Its only file is viewed now: N says so for the resolution (and opens nothing of parent 1's).
+    await vscode.commands.executeCommand('commitCorner.nextUnviewedFile');
+    await sleep(300);
+    assert.strictEqual(vscode.window.tabGroups.activeTabGroup.activeTab, tab, 'still the same diff');
   });
 
   test('a merge in a tree: Merge Resolution open, the parents\' changes closed with their counts', async () => {
@@ -134,7 +188,11 @@ suite('Commit Corner in VS Code', () => {
     const repo = api.manager.repositories[0];
     const merge = makeMerge();
     const sections = await new CommitNode(repo, await repo.getCommit(merge)).getChildren();
-    const items = await Promise.all(sections.map((s) => s.getTreeItem()));
+    // Drawn at once (counting), drawn again when git has the answer.
+    const first = sections.map((s) => s.getTreeItem());
+    assert.match(first[0].description, /counting/);
+    await Promise.all(sections.map((s) => s.loading || s.counting));
+    const items = sections.map((s) => s.getTreeItem());
     assert.deepStrictEqual(items.map((i) => i.label), ['Merge Resolution', 'Changes vs Parent 1', 'Changes vs Parent 2']);
     assert.deepStrictEqual(items.map((i) => i.collapsibleState), [vscode.TreeItemCollapsibleState.Expanded, vscode.TreeItemCollapsibleState.Collapsed, vscode.TreeItemCollapsibleState.Collapsed]);
     assert.match(items[0].description, /^1 file/);

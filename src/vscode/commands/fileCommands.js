@@ -208,7 +208,7 @@ function viewColumnOf(node) {
  */
 async function withBlobs(repo, sha, file, base) {
   if (file.oldBlob && file.newBlob) return file;
-  const files = isFullSha(base) ? await repo.diffFiles(base, sha, { blobs: true }) : (await repo.getCommitFiles(sha)).files;
+  const files = isFullSha(base) ? (await require('../merges').filesAgainst(repo, sha, base)).files : (await repo.getCommitFiles(sha)).files;
   return files.find((x) => x.path === file.path);
 }
 
@@ -250,7 +250,8 @@ async function openCommitFileDiff(repo, sha, parent, f, o = {}) {
     leftRef: f.status === 'A' ? null : parent || EMPTY_TREE,
     leftPath: f.origPath || f.path,
     rightRef: f.status === 'D' ? null : sha,
-    title: `${f.path.split('/').pop()} (${shortSha(sha)})`,
+    // Against another side than the first parent: the title says which ("automatic merge ↔ …").
+    title: `${f.path.split('/').pop()} (${o.leftLabel ? `${o.leftLabel} ↔ ` : o.base ? `${shortSha(o.base)} ↔ ` : ''}${shortSha(sha)})`,
     preserveFocus: !!o.preserveFocus,
     preview: o.preview,
     viewColumn: o.viewColumn,
@@ -464,11 +465,9 @@ function register(ctx) {
     let files;
     let leftLabel;
     if (base) {
-      // Not one of the commit's parents: the automatic merge of its resolution.
-      const commit = await repo.getCommit(sha);
-      if (!commit.parents.includes(base)) leftLabel = require('../merges').AUTO_LABEL;
+      // A merge's resolution (its automatic merge, labelled so) or another parent: that list.
       parent = base;
-      files = await repo.diffFiles(base, sha, { blobs: true });
+      ({ files, leftLabel } = await require('../merges').filesAgainst(repo, sha, base));
     } else ({ parent, files } = await repo.getCommitFiles(sha));
     const next = nextUnviewedOf(sha, files, current);
     if (!next) {

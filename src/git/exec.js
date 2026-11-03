@@ -155,6 +155,12 @@ function git(args, opts = {}) {
     // No inherited editor (GIT_EDITOR=vim, …) may hang a child process: callers that want an
     // editor pass one explicitly.
     env.GIT_EDITOR = (opts.env && opts.env.GIT_EDITOR) || 'true';
+    // Stopped before it started: no process at all.
+    if (opts.signal && opts.signal.aborted) {
+      if (lease) lease.release();
+      reject(new GitError({ args, exitCode: null, stdout: '', stderr: 'Cancelled', cwd: opts.cwd }));
+      return;
+    }
     let child;
     try {
       // Keep output parseable regardless of user config; patches always use a/ b/ prefixes.

@@ -164,6 +164,11 @@ function register(ctx, view) {
     if (editor.document.uri.scheme === SCHEME) {
       // A file opened at a revision: its line numbers belong to that revision.
       const q = fromGitUri(editor.document.uri);
+      if (q.rev === 'automatic merge') {
+        // A merge resolution's left side: git's merge done again, with no history of its own.
+        vscode.window.showInformationMessage('Line History works on a commit\'s side of the diff: the automatic merge is git\'s merge done again, not a commit.');
+        return;
+      }
       if (q.ref && /^[0-9a-f]{40,64}/.test(q.ref)) ref = q.ref;
     } else if (editor.document.uri.scheme === 'file') {
       // git log -L works on HEAD's version of the file: map the selection through uncommitted edits.

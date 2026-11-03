@@ -138,6 +138,18 @@ These hold everywhere and have tests (`test/regressions.test.js`):
   it, and `ownsGitDir` alone refuses embedded bare repositories); the
   rebase-todo editor and the `commitcorner:` file system only use open
   repositories.
+- **Looking changes nothing.** Merge Resolution merges a merge's parents
+  again (`merge-tree --write-tree`; on git < 2.38 a private index, `merge-file`
+  and `hash-object`) without the real index, working tree or refs. The objects
+  it makes go to `<git dir>/commit-corner-objects` (`GIT_OBJECT_DIRECTORY`,
+  the repository's objects as an alternate), which every read of the
+  extension sees (`GIT_ALTERNATE_OBJECT_DIRECTORIES`) and git alone does not:
+  no unreachable loose objects in the repository for `gc` to warn about. It is
+  emptied when a session finds it older than a week; temporary folders
+  (`commit-corner-remerge-*`) left by an interrupted session go after an hour.
+  As with `git merge`, merge drivers set up in your git config run when
+  `.gitattributes` names them (on git >= 2.38; the fallback runs none); a
+  repository cannot define a driver's command itself.
 - **A commit cannot forge another.** Log records end in NUL, or are framed by
   a random per-call nonce (`framedLog`) when more output follows each commit;
   git's own fields (SHAs, dates, refs) come before the text an author chose.

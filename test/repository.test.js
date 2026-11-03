@@ -351,20 +351,25 @@ for (const [name, how] of [['merge-tree --write-tree (git >= 2.38)', 'mergeTree'
     const { r, repo } = await setup(t);
     const m = mergeScenario(r);
     const [p1, p2] = r.git('log', '-1', '--format=%P', m).split(' ');
+    const loose = r.git('count-objects');
+    await repo.prepareScratchObjects();
     const merged = await repo[how](p1, p2);
     assert.match(merged.tree, /^[0-9a-f]{40}$/);
     assert.deepEqual(merged.conflicts.sort(), ['d', 'f']);
     assert.equal(merged.exact, how === 'mergeTree');
     // git's own merge: the conflict with markers, the clean three-way merge, the changed side of d.
-    const f = r.git('show', `${merged.tree}:f`);
-    assert.match(f, new RegExp(`^a\\n<<<<<<< ${p1}\\nB1\\n=======\\nB2\\n>>>>>>> ${p2}\\nc$`));
-    assert.equal(r.git('show', `${merged.tree}:h`), '1\n2x\n3\n4\n5\n6x\n7');
-    assert.equal(r.git('show', `${merged.tree}:d`), 'mod');
+    const f = await repo.showText(merged.tree, 'f');
+    assert.match(f, new RegExp(`^a\\n<<<<<<< ${p1}\\nB1\\n=======\\nB2\\n>>>>>>> ${p2}\\nc\\n$`));
+    assert.equal(await repo.showText(merged.tree, 'h'), '1\n2x\n3\n4\n5\n6x\n7\n');
+    assert.equal(await repo.showText(merged.tree, 'd'), 'mod\n');
     const files = await repo.diffFiles(merged.tree, m);
     assert.deepEqual(files.map((x) => `${x.status} ${x.path}`), ['M f', 'M g']);
-    // Nothing of the real index or working tree changed; no temporary files are left.
+    // Nothing of the real index or working tree changed; no temporary files are left; the
+    // objects it made are in the scratch folder, not the repository's (which git alone cannot see).
     assert.equal(r.git('status', '--porcelain'), '');
-    assert.deepEqual(fs.readdirSync(path.join(r.dir, '.git')).filter((x) => x.startsWith('commit-corner-')), []);
+    assert.deepEqual(fs.readdirSync(path.join(r.dir, '.git')).filter((x) => x.startsWith('commit-corner-') && x !== 'commit-corner-objects'), []);
+    assert.equal(r.git('count-objects'), loose);
+    assert.throws(() => r.git('cat-file', '-e', merged.tree));
   });
 }
 
@@ -404,4 +409,125 @@ test('getMergeResolution of a merge of unrelated histories', async (t) => {
   r.git('merge', '-q', '--allow-unrelated-histories', 'other', '-m', 'join');
   assert.deepEqual((await repo.getMergeResolution('HEAD')).files, []);
   assert.deepEqual((await repo.resolveMergeTree('HEAD^1', 'HEAD^2')).conflicts, []);
+});
+
+/** Two sides from one base, merged with "merge side" as given (files: path -> content; null deletes). */
+function twoSides(r, base, main, side, result) {
+  r.commit('base', base);
+  r.git('switch', '-q', '-c', 'side');
+  r.commit('side', side);
+  r.git('switch', '-q', 'main');
+  r.commit('main', main);
+  try { r.git('merge', '-q', '--no-ff', 'side', '-m', 'merge side'); } catch { /* conflicts */ }
+  return r.commit('merge side', result);
+}
+
+test('resolve fallback: a binary conflict keeps the first parent, add/add merges with markers, both-sides edits merge', async (t) => {
+  const { r, repo } = await setup(t);
+  const m = twoSides(r,
+    { bin: 'a\0base', text: '1\n2\n3\n' },
+    { bin: 'a\0main', text: '1\n2\n3m\n', added: 'main\n' },
+    { bin: 'a\0side', text: '1s\n2\n3\n', added: 'side\n' },
+    { bin: 'a\0main', text: '1s\n2\n3m\n', added: 'main\n' });
+  const [p1, p2] = r.git('log', '-1', '--format=%P', m).split(' ');
+  await repo.prepareScratchObjects();
+  const merged = await repo.resolveMergeTree(p1, p2);
+  assert.deepEqual(merged.conflicts.sort(), ['added', 'bin']);
+  assert.equal(await repo.showText(merged.tree, 'bin'), 'a\0main');
+  assert.match(await repo.showText(merged.tree, 'added'), new RegExp(`^<<<<<<< ${p1}\\nmain\\n=======\\nside\\n>>>>>>> ${p2}\\n$`));
+  assert.equal(await repo.showText(merged.tree, 'text'), '1s\n2\n3m\n');
+  // What the merge commit itself changed: only the add/add file it resolved.
+  assert.deepEqual((await repo.diffFiles(merged.tree, m)).map((x) => x.path), ['added']);
+});
+
+test('resolve fallback: symlinks changed on both sides keep the first parent\'s link', { skip: process.platform === 'win32' }, async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { keep: 'k\n' });
+  const link = (target, msg) => {
+    fs.rmSync(path.join(r.dir, 'ln'), { force: true });
+    fs.symlinkSync(target, path.join(r.dir, 'ln'));
+    return r.commit(msg);
+  };
+  link('base', 'link');
+  r.git('switch', '-q', '-c', 'side');
+  const p2 = link('side', 'side link');
+  r.git('switch', '-q', 'main');
+  const p1 = link('main', 'main link');
+  await repo.prepareScratchObjects();
+  const merged = await repo.resolveMergeTree(p1, p2);
+  assert.deepEqual(merged.conflicts, ['ln']);
+  assert.match((await repo.exec(['ls-tree', merged.tree, 'ln'])).stdout, /^120000 /);
+  assert.equal(await repo.showText(merged.tree, 'ln'), 'main');
+});
+
+test('resolve fallback: a mode change on one side and an edit on the other keep both', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { run: '1\n2\n3\n' });
+  r.git('switch', '-q', '-c', 'side');
+  fs.chmodSync(path.join(r.dir, 'run'), 0o755);
+  r.git('update-index', '--chmod=+x', 'run');
+  r.git('commit', '-q', '-m', 'exec');
+  r.git('switch', '-q', 'main');
+  const p1 = r.commit('edit', { run: '1\n2\n3 edited\n' });
+  const p2 = r.git('rev-parse', 'side');
+  await repo.prepareScratchObjects();
+  const merged = await repo.resolveMergeTree(p1, p2);
+  assert.deepEqual(merged.conflicts, []);
+  const entry = (await repo.exec(['ls-tree', merged.tree, 'run'])).stdout.trim();
+  assert.match(entry, /^100755 blob /);
+  assert.equal(await repo.showText(merged.tree, 'run'), '1\n2\n3 edited\n');
+});
+
+test('resolve fallback: over 1000 files changed on both sides is an error, not a partial answer', async (t) => {
+  const { r, repo } = await setup(t);
+  const files = (v) => Object.fromEntries(Array.from({ length: 1001 }, (_, i) => [`d/${i}`, `${v}\n`]));
+  r.commit('base', files('base'));
+  r.git('switch', '-q', '-c', 'side');
+  const p2 = r.commit('side', files('side'));
+  r.git('switch', '-q', 'main');
+  const p1 = r.commit('main', files('main'));
+  await repo.prepareScratchObjects();
+  await assert.rejects(repo.resolveMergeTree(p1, p2), /1001 files were changed on both sides: too many/);
+  await new Promise((res) => setTimeout(res, 50));
+  assert.deepEqual(fs.readdirSync(path.join(r.dir, '.git')).filter((x) => x.startsWith('commit-corner-remerge-')), []);
+});
+
+test('getMergeResolution: one run for callers at the same time; one giving up does not stop it for the other; all giving up stops it', async (t) => {
+  const { r, repo } = await setup(t);
+  const m = mergeScenario(r);
+  let runs = 0;
+  const real = repo.diffFiles.bind(repo);
+  repo.diffFiles = (...a) => {
+    runs++;
+    return real(...a);
+  };
+  const quitter = new AbortController();
+  const a = repo.getMergeResolution(m, { signal: quitter.signal });
+  const b = repo.getMergeResolution(m);
+  quitter.abort();
+  await assert.rejects(a, (e) => e.code === 'Cancelled');
+  const res = await b;
+  assert.deepEqual(res.files.map((x) => x.path), ['f', 'g']);
+  assert.equal(runs, 1);
+  assert.equal(repo.knownMergeResolution(r.git('rev-parse', m)), res);
+  // A fresh commit's run, everyone gone: stopped, nothing kept, no temporary files.
+  r.git('switch', '-q', '-c', 'again', `${m}^1`);
+  r.git('merge', '-q', '--no-ff', '-s', 'ours', `${m}^2`, '-m', 'again');
+  const all = new AbortController();
+  const c = repo.getMergeResolution('HEAD', { signal: all.signal });
+  all.abort();
+  await assert.rejects(c, (e) => e.code === 'Cancelled');
+  await new Promise((res) => setTimeout(res, 100));
+  assert.equal(repo.knownMergeResolution(r.git('rev-parse', 'HEAD')), undefined);
+  assert.deepEqual(fs.readdirSync(path.join(r.dir, '.git')).filter((x) => x.startsWith('commit-corner-remerge-')), []);
+});
+
+test('getMergeResolution in a shallow clone without the merge base says so', async (t) => {
+  const { r } = await setup(t);
+  mergeScenario(r);
+  const dir = makeTempDir();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  r.git('clone', '-q', '--depth', '2', `file://${r.dir}`, dir); // the merge and its parents, not their base
+  const shallow = await Repository.open(dir);
+  await assert.rejects(shallow.getMergeResolution('HEAD'), /shallow/);
 });

@@ -155,12 +155,16 @@ new tags (open them in the graph).
   the commit, so you see the resolved
   conflicts (marked *conflict*, the markers on the left) and anything else
   edited while merging; a clean merge shows nothing. **Changes vs Parent 1**
-  is everything the merge brought in, **Changes vs Parent 2** everything the
-  other side had. Under a merge, the graph (expanded row and details pane) and
-  the trees list the three as sections, Merge Resolution open; *Show Changes*
-  on a merge asks which (with file counts, Enter takes the resolution);
-  *Show Merge Resolution* is in its menu and hover. Merges of more than two
-  parents offer the parents' changes only.
+  is everything the merge brought in, **Changes vs Parent 2** everything that
+  differs from the merged-in branch. Under a merge, the graph (expanded row and details pane) and
+  the trees list the three as sections, Merge Resolution open (for a clean
+  merge, Changes vs Parent 1); *Show Changes* on a merge asks which (with file
+  counts; Enter takes the resolution, or Parent 1 for a clean merge); *Show
+  Merge Resolution* is in its menu and hover, `A` on a section opens all its
+  files. Merges of more than two parents offer the parents' changes only; a
+  shallow clone without the merge's base says so. Merging again needs no
+  working tree: nothing in yours or in the index changes, and its objects
+  stay out of the repository's object store.
 - Details pane: avatar, author, age and date, SHA (copy), change summary,
   full message, committer, signature status (GPG/SSH), parents, refs, and the
   changed files with per-file bars and line stats. Click a file to open its diff.
