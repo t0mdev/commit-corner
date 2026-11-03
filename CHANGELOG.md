@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.0
 
 - **Merge Resolution**: what a merge commit itself changed, beyond git's automatic merge of its parents: the conflicts it resolved (marked *conflict*, the markers on the left side) and anything else edited while merging. git merges the parents again for it (`merge-tree`, nothing in your working tree or index changes); a clean merge says so. With git older than 2.38 it is merged again without rename detection, merge drivers or several merge bases and marked approximate; a merge with more than 1000 files (or 64 MB) changed on both sides, or one in a partial clone, shows its resolution as unavailable there. A shallow clone without the merge's base says so.
 - **Opening a merge asks which changes**: *Show Changes* on a merge commit offers Merge Resolution, Changes vs Parent 1 (what the merge brought in) and Changes vs Parent 2 (what differs from the merged-in branch), with each parent's commit and the file counts; Enter takes the resolution, or Parent 1 when the merge turns out clean. The graph's expanded row and details pane and the trees list the three as sections under the merge (the same way: open is the resolution, or Parent 1 for a clean merge; the others load when you open them; `A` on a section in the graph opens all its files). *Show Merge Resolution* is in a merge's menus and hover card; *Show Changes vs Parent 2* (formerly "Against Second Parent") is only offered on merges now. Diffs opened from a section say which side they compare (`app.js (automatic merge ↔ 1a2b3c4)`).
