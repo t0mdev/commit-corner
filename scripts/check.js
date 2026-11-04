@@ -186,8 +186,10 @@ for (const id of used) {
 // Tree rows are redrawn through TreeProvider.redraw only (docs/DEVELOPMENT.md: a row redrawn
 // while its children load shows only part of them).
 for (const f of jsFiles.filter((x) => x.startsWith(path.join(root, 'src') + path.sep))) {
+  // Only TreeProvider itself (nodes.js) fires: a full refresh (undefined) and the held rows.
+  const own = f === path.join(root, 'src', 'vscode', 'views', 'nodes.js');
   fs.readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
-    if (/_onDidChangeTreeData\.fire\((?!undefined\)|nodes\))/.test(line)) problems.push(`${path.relative(root, f)}:${i + 1}: redraw tree rows with this.redraw(…), not _onDidChangeTreeData.fire`);
+    if (/_onDidChangeTreeData\.fire\(/.test(line) && !(own && /_onDidChangeTreeData\.fire\((undefined|ready)\)/.test(line))) problems.push(`${path.relative(root, f)}:${i + 1}: redraw tree rows with this.redraw(…), not _onDidChangeTreeData.fire`);
   });
 }
 for (const icon of [pkg.icon, ...pkg.contributes.viewsContainers.activitybar.map((a) => a.icon)].filter(Boolean)) {

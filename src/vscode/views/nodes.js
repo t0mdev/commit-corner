@@ -25,8 +25,12 @@ function statsText(stats) {
  * VS Code passes the node itself as the command argument.
  */
 
-/** How long loading must have been quiet before rows are redrawn (TreeProvider.redraw). */
+/** How long loading must have been quiet before rows are redrawn (TreeProvider.redraw)… */
 const REDRAW_QUIET_MS = 300;
+/** …and how long a row waits at most for other rows of its view (not for its own children). */
+const REDRAW_MAX_HOLD_MS = 3000;
+/** A clock that never goes back (the wall clock may, after a sleep or a time sync). */
+const clock = () => performance.now();
 
 class TreeProvider {
   constructor() {
@@ -37,7 +41,10 @@ class TreeProvider {
     /** getChildren calls still running, when the last one ended, and rows waiting to be redrawn (see redraw). */
     this.loading = 0;
     this.loadedAt = 0;
-    this.pendingRedraw = new Set();
+    /** row -> how many of its own getChildren calls are running */
+    this.loadingRows = new Map();
+    /** row -> since when it waits for its redraw (since its own children loaded, if they were loading) */
+    this.pendingRedraw = new Map();
     this.redrawTimer = undefined;
   }
 
@@ -48,6 +55,7 @@ class TreeProvider {
   async getChildren(node) {
     let children;
     this.loading++;
+    if (node) this.loadingRows.set(node, (this.loadingRows.get(node) || 0) + 1);
     try {
       if (node) children = node.getChildren ? await node.getChildren() : [];
       else children = await this.getRoots();
@@ -55,7 +63,16 @@ class TreeProvider {
       return [new MessageNode(`Error: ${e.message}`, 'error')];
     } finally {
       this.loading--;
-      this.loadedAt = Date.now();
+      this.loadedAt = clock();
+      if (node) {
+        const left = this.loadingRows.get(node) - 1;
+        if (left > 0) this.loadingRows.set(node, left);
+        else {
+          this.loadingRows.delete(node);
+          // Its own children are there: from now on it waits like any other row.
+          if (this.pendingRedraw.has(node)) this.pendingRedraw.set(node, this.loadedAt);
+        }
+      }
       if (this.pendingRedraw.size) this.scheduleRedraw();
     }
     this.fillStats(children || []);
@@ -154,44 +171,47 @@ class TreeProvider {
     if (node) return this.redraw(node);
     this.statsEpoch++;
     if (this.commitFiles) this.commitFiles.clear();
-    // The rows waiting for a redraw are about to be replaced.
+    // The rows waiting for a redraw are about to be replaced; so are the rows that count viewed
+    // marks (see the Pull Requests and Worktrees views: they register again as they load).
     this.pendingRedraw.clear();
+    if (this.viewedOwners) this.viewedOwners.clear();
     clearTimeout(this.redrawTimer);
     this.redrawTimer = undefined;
     this._onDidChangeTreeData.fire(undefined);
   }
 
   /**
-   * Draw rows again (their children too). Never while VS Code is still loading rows of this view:
-   * a row redrawn while its children (or theirs) load ends up with only part of them, e.g. a large
-   * pull request's files (until the next refresh). Held until loading has been quiet for 300 ms.
+   * Draw rows again (their children too), but not while VS Code is loading rows of this view: a
+   * row redrawn while its children (or theirs) load ends up with only part of them, e.g. a large
+   * pull request's files (until the next refresh). A row whose own children are loading waits
+   * for them; then rows wait until loading has been quiet for 300 ms, at most 3 s (a slow load
+   * elsewhere in the view, say another pull request being fetched, must not hold its counts).
    * @param {any|any[]} nodes
    */
   redraw(nodes) {
-    for (const n of Array.isArray(nodes) ? nodes : [nodes]) if (n) this.pendingRedraw.add(n);
-    if (this.pendingRedraw.size) this.scheduleRedraw();
+    const now = clock();
+    for (const n of Array.isArray(nodes) ? nodes : [nodes]) if (n && !this.pendingRedraw.has(n)) this.pendingRedraw.set(n, now);
+    this.scheduleRedraw();
   }
 
   scheduleRedraw() {
-    if (this.redrawTimer) return;
-    const wait = this.loading ? undefined : Math.max(0, this.loadedAt + REDRAW_QUIET_MS - Date.now());
-    // Still loading: the getChildren that ends last schedules it again.
-    if (wait === undefined) return;
-    if (!wait) {
-      this.flushRedraw();
-      return;
+    clearTimeout(this.redrawTimer);
+    this.redrawTimer = undefined;
+    if (!this.pendingRedraw.size) return;
+    const now = clock();
+    const quietAt = this.loading ? Infinity : this.loadedAt + REDRAW_QUIET_MS;
+    const ready = [];
+    let next = Infinity;
+    for (const [n, since] of this.pendingRedraw) {
+      // Its own children are loading: the getChildren that ends schedules it again.
+      if (this.loadingRows.has(n)) continue;
+      const due = Math.min(quietAt, since + REDRAW_MAX_HOLD_MS);
+      if (due <= now) ready.push(n);
+      else next = Math.min(next, due);
     }
-    this.redrawTimer = setTimeout(() => {
-      this.redrawTimer = undefined;
-      if (this.loading || Date.now() - this.loadedAt < REDRAW_QUIET_MS) this.scheduleRedraw();
-      else this.flushRedraw();
-    }, wait);
-  }
-
-  flushRedraw() {
-    const nodes = [...this.pendingRedraw];
-    this.pendingRedraw.clear();
-    if (nodes.length) this._onDidChangeTreeData.fire(nodes);
+    for (const n of ready) this.pendingRedraw.delete(n);
+    if (ready.length) this._onDidChangeTreeData.fire(ready);
+    if (next !== Infinity) this.redrawTimer = setTimeout(() => this.scheduleRedraw(), Math.min(REDRAW_MAX_HOLD_MS, Math.max(1, next - now)));
   }
 
   dispose() {
@@ -542,6 +562,12 @@ class FileNode {
     this.leftLabel = refs.leftLabel;
   }
 
+  /** Show its diff as its row's click does (and so mark it viewed, in a list with marks). */
+  async open() {
+    const { command, arguments: args } = this.getTreeItem().command;
+    await vscode.commands.executeCommand(command, ...args);
+  }
+
   /** The URIs its diff shows (to tell whether that diff is the editor you are looking at). */
   openUris() {
     const { uriAt } = require('../diffs');
@@ -569,11 +595,13 @@ class FileNode {
     item.resourceUri = vscode.Uri.file(this.repo.absolute(this.path)).with({ fragment: 'commit-corner-history', query: mark });
     item.iconPath = statusIcon(this.status);
     const why = this.change.conflict ? '\ngit\'s automatic merge left conflict markers here (left side); the right side is how the merge resolved them' : this.leftLabel ? '\nEdited in the merge beyond git\'s automatic merge' : '';
-    item.tooltip = `${STATUS_LABELS[this.status] || this.status}: ${this.origPath ? `${this.origPath} → ` : ''}${this.path}${why}${unviewed ? '\n● Not viewed (the dot goes when you open it)' : ''}`;
+    const markLine = this.viewed ? `\n${viewed.scopedTooltip(this.viewed.scope, this.path, this.viewed.fingerprint)}` : unviewed ? '\n● Not viewed (the dot goes when you open it)' : '';
+    item.tooltip = `${STATUS_LABELS[this.status] || this.status}: ${this.origPath ? `${this.origPath} → ` : ''}${this.path}${why}${markLine}`;
     // Not viewed yet: its menu offers Mark as Viewed (else Mark as Not Viewed). A pull request's
-    // file that cannot be fingerprinted (a symlink, a submodule) offers neither.
-    const markable = !this.viewed || viewed.FINGERPRINT.test(this.viewed.fingerprint || '');
-    item.contextValue = unviewed ? `${this.contextValue}:new` : this.viewed && markable ? `${this.contextValue}:viewed` : this.contextValue;
+    // file offers them whatever the dots setting says, one that cannot be fingerprinted (a
+    // symlink, a submodule) neither.
+    const state = this.viewed ? viewed.scopedState(this.viewed.scope, this.path, this.viewed.fingerprint) : unviewed ? 'new' : 'none';
+    item.contextValue = state === 'none' ? this.contextValue : `${this.contextValue}:${state}`;
     item.command = {
       command: 'commitCorner.openCommitFile',
       title: 'Open Changes',
@@ -589,17 +617,33 @@ class FileNode {
 
 /**
  * Build FileNodes, optionally as a folder tree depending on settings.
- * @param {{tree?: boolean, viewed?: {scope: string, ids: Map<string, string>, owner?: any, provider?: any}}} [opts] tree: always
+ * @param {{tree?: boolean, viewed?: {scope: string, ids: Map<string, string>, owner?: any, provider?: any, label?: string}}} [opts] tree: always
  *        a folder tree (pull requests), whatever the fileLayout setting says; viewed: "Viewed"
  *        marks on the files, a dot until opened (ids: the files' content fingerprints, see
- *        viewed.js; owner: the node redrawn when a mark changes)
+ *        viewed.js; owner: the node redrawn when a mark changes; label: what Next Unviewed File
+ *        calls the list, "pull request #7")
  */
 function fileNodes(repo, files, refs, opts = {}) {
   const nodes = files.map((f) => new FileNode(repo, f, refs));
   if (opts.viewed) for (const n of nodes) n.viewed = { scope: opts.viewed.scope, fingerprint: fingerprintOf(opts.viewed.ids, n), owner: opts.viewed.owner, provider: opts.viewed.provider };
   // A tree even for a single file: its folder is part of what you need to see.
-  if (!opts.tree && config().get('fileLayout', 'tree') !== 'tree') return nodes;
-  return buildFolderTree(nodes);
+  const out = !opts.tree && config().get('fileLayout', 'tree') !== 'tree' ? nodes : buildFolderTree(nodes);
+  if (opts.viewed) {
+    // Folders get Mark as Viewed / Not Viewed for their files; Next Unviewed File in the diffs
+    // goes through the files in the order shown.
+    const shown = [];
+    const walk = (list) => {
+      for (const n of list) {
+        if (n instanceof FolderNode) {
+          n.marks = true;
+          walk(n.children);
+        } else shown.push(n);
+      }
+    };
+    walk(out);
+    if (opts.viewed.label) viewed.registerList(opts.viewed.scope, opts.viewed.label, shown);
+  }
+  return out;
 }
 
 class FolderNode {
@@ -612,8 +656,14 @@ class FolderNode {
   getTreeItem() {
     const item = new vscode.TreeItem(this.name, vscode.TreeItemCollapsibleState.Expanded);
     item.iconPath = vscode.ThemeIcon.Folder;
-    item.contextValue = 'folder';
+    // In a list with viewed marks (a pull request's files): Mark as Viewed / Not Viewed for all in it.
+    item.contextValue = this.marks ? 'folder:marks' : 'folder';
     return item;
+  }
+
+  /** The files in it and its sub-folders. */
+  files() {
+    return this.children.flatMap((c) => (c instanceof FolderNode ? c.files() : [c]));
   }
 
   getChildren() {

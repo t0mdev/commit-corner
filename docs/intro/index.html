@@ -66,7 +66,7 @@
       <p class="lead">Getting the most out of Commit Corner: one slide per view, plus the keys that tie them together.</p>
       <div class="steps">
         <div class="step"><div class="n">1 · WATCH</div><b>Graph</b><span>New commits glow as they arrive. A <b style="display:inline;font-size:1em">✎ 2</b> chip marks a commit whose worktree has uncommitted work.</span></div>
-        <div class="step"><div class="n">2 · REVIEW</div><b>Worktrees &amp; PRs</b><span>Changes vs main, file by file. <kbd>Space</kbd> ticks a file as <i>Viewed</i>, and it unticks itself when the agent changes it again.</span></div>
+        <div class="step"><div class="n">2 · REVIEW</div><b>Worktrees &amp; PRs</b><span>Changes vs main, file by file. A file you have not opened has a dot; it comes back when the agent changes the file again.</span></div>
         <div class="step"><div class="n">3 · ACT</div><b>Commit, compare, ship</b><span>Stage and commit right in the graph. ✨ writes commit messages and summaries. Push, rebase and cherry-pick are a key away.</span></div>
       </div>
       <aside class="notes">It can run next to the built-in Git, or replace it. Everything works by keyboard; every view is in the Commit Corner activity bar icon.</aside>
@@ -154,13 +154,13 @@
           <p class="lead">GitHub pull requests, diffed by git itself</p>
           <ul>
             <li>Each PR expands to its base, commits and <b>Files changed</b>, diffed from the merge base like GitHub's tab</li>
-            <li><b>Viewed</b> checkboxes per file; a push that changes a file unticks it</li>
+            <li>A dot on each file you have not opened (like GitHub's <i>Viewed</i>); a push that changes a file brings it back</li>
             <li>Reviews and CI checks when you are signed in to GitHub; without the API it falls back to <code>git ls-remote</code></li>
             <li>✨ <b>Summarize Pull Request</b>: what it does, what looks risky, and what to read first</li>
             <li><kbd>Ctrl+Alt+G</kbd> <kbd>P</kbd> opens a PR's changes, <kbd>Shift+N</kbd> creates one</li>
           </ul>
         </div>
-        <img class="shot" src="images/prs.png" alt="A pull request expanded: base, commits and files changed with Viewed checkboxes">
+        <img class="shot" src="images/prs.png" alt="A pull request expanded: base, commits and files changed, a dot on the file not opened yet">
       </div>
     </section>
 
@@ -207,13 +207,13 @@
           <ul>
             <li>Each worktree with its uncommitted changes, ↑ahead ↓behind and age, checked again every 10 seconds</li>
             <li><b>Changes vs main</b>: everything the agent changed, committed or not
-              <ul><li><kbd>Enter</kbd> shows a diff and keeps the keyboard in the list; <kbd>Space</kbd> ticks it as <i>Viewed</i></li></ul></li>
+              <ul><li><kbd>Enter</kbd> shows a diff (the keyboard stays in the list) and the file's dot goes; <kbd>Ctrl+Alt+G</kbd> <kbd>N</kbd> opens the next one</li></ul></li>
             <li><b>Comment</b> with the + in the gutter of its files or commits; <kbd>Ctrl+Alt+G</kbd> <kbd>C</kbd> copies your review for the agent's chat</li>
             <li>✨ <b>Summarize</b> the worktree's work; open all its changes in one multi-diff (<kbd>Ctrl+Alt+G</kbd> <kbd>Shift+D</kbd>)</li>
             <li><kbd>Ctrl+Alt+G</kbd> <kbd>Shift+W</kbd>: the overview, one card per worktree</li>
           </ul>
         </div>
-        <img class="shot" src="images/worktrees.png" alt="An agent's worktree expanded to Changes vs main with Viewed checkboxes">
+        <img class="shot" src="images/worktrees.png" alt="An agent's worktree expanded to Changes vs main, a dot on the file not opened yet">
       </div>
     </section>
 
@@ -256,7 +256,7 @@
       <h2>Habits that pay off</h2>
       <div class="steps" style="grid-template-columns: repeat(2, 1fr)">
         <div class="step"><b>Let agents work in worktrees</b><span>Each agent gets its own folder and branch. You watch them in the Graph (the ✎ chip) and review them in Worktrees, without stashing your own work.</span></div>
-        <div class="step"><b>Review with Viewed</b><span><kbd>Enter</kbd> to read, <kbd>Space</kbd> to tick. A file the agent touches again comes back unticked, so nothing slips through.</span></div>
+        <div class="step"><b>Review what is new</b><span><kbd>Enter</kbd> to read, <kbd>Ctrl+Alt+G</kbd> <kbd>N</kbd> for the next. A file the agent touches again gets its dot back, so nothing slips through.</span></div>
         <div class="step"><b>Commit from the graph</b><span>Expand <i>Uncommitted changes</i>, stage with <kbd>+</kbd>, write or ✨ the message, press <kbd>Enter</kbd>. Source Control shares the same message.</span></div>
         <div class="step"><b>Undo is one key</b><span>A squash, reword or drop went wrong? <kbd>Ctrl+Alt+G</kbd> <kbd>Shift+U</kbd> puts the branch back.</span></div>
       </div>

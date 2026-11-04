@@ -1363,7 +1363,7 @@
       },
       {
         "command": "commitCorner.viewedClear",
-        "title": "Clear Viewed Marks",
+        "title": "Mark All as Not Viewed",
         "category": "Commit Corner",
         "icon": "$(clear-all)"
       },
@@ -1438,7 +1438,7 @@
       },
       {
         "command": "commitCorner.markCommitUnviewed",
-        "title": "Clear Viewed Marks",
+        "title": "Mark All as Not Viewed",
         "category": "Commit Corner"
       },
       {
@@ -1509,7 +1509,7 @@
       },
       {
         "command": "commitCorner.graph.markUnviewed",
-        "title": "Clear Viewed Marks",
+        "title": "Mark All as Not Viewed",
         "category": "Commit Corner"
       },
       {
@@ -1628,7 +1628,7 @@
       },
       {
         "id": "commitCorner.review",
-        "label": "Review"
+        "label": "Review Comments"
       },
       {
         "id": "commitCorner.sidebar.switch",
@@ -4173,13 +4173,28 @@
         },
         {
           "command": "commitCorner.markCommitFileViewed",
-          "when": "viewItem =~ /^(file:(commit|pr)|changedFile:worktree):new$/ && !listMultiSelection",
+          "when": "viewItem == file:commit:new && !listMultiSelection",
           "group": "8_viewed@1"
         },
         {
           "command": "commitCorner.markCommitFileUnviewed",
-          "when": "viewItem =~ /^(file:commit|(file:pr|changedFile:worktree):viewed)$/ && !listMultiSelection && config.commitCorner.markUnviewedFiles",
+          "when": "viewItem == file:commit && !listMultiSelection && config.commitCorner.markUnviewedFiles",
           "group": "8_viewed@1"
+        },
+        {
+          "command": "commitCorner.markCommitFileViewed",
+          "when": "viewItem =~ /^((file:pr|changedFile:worktree):new|folder:marks)$/",
+          "group": "8_viewed@1"
+        },
+        {
+          "command": "commitCorner.markCommitFileUnviewed",
+          "when": "viewItem =~ /^((file:pr|changedFile:worktree):viewed|folder:marks)$/",
+          "group": "8_viewed@2"
+        },
+        {
+          "command": "commitCorner.copyFilePath",
+          "when": "viewItem =~ /^changedFile:worktree/ && !listMultiSelection",
+          "group": "9_copy@1"
         },
         {
           "command": "commitCorner.review.copy",
@@ -5657,7 +5672,7 @@
           "commitCorner.markUnviewedFiles": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Show files you have not viewed in **bold** (graph) or with a dot (tree views, also a pull request's files and a worktree's *Changes vs main*); a commit you started on counts what you have seen (\"3/12\"). Opening a file marks it viewed. Marks survive an amend or rebase that leaves a change as it was; an uncommitted file is bold again when its content changes.",
+            "markdownDescription": "Show files you have not viewed in **bold** (graph) or with a dot (tree views, also a pull request's files and a worktree's *Changes vs main*, whose *Mark as Viewed* / *Not Viewed* menus work either way); a commit you started on counts what you have seen (\"3/12\"). Opening a file marks it viewed. Marks survive an amend or rebase that leaves a change as it was; an uncommitted file is bold again when its content changes.",
             "order": 1
           },
           "commitCorner.review.comments": {

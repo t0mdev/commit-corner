@@ -2,9 +2,16 @@
 
 ## 1.6.0
 
-- **A pull request's files and a worktree's *Changes vs main* mark what you have not seen like a commit's files do**: the *Viewed* checkboxes are gone; a file you have not opened has a dot, opening it marks it viewed (`Enter` keeps the keyboard in the list, `↓` goes on to the next). A push or an agent's edit that changes the file brings its dot back. A file's menu has *Mark as Viewed* / *Mark as Not Viewed*; Mark All as Viewed / Clear stay on the list's row, and so does its count ("2/5 viewed"). Files you had checked stay viewed. `Space` no longer ticks a file off. The dots follow `commitCorner.markUnviewedFiles`.
-- **Review** submenu in each Commit Corner view's `···` menu (while there are review comments): Copy Review for the Agent (with its shortcut, `Ctrl+Alt+G C`), Save Review to the Worktree, Delete All Review Comments….
-- Fixed: a large pull request opened for the first time could show only part of its files until you refreshed. The pull request's row was redrawn (it had just been fetched) while VS Code was still loading the rows below it; rows redrawn while a view loads now wait until it is done.
+- **Changed: the *Viewed* checkboxes are gone, and so is `Space` to tick a file.** A pull request's *Files changed* and a worktree's *Changes vs main* now show what you have not seen the way a commit's files do: a file you have not opened has a dot, and opening it (click or `Enter`; the keyboard stays in the list, `↓` `Enter` for the next) marks it viewed. *Mark as Not Viewed* in its menu (`Shift+F10`) brings the dot back. Files you had checked stay viewed.
+  - A push or an agent's edit that changes a file brings its dot back.
+  - *Next Unviewed File* (`Ctrl+Alt+G N`) works in their diffs too: it opens the next file of that list not viewed yet.
+  - *Mark as Viewed* / *Mark as Not Viewed* on a file, on several selected files, or on a folder of a pull request's files. The list's row keeps its count ("2/5 viewed") and *Mark All as Viewed* / *Mark All as Not Viewed* (formerly "Clear Viewed Marks").
+  - The dots follow `commitCorner.markUnviewedFiles`. With it off these lists show no dots but still count what you opened, and their Mark menus stay.
+  - A file that cannot be marked (a symbolic link, a submodule) says so in its tooltip.
+  - *Copy Relative Path* on a worktree's changed file.
+- **Review Comments** submenu in each Commit Corner view's `···` menu, while there are review comments: Copy Review for the Agent (with its shortcut, `Ctrl+Alt+G C`), Save Review to the Worktree, Delete All Review Comments….
+- Fixed: a large pull request opened for the first time could show only part of its files until you refreshed. The pull request's row was redrawn (it had just been fetched) while VS Code was still loading the rows below it; a row is now redrawn only after the rows below it have loaded.
+- Fixed: *Open File at Commit*, *Compare with Working Tree* and *Restore File from Commit* on a file a pull request (or a merge's other side) deleted now use the version before the pull request, not the parent of its last commit.
 
 ## 1.5.0
 

@@ -16,15 +16,15 @@ and change summaries. Plain JavaScript, no runtime dependencies, no telemetry.
    work.
 2. **Review** — in **Worktrees**, the agent's worktree expands to **Changes vs main**:
    everything it changed, committed or not. A file you have not opened has a dot; `Enter`
-   shows its diff (the keyboard stays in the list, `↓` goes on to the next) and the dot
+   shows its diff (the keyboard stays in the list: `↓` `Enter` for the next file) and the dot
    goes. A file the agent changes again gets it back.
 3. **Comment** — the **+** in an editor's gutter adds a review comment on that line (in the
    agent's files or in a commit's diff). **Copy Review for the Agent** (`Ctrl+Alt+G C`)
    puts all of them together — file, line, the code as it is now, your comment — to paste
    into the agent's chat (or **Save Review to the Worktree** for the agent to read). When it
    is done, **Delete All Review Comments…** in a comment's `…` menu clears them. The same
-   three are in the **Review** submenu of each Commit Corner view's `···` menu (while there
-   are comments).
+   three are in the **Review Comments** submenu of each Commit Corner view's `···` menu
+   (while there are comments).
 4. **Summarize** — the sparkle button on that row (or on a pull request, or selected commits) asks your
    language model what changed, **what looks risky** and which files to read first.
 
@@ -133,8 +133,12 @@ new tags (open them in the graph).
   commit's mark belongs to the change, not the commit: when an agent amends or
   rebases, the files whose change stayed the same stay viewed. An uncommitted
   file is bold again as soon as its content changes. A pull request's files
-  and a worktree's *Changes vs main* work the same way in their tree views (a
-  dot until opened). On by default; off with `commitCorner.markUnviewedFiles`.
+  and a worktree's *Changes vs main* have a dot until opened, and *Next
+  Unviewed File* (`Ctrl+Alt+G N`) in their diffs opens the next one of that
+  list; their marks are kept per pull request or worktree, by content, so a
+  push or an agent's edit brings the dot back. On by default; off with
+  `commitCorner.markUnviewedFiles` (those two lists then still count what you
+  opened and keep their *Mark as Viewed* menus, without dots).
 - Uncommitted changes are a row like a commit: its summary, a click opens
   Source Control, `▸`/`→` opens the staging area (see *Staging in the graph*
   above). Folders in expanded file trees collapse and expand (click, or
@@ -305,9 +309,11 @@ api.github.com is contacted, and unchanged lists are revalidated with ETags.
 
 In **Files changed**, a file you have not opened has a dot; opening it marks it
 viewed, as GitHub's *Viewed* checkbox does (kept per pull request in this
-workspace; a push that changes the file brings the dot back). Its menu has *Mark
-as Viewed* / *Mark as Not Viewed*, the row's menu marks them all. **Summarize
-Pull Request** (sparkle button) describes what it does and what looks risky.
+workspace; a push that changes the file brings the dot back). `Ctrl+Alt+G N` in
+its diff opens the next file not viewed yet. A file's or folder's menu (also for
+several selected files) has *Mark as Viewed* / *Mark as Not Viewed*, the
+**Files changed** row's menu marks them all. **Summarize Pull Request** (sparkle
+button) describes what it does and what looks risky.
 
 **The diffs always come from git.** GitHub publishes every pull request as
 `refs/pull/<n>/head` (and a test merge as `refs/pull/<n>/merge` while it is
@@ -436,8 +442,8 @@ newest commit.
   committed or not; a file you have not opened has a dot. Click a file (or
   `Enter`) to see its diff, which marks it viewed; the row counts "5/12
   viewed". When the agent changes a file again its dot comes back. A file's
-  menu has *Mark as Viewed* / *Mark as Not Viewed*; Mark All as Viewed /
-  Clear in the row's menu, Summarize (sparkle) and Open All Changes as
+  menu has *Mark as Viewed* / *Mark as Not Viewed* (also for several selected
+  files); Mark All as Viewed / Not Viewed in the row's menu, Summarize (sparkle) and Open All Changes as
   inline buttons.
 - **Review comments for the agent.** The **+** in the gutter of a worktree's
   files (or the repository's) and of a commit's diff adds a comment on that
@@ -457,7 +463,7 @@ newest commit.
   never overwritten. Only submitted comments go in (not a reply still being
   typed). Copy, Save and **Delete All Review Comments…** (asks
   first; for when the agent has dealt with them) are also in each comment's
-  `…` menu and, while there are comments, in the **Review** submenu of each
+  `…` menu and, while there are comments, in the **Review Comments** submenu of each
   Commit Corner view's `···` menu (with their shortcuts); Delete All is in
   **Agent review**'s menu too. Settings:
   `commitCorner.review.comments`, `commitCorner.review.fileName` (user setting).

@@ -121,7 +121,7 @@ suite('Tree views', () => {
     for (const id of ['graphView', 'worktrees']) {
       await vscode.commands.executeCommand(`commitCorner.sidebar.${id}`);
       await sleep(500);
-      assert.ok(!(await openViewMenu()).some((x) => x.startsWith('Review ')), `no Review without comments (${id})`);
+      assert.ok(!(await openViewMenu()).some((x) => x.startsWith('Review Comments ')), `no Review without comments (${id})`);
       await press(await workbench(), 'Escape');
     }
     const file = path.join(root(), 'review-menu.txt');
@@ -134,10 +134,10 @@ suite('Tree views', () => {
       for (const id of ['worktrees', 'graphView']) {
         await vscode.commands.executeCommand(`commitCorner.sidebar.${id}`);
         await sleep(500);
-        assert.ok((await openViewMenu()).includes('Review []'), `Review in the ··· menu (${id})`);
+        assert.ok((await openViewMenu()).includes('Review Comments []'), `Review in the ··· menu (${id})`);
         await inWorkbench(`(() => {
           const roots = [document, ...[...document.querySelectorAll('*')].filter((h) => h.shadowRoot).map((h) => h.shadowRoot)];
-          const item = roots.flatMap((r) => [...r.querySelectorAll('.action-menu-item')]).find((i) => (i.querySelector('.action-label') || {}).textContent === 'Review');
+          const item = roots.flatMap((r) => [...r.querySelectorAll('.action-menu-item')]).find((i) => (i.querySelector('.action-label') || {}).textContent === 'Review Comments');
           item.focus();
         })()`);
         await press(await workbench(), 'ArrowRight');

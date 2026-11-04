@@ -20,6 +20,11 @@ const { mapRangesToFrom, withEol, eolOf } = require('../../git/lineDiff');
  */
 
 const isFullSha = (s) => typeof s === 'string' && /^[0-9a-f]{40,64}$/.test(s);
+/**
+ * The revision a row's deleted file is read from: its left side when the row has one (a pull
+ * request's merge base, a merge view's other side, a commit's parent), else the parent of `sha`.
+ */
+const beforeRev = (node) => (isFullSha(node.leftRef) ? node.leftRef : `${node.sha}^`);
 /** Repository text (a path) in the status bar: no $(icon) syntax, no control characters. */
 const plain = (t) => escapeIcons(String(t).replace(/[\u0000-\u001f\u007f]/g, ' '));
 /** Above this, a file is opened at the same line number instead of a mapped one. */
@@ -185,7 +190,7 @@ function nextUnviewedOf(sha, files, current) {
 async function compareNodeWith(repo, node, ref) {
   const name = node.path.split('/').pop();
   const deleted = node.status === 'D' && isFullSha(node.sha);
-  let rightRef = deleted ? `${node.sha}^` : isFullSha(node.sha) ? node.sha : undefined;
+  let rightRef = deleted ? beforeRev(node) : isFullSha(node.sha) ? node.sha : undefined;
   let rightPath = deleted ? node.origPath || node.path : node.path;
   if (!rightRef) {
     const work = await workingPathOf(repo, node.sha, node.path, node.currentPath);
@@ -193,7 +198,7 @@ async function compareNodeWith(repo, node, ref) {
     if (work) rightPath = work.rel;
   }
   const leftPath = node.origPath && node.origPath !== node.path && (await repo.blobSize(ref, node.path).catch(() => undefined)) === undefined ? node.origPath : node.path;
-  const label = rightRef === WORKTREE ? 'Working Tree' : rightRef ? `${shortSha(node.sha)}${deleted ? '^' : ''}` : 'deleted';
+  const label = rightRef === WORKTREE ? 'Working Tree' : rightRef ? (deleted ? (isFullSha(rightRef) ? shortSha(rightRef) : `${shortSha(node.sha)}^`) : shortSha(node.sha)) : 'deleted';
   await openDiff(repo, { path: rightPath, leftRef: ref, leftPath, rightRef, rightPath, title: `${name} (${ref} ↔ ${label})`, viewColumn: viewColumnOf(node) });
 }
 
@@ -351,7 +356,7 @@ function register(ctx) {
     const repo = node && typeof node.path === 'string' ? manager.getRepository(node.repoRoot) : undefined;
     if (!repo || !isFullSha(node.sha)) return;
     const deleted = node.status === 'D';
-    const rev = deleted ? `${node.sha}^` : node.sha;
+    const rev = deleted ? beforeRev(node) : node.sha;
     const revPath = deleted ? node.origPath || node.path : node.path;
     const work = await workingPathOf(repo, node.sha, node.path, node.currentPath);
     if (work && work.renamed) vscode.window.setStatusBarMessage(`Renamed since: ${plain(revPath)} → ${plain(work.rel)}`, 4000);
@@ -425,9 +430,11 @@ function register(ctx) {
   cmd('commitCorner.markCommitUnviewed', markCommits(false));
   // One file of a commit, from its menu in a tree (node: repoRoot, commitViewed = its commit, path,
   // change), or of a pull request's or a worktree's list (node.viewed: its scope and fingerprint).
-  const markFile = (on) => async (node) => {
-    if (node && node.viewed) {
-      await viewed.markScoped(node.viewed, node.path, on);
+  // Several selected rows, or a folder of a pull request's files: all the files of lists with marks in them.
+  const markFile = (on) => async (node, selected) => {
+    const rows = (Array.isArray(selected) && selected.includes(node) ? selected : [node]).flatMap((n) => (n && n.marks && typeof n.files === 'function' ? n.files() : [n]));
+    if (rows.some((n) => n && n.viewed)) {
+      await viewed.markScopedMany(rows.filter((n) => n && n.viewed), on);
       return;
     }
     const repo = node && manager.getRepository(node.repoRoot);
@@ -463,7 +470,15 @@ function register(ctx) {
       }
     }
     if (!repo || !sha) {
-      vscode.window.setStatusBarMessage('Next Unviewed File works in a diff opened from a commit\'s files', 4000);
+      // A diff opened from a pull request's files or a worktree's changes: the next of that list.
+      const shown = viewed.listOfShown(activeUris().map(String));
+      if (shown) {
+        const next = viewed.nextUnviewedRow(shown.scope, shown.list, shown.at);
+        if (next) await next.open();
+        else vscode.window.setStatusBarMessage(`All ${shown.list.rows.length} file${shown.list.rows.length === 1 ? '' : 's'} of ${shown.list.label} are viewed`, 4000);
+        return;
+      }
+      vscode.window.setStatusBarMessage('Next Unviewed File works in a diff opened from the files of a commit, a pull request or a worktree\'s changes', 4000);
       return;
     }
     let parent;

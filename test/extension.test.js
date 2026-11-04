@@ -857,10 +857,16 @@ test('a pull request\'s files have a dot until opened; Mark as Not Viewed brings
   const env = { ...process.env, GIT_INDEX_FILE: index };
   const plumb = (args, input) => require('child_process').execFileSync('git', args, { cwd: r.dir, env, input, encoding: 'utf8' }).trim();
   const head = r.git('rev-parse', 'HEAD');
+  // Two commits: the first deletes a file the base has and adds pr/one.txt, the second pr/two.txt.
+  const add = (p, text) => plumb(['update-index', '--add', '--cacheinfo', `100644,${plumb(['hash-object', '-w', '--stdin'], text)},${p}`]);
+  const gone = r.git('ls-tree', '--name-only', 'HEAD').split('\n').find((n) => /\.txt$/.test(n));
   plumb(['read-tree', head]);
-  for (const [p, text] of [['pr/one.txt', 'one\n'], ['pr/two.txt', 'two\n']]) plumb(['update-index', '--add', '--cacheinfo', `100644,${plumb(['hash-object', '-w', '--stdin'], text)},${p}`]);
+  plumb(['update-index', '--force-remove', gone]);
+  add('pr/one.txt', 'one\n');
+  const first = plumb(['commit-tree', plumb(['write-tree']), '-p', head, '-m', 'PR work 1']);
+  add('pr/two.txt', 'two\n');
   const tree = plumb(['write-tree']);
-  const pr = plumb(['commit-tree', tree, '-p', head, '-m', 'PR work']);
+  const pr = plumb(['commit-tree', tree, '-p', first, '-m', 'PR work 2']);
   const testMerge = plumb(['commit-tree', tree, '-p', head, '-p', pr, '-m', 'Merge']);
   fs.rmSync(index, { force: true });
   r.git('push', '-q', remote, `${head}:refs/heads/main`, `${pr}:refs/pull/7/head`, `${testMerge}:refs/pull/7/merge`);
@@ -874,7 +880,9 @@ test('a pull request\'s files have a dot until opened; Mark as Not Viewed brings
   const prNode = roots.flatMap((n) => (n.number ? [n] : [])).find((n) => n.number === 7) || (await Promise.all(roots.filter((n) => n.getChildren && !n.number).map((g) => view.getChildren(g)))).flat().find((n) => n.number === 7);
   assert.ok(prNode, `pull request #7 is listed: ${roots.map((n) => n.getTreeItem().label).join(' | ')}`);
   const group = (await view.getChildren(prNode)).find((n) => /Files changed/.test(n.label));
-  const [folder] = await view.getChildren(group);
+  const top = await view.getChildren(group);
+  const folder = top.find((n) => n.name === 'pr');
+  const deleted = top.find((n) => n.path === gone);
   const files = await view.getChildren(folder);
   assert.deepEqual(files.map((f) => f.path), ['pr/one.txt', 'pr/two.txt']);
   const item = files[0].getTreeItem();
@@ -884,49 +892,93 @@ test('a pull request\'s files have a dot until opened; Mark as Not Viewed brings
   // Opening it (its row's command) marks it viewed.
   await run(item.command.command, ...item.command.arguments);
   assert.equal(files[0].getTreeItem().contextValue, 'file:pr:viewed');
-  assert.equal(group.getTreeItem().description, '1/2 viewed');
+  assert.equal(group.getTreeItem().description, '1/3 viewed');
+  assert.match(files[0].getTreeItem().tooltip, /✓ Viewed/);
   // Its count is redrawn once VS Code has stopped loading rows (TreeProvider.redraw).
   await new Promise((res) => setTimeout(res, 400));
   assert.ok(fired.some((e) => Array.isArray(e) && e.includes(group)), 'the Files changed row is redrawn');
   await run('commitCorner.markCommitFileUnviewed', files[0]);
   assert.equal(files[0].getTreeItem().contextValue, 'file:pr:new');
-  await run('commitCorner.markCommitFileViewed', files[1]);
+  // Next Unviewed File in that diff: the next file of the list not viewed yet, in the order shown.
+  const viewed = require('../src/vscode/viewed');
+  const shown = viewed.listOfShown(files[0].openUris());
+  assert.equal(shown.list.label, 'pull request #7');
+  assert.deepEqual(shown.list.rows.map((n) => n.path), ['pr/one.txt', 'pr/two.txt', gone]);
+  const next = viewed.nextUnviewedRow(shown.scope, shown.list, shown.at);
+  assert.equal(next.path, 'pr/two.txt');
+  await next.open();
   assert.equal(files[1].getTreeItem().contextValue, 'file:pr:viewed');
+  // Several selected files, or a folder: all of them at once.
+  await run('commitCorner.markCommitFileUnviewed', files[1], [files[0], files[1]]);
+  assert.equal(group.getTreeItem().description, undefined, 'none viewed');
+  assert.equal(folder.getTreeItem().contextValue, 'folder:marks');
+  await run('commitCorner.markCommitFileViewed', folder, [folder]);
+  assert.equal(group.getTreeItem().description, '2/3 viewed');
+  // With the dots off, a file still offers its Mark menus (by its state) and the list counts.
+  mock.configValues.set('markUnviewedFiles', false);
+  try {
+    assert.equal(deleted.getTreeItem().contextValue, 'file:pr:new');
+    assert.match(deleted.getTreeItem().tooltip, /Not viewed yet/);
+  } finally {
+    mock.configValues.delete('markUnviewedFiles');
+  }
+  // A file the pull request deleted (in its first commit): read from the merge base, not from
+  // the parent of its last commit (where it is gone too).
+  mock.executed.length = 0;
+  await run('commitCorner.compareFileWithWorkingTree', deleted);
+  const diff = mock.executed.find((e) => e.id === 'vscode.diff');
+  assert.ok(diff && String(diff.args[0]).includes(head) && !String(diff.args[0]).includes(first), `left side from the merge base: ${diff && diff.args[0]}`);
   // The menus that work on any file still match (Open Working File and the others).
   const when = pkg.contributes.menus['view/item/context'].find((m) => m.command === 'commitCorner.openWorkingFile').when;
   const re = new RegExp(/viewItem =~ \/(.*?)\/ /.exec(when)[1]);
   assert.ok(re.test('file:pr:new') && re.test('file:pr:viewed'));
 });
 
-test('a row redrawn while VS Code loads rows waits until loading has been quiet (else it shows only part of its children)', async () => {
+test('a row is redrawn after its own children have loaded and the view has been quiet; other rows wait 3 s at most', async () => {
   const { TreeProvider } = require('../src/vscode/views/nodes');
   const provider = new TreeProvider();
   const fired = [];
   provider.onDidChangeTreeData((e) => fired.push(e));
-  let finish;
-  const slow = { getChildren: () => new Promise((res) => (finish = res)) };
-  const loading = provider.getChildren(slow);
-  const row = { getTreeItem: () => ({}) };
-  provider.redraw(row);
-  provider.redraw([row]);
-  await new Promise((res) => setTimeout(res, 350));
-  assert.deepEqual(fired, [], 'held while loading');
-  finish([]);
+  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+  const pending = () => {
+    let finish;
+    const node = { getChildren: () => new Promise((res) => (finish = res)), getTreeItem: () => ({}) };
+    return { node, finish: (v) => finish(v) };
+  };
+  // A row redrawn while its own children load (a pull request just fetched): after them, then
+  // once the rows below have loaded too.
+  const pr = pending();
+  const loading = provider.getChildren(pr.node);
+  provider.redraw(pr.node);
+  provider.redraw([pr.node]);
+  await sleep(500);
+  assert.deepEqual(fired, [], 'held while its children load');
+  pr.finish([]);
   await loading;
-  await new Promise((res) => setTimeout(res, 100));
+  await sleep(50);
   assert.deepEqual(fired, [], 'and for a moment after (VS Code asks for the next level)');
-  await new Promise((res) => setTimeout(res, 300));
-  assert.deepEqual(fired, [[row]], 'then once');
-  // Idle: at once. A full refresh drops what was waiting.
-  provider.redraw(row);
-  assert.deepEqual(fired.length, 2);
-  const again = provider.getChildren(slow);
-  provider.redraw(row);
+  await sleep(450);
+  assert.deepEqual(fired, [[pr.node]], 'then once');
+  // Idle: at once.
+  provider.redraw(pr.node);
+  assert.equal(fired.length, 2);
+  // Another row, while something else in the view loads for long (another pull request being
+  // fetched): 3 s at most.
+  const slow = pending();
+  const busy = provider.getChildren(slow.node);
+  const other = { getTreeItem: () => ({}) };
+  provider.redraw(other);
+  await sleep(2500);
+  assert.equal(fired.length, 2, 'held while the view loads');
+  await sleep(1000);
+  assert.deepEqual(fired[2], [other], 'not longer than 3 s');
+  // A full refresh drops what was waiting.
+  provider.redraw(other);
   provider.refresh();
-  finish([]);
-  await again;
-  await new Promise((res) => setTimeout(res, 400));
-  assert.deepEqual(fired.slice(2), [undefined]);
+  slow.finish([]);
+  await busy;
+  await sleep(500);
+  assert.deepEqual(fired.slice(3), [undefined]);
   provider.dispose();
 });
 

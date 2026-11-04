@@ -165,7 +165,17 @@ test('a viewed mark holds for the content it was given, and goes when the file c
   assert.equal(store.count('pr:1', [{ path: 'a.txt', fingerprint: 'aaa' }, { path: 'c.txt', fingerprint: 'c' }]), 1);
   await store.set('pr:1', [{ path: 'a.txt', fingerprint: 'aaa' }], false);
   assert.equal(store.isViewed('pr:1', 'a.txt', 'aaa'), false);
-  assert.deepEqual(store.all(), {}, 'an empty scope is forgotten');
+  assert.deepEqual(Object.keys(store.all()), [], 'an empty scope is forgotten');
+  // Any file name is a file (no object property magic), and survives a reload.
+  const m = memento();
+  const odd = new ViewedStore(m);
+  await odd.set('pr:9', [{ path: '__proto__', fingerprint: 'p' }, { path: 'constructor', fingerprint: 'c' }], true);
+  assert.equal(odd.isViewed('pr:9', '__proto__', 'p'), true);
+  assert.equal(odd.isViewed('pr:9', 'constructor', 'c'), true);
+  assert.equal(odd.isViewed('pr:9', 'toString', undefined), false);
+  const reloaded = new ViewedStore({ get: (k) => JSON.parse(JSON.stringify(m.get(k))), update: async () => {} });
+  assert.equal(reloaded.isViewed('pr:9', '__proto__', 'p'), true);
+  assert.equal(reloaded.isViewed('__proto__', 'x', 'p'), false);
   for (let k = 0; k < 105; k++) await store.set(`s${k}`, [{ path: 'x', fingerprint: 'f' }], true);
   assert.equal(Object.keys(store.all()).length, 100, 'the least recently used scopes go');
 });
@@ -204,7 +214,7 @@ test('Changes vs Base in the Worktrees view: a file has a dot until opened, and 
   // Its row's click: the diff opens (keyboard kept in the list), and it is viewed.
   assert.equal(item.command.command, 'commitCorner.worktreeOpenChangedFile');
   mock.executed.length = 0;
-  await files[0].openAndMark();
+  await files[0].open();
   assert.equal(mock.executed[0].id, 'vscode.diff');
   assert.deepEqual(mock.executed[0].args[3], { preserveFocus: true, preview: true });
   assert.equal(redrawn[0], changes, 'the row with the count is redrawn');

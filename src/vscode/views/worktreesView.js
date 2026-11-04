@@ -73,7 +73,8 @@ class WorktreeChangesNode {
     const item = new vscode.TreeItem(`Changes vs ${this.base}`, open ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
     // Short (a narrow sidebar cuts the end): "3 files", then "1/3 viewed", "all 3 viewed".
     item.description = !seen ? `${n} file${n === 1 ? '' : 's'}` : seen === n ? (n === 1 ? 'viewed' : `all ${n} viewed`) : `${seen}/${n} viewed`;
-    item.tooltip = `What ${this.worktree.branch || path.basename(this.worktreePath)} changed since it left ${this.base} (${shortSha(this.mergeBase)}), committed and uncommitted. A file you have not opened has a dot; a file that changes again gets it back. The + in a file's gutter adds a review comment for the agent.`;
+    const marks = viewed.marksUnviewed() ? 'A file you have not opened has a dot; a file that changes again gets it back.' : 'Opening a file marks it viewed; a file that changes again is unviewed again.';
+    item.tooltip = `What ${this.worktree.branch || path.basename(this.worktreePath)} changed since it left ${this.base} (${shortSha(this.mergeBase)}), committed and uncommitted. ${marks} The + in a file's gutter adds a review comment for the agent.`;
     item.iconPath = new vscode.ThemeIcon(seen === n ? 'pass' : 'git-compare');
     item.contextValue = 'viewedGroup:worktree';
     item.id = `worktreeChanges:${this.worktreePath}`;
@@ -81,15 +82,19 @@ class WorktreeChangesNode {
   }
 
   getChildren() {
-    return [...this.changes].sort((a, b) => a.path.localeCompare(b.path)).map((c) => new WorktreeFileNode(this, c));
+    const rows = [...this.changes].sort((a, b) => a.path.localeCompare(b.path)).map((c) => new WorktreeFileNode(this, c));
+    // Next Unviewed File in their diffs goes through them in this order.
+    viewed.registerList(this.viewedScope, `Changes vs ${this.base}`, rows);
+    return rows;
   }
 }
 
 /** A file of "Changes vs main": opens base ↔ the file in the worktree, which marks it viewed (no dot). */
 class WorktreeFileNode {
-  /** The URIs its diff shows (set when its row is drawn). */
+  /** The URIs its diff shows. */
   openUris() {
-    return this.uris || [];
+    if (!this.uris) this.getTreeItem();
+    return this.uris;
   }
 
   constructor(owner, change) {
@@ -110,28 +115,28 @@ class WorktreeFileNode {
     // the query carries its viewed mark (the dot, see viewed.scopedKey).
     item.resourceUri = file.with({ fragment: 'commit-corner-history', query: `vs=${viewed.scopedKey(this.viewed.scope, change.path, this.viewed.fingerprint)}` });
     item.iconPath = statusIcon(change.status);
-    const unviewed = viewed.scopedUnviewed(this.viewed.scope, change.path, this.viewed.fingerprint);
-    item.tooltip = `${STATUS_LABELS[change.status] || change.status}: ${change.origPath ? `${change.origPath} → ` : ''}${change.path}${unviewed ? '\n● Not viewed (the dot goes when you open it)' : ''}`;
+    item.tooltip = `${STATUS_LABELS[change.status] || change.status}: ${change.origPath ? `${change.origPath} → ` : ''}${change.path}\n${viewed.scopedTooltip(this.viewed.scope, change.path, this.viewed.fingerprint)}`;
     // Not /^worktree/ (those are the worktree row's menus); :new offers Mark as Viewed, :viewed
-    // Mark as Not Viewed (a file that cannot be fingerprinted neither).
-    item.contextValue = `changedFile:worktree${unviewed ? ':new' : viewed.FINGERPRINT.test(this.viewed.fingerprint || '') ? ':viewed' : ''}`;
+    // Mark as Not Viewed, whatever the dots setting says (a file that cannot be fingerprinted neither).
+    const state = viewed.scopedState(this.viewed.scope, change.path, this.viewed.fingerprint);
+    item.contextValue = `changedFile:worktree${state === 'none' ? '' : `:${state}`}`;
     const left = toGitUri(owner.repoRoot, change.origPath || change.path, owner.mergeBase, { root: owner.worktreePath });
     const title = `${name} (${owner.worktree.branch || path.basename(owner.worktreePath)} vs ${owner.base})`;
     // The keyboard stays in the list: Enter shows the file, ↓ goes to the next.
     const keep = { preserveFocus: true, preview: true };
     this.uris = [String(file), String(left)];
-    if (change.status === 'A') this.open = ['vscode.open', file, keep];
-    else if (change.status === 'D') this.open = ['vscode.open', left, keep];
-    else this.open = ['vscode.diff', left, file, title, keep];
-    // Opened, it is viewed (openAndMark).
+    if (change.status === 'A') this.opener = ['vscode.open', file, keep];
+    else if (change.status === 'D') this.opener = ['vscode.open', left, keep];
+    else this.opener = ['vscode.diff', left, file, title, keep];
+    // Opened, it is viewed (open below).
     item.command = { command: 'commitCorner.worktreeOpenChangedFile', title: 'Open Changes', arguments: [this] };
     return item;
   }
 
   /** Show it (as its row's click does) and mark it viewed. */
-  async openAndMark() {
-    if (!this.open) this.getTreeItem();
-    await vscode.commands.executeCommand(...this.open);
+  async open() {
+    if (!this.opener) this.getTreeItem();
+    await vscode.commands.executeCommand(...this.opener);
     await viewed.markScoped(this.viewed, this.path);
   }
 }
@@ -443,7 +448,7 @@ function register(ctx) {
   /** A worktree's uncommitted changes (its HEAD ↔ its files) in the multi-diff editor. */
   // A file of "Changes vs …" (only its own row passes itself here).
   cmd('commitCorner.worktreeOpenChangedFile', async (node) => {
-    if (node instanceof WorktreeFileNode) await node.openAndMark();
+    if (node instanceof WorktreeFileNode) await node.open();
   });
 
   cmd('commitCorner.worktreeOpenChanges', async (node) => {

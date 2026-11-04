@@ -28,8 +28,10 @@ class ViewedStore {
 
   /** Whether `file` was viewed with this fingerprint (undefined fingerprint: never viewed). */
   isViewed(scope, file, fingerprint) {
-    const s = this.all()[scope];
-    return !!(fingerprint && s && s.files && s.files[file] === fingerprint);
+    const all = this.all();
+    const s = Object.prototype.hasOwnProperty.call(all, scope) ? all[scope] : undefined;
+    // Own properties only: a file named "__proto__" or "constructor" is a file like any other.
+    return !!(fingerprint && s && s.files && Object.prototype.hasOwnProperty.call(s.files, file) && s.files[file] === fingerprint);
   }
 
   /** @param {{path: string, fingerprint?: string}[]} files */
@@ -42,8 +44,10 @@ class ViewedStore {
    * @param {{path: string, fingerprint?: string}[]} files
    */
   async set(scope, files, viewed) {
-    const all = { ...this.all() };
-    const s = { files: { ...((all[scope] && all[scope].files) || {}) }, used: Date.now() };
+    // Objects without a prototype: any file name (even "__proto__") is a plain key.
+    const all = Object.assign(Object.create(null), this.all());
+    const before = Object.prototype.hasOwnProperty.call(all, scope) && all[scope] && all[scope].files;
+    const s = { files: Object.assign(Object.create(null), before || {}), used: Date.now() };
     for (const f of files) {
       if (viewed && f.fingerprint) s.files[f.path] = f.fingerprint;
       else delete s.files[f.path];
@@ -91,7 +95,25 @@ const FINGERPRINT = /^([0-9a-f]{40}([0-9a-f]{24})?|deleted)$/;
  * marked) with this content, the setting on, and a fingerprint to mark it with.
  */
 function scopedUnviewed(scope, file, fingerprint) {
-  return marksUnviewed() && FINGERPRINT.test(fingerprint || '') && !get().isViewed(scope, file, fingerprint);
+  return marksUnviewed() && scopedState(scope, file, fingerprint) === 'new';
+}
+
+/**
+ * A file of a list with viewed marks: 'new' (not viewed with this content), 'viewed', or
+ * 'none' (no fingerprint: it cannot be marked). Whatever the setting says (its menu offers
+ * Mark as Viewed / Not Viewed even without the dots).
+ */
+function scopedState(scope, file, fingerprint) {
+  if (!FINGERPRINT.test(fingerprint || '')) return 'none';
+  return get().isViewed(scope, file, fingerprint) ? 'viewed' : 'new';
+}
+
+/** The tooltip line of a file of a list with viewed marks. */
+function scopedTooltip(scope, file, fingerprint) {
+  const state = scopedState(scope, file, fingerprint);
+  if (state === 'none') return 'Cannot be marked as viewed (no content to compare: a symbolic link, a submodule or an unreadable file)';
+  if (state === 'viewed') return '✓ Viewed (Mark as Not Viewed in its menu brings it back)';
+  return marksUnviewed() ? '● Not viewed (the dot goes when you open it)' : 'Not viewed yet (opening it marks it viewed)';
 }
 
 /**
@@ -101,9 +123,61 @@ function scopedUnviewed(scope, file, fingerprint) {
  * @param {{scope: string, fingerprint?: string}} v the row's `viewed`
  */
 async function markScoped(v, file, on = true) {
-  if (!v || typeof v.scope !== 'string' || typeof file !== 'string' || !FINGERPRINT.test(v.fingerprint || '')) return;
-  if (get().isViewed(v.scope, file, v.fingerprint) === on) return;
-  await get().set(v.scope, [{ path: file, fingerprint: v.fingerprint }], on);
+  await markScopedMany([{ viewed: v, path: file }], on);
+}
+
+/** No list's scope or file path is this long; anything longer was not made by a row. */
+const MAX_KEY = 8192;
+
+/**
+ * Mark files of lists viewed (or not): several rows selected, or a folder's. One write per list.
+ * @param {{viewed: {scope: string, fingerprint?: string}, path: string}[]} rows
+ */
+async function markScopedMany(rows, on = true) {
+  const byScope = new Map();
+  for (const r of rows) {
+    const v = r && r.viewed;
+    if (!v || typeof v.scope !== 'string' || typeof r.path !== 'string' || v.scope.length > MAX_KEY || r.path.length > MAX_KEY) continue;
+    if (!FINGERPRINT.test(v.fingerprint || '') || get().isViewed(v.scope, r.path, v.fingerprint) === on) continue;
+    if (!byScope.has(v.scope)) byScope.set(v.scope, []);
+    byScope.get(v.scope).push({ path: r.path, fingerprint: v.fingerprint });
+  }
+  for (const [scope, files] of byScope) await get().set(scope, files, on);
+}
+
+/**
+ * The lists with viewed marks shown lately (a pull request's files, a worktree's changes), for
+ * Next Unviewed File in their diffs: scope -> {label, rows}. Rows have openUris() (what their
+ * diff shows) and open() (shows the diff and marks the file viewed). The 20 last loaded.
+ */
+const MAX_LISTS = 20;
+const lists = new Map();
+
+/** @param {string} scope @param {string} label ("pull request #7") @param {any[]} rows in the order shown */
+function registerList(scope, label, rows) {
+  lists.delete(scope);
+  lists.set(scope, { label, rows });
+  while (lists.size > MAX_LISTS) lists.delete(lists.keys().next().value);
+}
+
+/**
+ * The list (and row) whose file is shown in the active diff, if one is: `uris` are the active
+ * editor's (as strings).
+ */
+function listOfShown(uris) {
+  const shown = new Set(uris);
+  for (const [scope, list] of [...lists].reverse()) {
+    const at = list.rows.findIndex((r) => r.openUris().some((u) => shown.has(u)));
+    if (at >= 0) return { scope, list, at };
+  }
+  return undefined;
+}
+
+/** The next row of a list (after index `at`, around to the start) not viewed yet. */
+function nextUnviewedRow(scope, list, at) {
+  const rows = list.rows;
+  const after = [...rows.slice(at + 1), ...rows.slice(0, Math.max(0, at))];
+  return after.find((r) => scopedState(scope, r.path, r.viewed && r.viewed.fingerprint) === 'new');
 }
 
 const CHANGES_KEY = 'viewedChanges';
@@ -278,4 +352,4 @@ function commitCount(sha, files) {
   return { viewed: files.filter((f) => m.has(ChangeMarks.key(sha, f))).length, total: files.length };
 }
 
-module.exports = { registerDecorations, ViewedStore, ChangeMarks, scopedKey, scopedUnviewed, markScoped, FINGERPRINT, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };
+module.exports = { registerDecorations, ViewedStore, ChangeMarks, scopedKey, scopedUnviewed, scopedState, scopedTooltip, markScoped, markScopedMany, registerList, listOfShown, nextUnviewedRow, FINGERPRINT, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };

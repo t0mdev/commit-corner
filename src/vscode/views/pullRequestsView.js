@@ -126,7 +126,7 @@ class PullRequestNode {
     const marks = files.map((f) => ({ path: f.path, fingerprint: fingerprintOf(ids, f) }));
     // The group redraws itself when a mark changes (its count): not the whole pull request,
     // whose reviews and checks would be fetched again.
-    const filesGroup = new GroupNode(`Files changed (${files.length})`, () => fileNodes(this.repo, files, { leftRef: mergeBase, rightRef: headSha, diffLabel: `#${this.number}`, contextValue: 'file:pr' }, { tree: true, viewed: { scope, ids, owner: filesGroup, provider: this.view } }), {
+    const filesGroup = new GroupNode(`Files changed (${files.length})`, () => fileNodes(this.repo, files, { leftRef: mergeBase, rightRef: headSha, diffLabel: `#${this.number}`, contextValue: 'file:pr' }, { tree: true, viewed: { scope, ids, owner: filesGroup, provider: this.view, label: `pull request #${this.number}` } }), {
       icon: 'files',
       description: () => {
         const seen = viewed.get().count(scope, marks);

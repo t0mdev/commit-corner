@@ -18,6 +18,11 @@ const { mapRangesToFrom, eolOf, withEol, DiffTooLargeError } = require('../../gi
  */
 
 const isFullSha = (s) => typeof s === 'string' && /^[0-9a-f]{40,64}$/.test(s);
+/**
+ * The revision a row's deleted file is read from: its left side when the row has one (a pull
+ * request's merge base, a merge view's other side, a commit's parent), else the parent of `sha`.
+ */
+const beforeRev = (node) => (isFullSha(node.leftRef) ? node.leftRef : `${node.sha}^`);
 
 /** Resolve (repo, relative path) from a URI argument or the active editor. */
 function fileTarget(manager, uri) {
@@ -201,7 +206,7 @@ function register(ctx) {
 
   cmd('commitCorner.openFileAtCommit', async (node) => {
     const repo = manager.getRepository(node.repoRoot);
-    if (repo) await openAtRevision(repo, node.status === 'D' ? `${node.sha}^` : node.sha, node.status === 'D' ? node.origPath || node.path : node.path, { preview: false });
+    if (repo) await openAtRevision(repo, node.status === 'D' ? beforeRev(node) : node.sha, node.status === 'D' ? node.origPath || node.path : node.path, { preview: false });
   });
 
   cmd('commitCorner.restoreFileFromCommit', async (node) => {
@@ -209,9 +214,9 @@ function register(ctx) {
     if (!repo) return;
     // Deleted in that commit: the version to restore is the one just before it.
     const deleted = node.status === 'D';
-    const rev = deleted ? `${node.sha}^` : node.sha;
+    const rev = deleted ? beforeRev(node) : node.sha;
     const ok = await notify.warn(`Replace "${node.path}" in the working tree with its version from ${deleted ? `before ${shortSha(node.sha)} (deleted there)` : shortSha(node.sha)}?`, { modal: true }, 'Restore');
-    if (ok) await repo.restoreFile(node.path, rev);
+    if (ok) await repo.restoreFile(deleted ? node.origPath || node.path : node.path, rev);
   });
 
   cmd('commitCorner.compareWithRef', async (uri) => {
