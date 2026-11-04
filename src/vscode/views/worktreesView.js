@@ -43,8 +43,8 @@ async function baseOf(repo, wt) {
 
 /**
  * "Changes vs main" under an agent's worktree: what its branch did since it left the base,
- * committed and uncommitted (like Changes vs Base), file by file, each with a "Viewed"
- * checkbox. A file the agent changes again is unviewed again (its content fingerprint differs).
+ * committed and uncommitted (like Changes vs Base), file by file; a file you have not opened has
+ * a dot. A file the agent changes again is unviewed again (its content fingerprint differs).
  */
 class WorktreeChangesNode {
   constructor(parent, base, { mergeBase, changes, ids }) {
@@ -62,6 +62,7 @@ class WorktreeChangesNode {
     this.viewedFiles = changes.map((c) => ({ path: c.path, fingerprint: fingerprintOf(ids, c) }));
     this.viewedOwner = this;
     this.viewedProvider = parent.provider;
+    if (parent.provider && parent.provider.viewedOwners) parent.provider.viewedOwners.set(this.viewedScope, this);
   }
 
   getTreeItem() {
@@ -72,7 +73,7 @@ class WorktreeChangesNode {
     const item = new vscode.TreeItem(`Changes vs ${this.base}`, open ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
     // Short (a narrow sidebar cuts the end): "3 files", then "1/3 viewed", "all 3 viewed".
     item.description = !seen ? `${n} file${n === 1 ? '' : 's'}` : seen === n ? (n === 1 ? 'viewed' : `all ${n} viewed`) : `${seen}/${n} viewed`;
-    item.tooltip = `What ${this.worktree.branch || path.basename(this.worktreePath)} changed since it left ${this.base} (${shortSha(this.mergeBase)}), committed and uncommitted. Check files off as you review them; a file that changes again unchecks itself. The + in a file's gutter adds a review comment for the agent.`;
+    item.tooltip = `What ${this.worktree.branch || path.basename(this.worktreePath)} changed since it left ${this.base} (${shortSha(this.mergeBase)}), committed and uncommitted. A file you have not opened has a dot; a file that changes again gets it back. The + in a file's gutter adds a review comment for the agent.`;
     item.iconPath = new vscode.ThemeIcon(seen === n ? 'pass' : 'git-compare');
     item.contextValue = 'viewedGroup:worktree';
     item.id = `worktreeChanges:${this.worktreePath}`;
@@ -84,7 +85,7 @@ class WorktreeChangesNode {
   }
 }
 
-/** A file of "Changes vs main": opens base ↔ the file in the worktree; Viewed checkbox. */
+/** A file of "Changes vs main": opens base ↔ the file in the worktree, which marks it viewed (no dot). */
 class WorktreeFileNode {
   /** The URIs its diff shows (set when its row is drawn). */
   openUris() {
@@ -105,21 +106,33 @@ class WorktreeFileNode {
     const dir = path.posix.dirname(change.path);
     item.description = dir === '.' ? '' : dir;
     const file = vscode.Uri.file(path.join(owner.worktreePath, ...change.path.split('/')));
-    // The fragment keeps the file icon but not the Explorer's decorations of the main worktree.
-    item.resourceUri = file.with({ fragment: 'commit-corner-history' });
+    // The fragment keeps the file icon but not the Explorer's decorations of the main worktree;
+    // the query carries its viewed mark (the dot, see viewed.scopedKey).
+    item.resourceUri = file.with({ fragment: 'commit-corner-history', query: `vs=${viewed.scopedKey(this.viewed.scope, change.path, this.viewed.fingerprint)}` });
     item.iconPath = statusIcon(change.status);
-    item.tooltip = `${STATUS_LABELS[change.status] || change.status}: ${change.origPath ? `${change.origPath} → ` : ''}${change.path}`;
-    item.contextValue = 'changedFile:worktree'; // not /^worktree/: those are the worktree row's menus
-    item.checkboxState = viewed.checkbox(viewed.get(), this.viewed.scope, change.path, this.viewed.fingerprint);
+    const unviewed = viewed.scopedUnviewed(this.viewed.scope, change.path, this.viewed.fingerprint);
+    item.tooltip = `${STATUS_LABELS[change.status] || change.status}: ${change.origPath ? `${change.origPath} → ` : ''}${change.path}${unviewed ? '\n● Not viewed (the dot goes when you open it)' : ''}`;
+    // Not /^worktree/ (those are the worktree row's menus); :new offers Mark as Viewed, :viewed
+    // Mark as Not Viewed (a file that cannot be fingerprinted neither).
+    item.contextValue = `changedFile:worktree${unviewed ? ':new' : viewed.FINGERPRINT.test(this.viewed.fingerprint || '') ? ':viewed' : ''}`;
     const left = toGitUri(owner.repoRoot, change.origPath || change.path, owner.mergeBase, { root: owner.worktreePath });
     const title = `${name} (${owner.worktree.branch || path.basename(owner.worktreePath)} vs ${owner.base})`;
-    // The keyboard stays in the list: Enter shows the file, Space ticks it off.
+    // The keyboard stays in the list: Enter shows the file, ↓ goes to the next.
     const keep = { preserveFocus: true, preview: true };
     this.uris = [String(file), String(left)];
-    if (change.status === 'A') item.command = { command: 'vscode.open', title: 'Open', arguments: [file, keep] };
-    else if (change.status === 'D') item.command = { command: 'vscode.open', title: 'Open', arguments: [left, keep] };
-    else item.command = { command: 'vscode.diff', title: 'Open Changes', arguments: [left, file, title, keep] };
+    if (change.status === 'A') this.open = ['vscode.open', file, keep];
+    else if (change.status === 'D') this.open = ['vscode.open', left, keep];
+    else this.open = ['vscode.diff', left, file, title, keep];
+    // Opened, it is viewed (openAndMark).
+    item.command = { command: 'commitCorner.worktreeOpenChangedFile', title: 'Open Changes', arguments: [this] };
     return item;
+  }
+
+  /** Show it (as its row's click does) and mark it viewed. */
+  async openAndMark() {
+    if (!this.open) this.getTreeItem();
+    await vscode.commands.executeCommand(...this.open);
+    await viewed.markScoped(this.viewed, this.path);
   }
 }
 
@@ -285,14 +298,16 @@ class WorktreesView extends TreeProvider {
     this.openChanges = new Set();
     /** worktree root -> its "Agent review" row (redrawn alone when a comment moves) */
     this.reviewNodes = new Map();
-    this.view = require('../util').registerTreeView('commitCorner.worktrees', vscode.window.createTreeView('commitCorner.worktrees', { treeDataProvider: this, manageCheckboxStateManually: true }));
+    this.view = require('../util').registerTreeView('commitCorner.worktrees', vscode.window.createTreeView('commitCorner.worktrees', { treeDataProvider: this }));
+    /** viewed scope -> the "Changes vs …" row that counts its marks (redrawn when they change) */
+    this.viewedOwners = new Map();
     const refresh = debounce(() => this.refresh(), 1500);
     // An "Agent review" row redrawn once typing pauses for 300 ms (a comment moves with every keystroke above it).
     const pendingReview = new Set();
     const flushReview = debounce(() => {
       const nodes = [...pendingReview];
       pendingReview.clear();
-      if (nodes.length) this._onDidChangeTreeData.fire(nodes);
+      if (nodes.length) this.redraw(nodes);
     }, 300);
     const redrawReview = (node) => {
       pendingReview.add(node);
@@ -327,7 +342,10 @@ class WorktreesView extends TreeProvider {
         } else if (node && !this.reviewCountChanged(node[1])) redrawReview(node[1]);
         else refresh();
       })] : []),
-      viewed.watchCheckboxes(this.view, this),
+      viewed.get().onDidChange((scope) => {
+        const owner = this.viewedOwners.get(scope);
+        if (owner) this.redraw(owner);
+      }),
       // Which "Changes vs …" rows are open (a redraw must not close the one you are reviewing).
       this.view.onDidExpandElement((e) => {
         if (e.element instanceof WorktreeChangesNode) this.openChanges.add(e.element.worktreePath);
@@ -423,6 +441,11 @@ function register(ctx) {
   });
 
   /** A worktree's uncommitted changes (its HEAD ↔ its files) in the multi-diff editor. */
+  // A file of "Changes vs …" (only its own row passes itself here).
+  cmd('commitCorner.worktreeOpenChangedFile', async (node) => {
+    if (node instanceof WorktreeFileNode) await node.openAndMark();
+  });
+
   cmd('commitCorner.worktreeOpenChanges', async (node) => {
     const repo = await manager.pick(node);
     if (!repo || !node || !node.worktreePath) return;

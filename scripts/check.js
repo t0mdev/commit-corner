@@ -183,6 +183,13 @@ const notCommands = new Set([
 for (const id of used) {
   if (!declared.has(id) && !notCommands.has(id) && !id.startsWith('commitCorner.blame.') && !id.startsWith('commitCorner.graph.')) problems.push(`code references undeclared command ${id}`);
 }
+// Tree rows are redrawn through TreeProvider.redraw only (docs/DEVELOPMENT.md: a row redrawn
+// while its children load shows only part of them).
+for (const f of jsFiles.filter((x) => x.startsWith(path.join(root, 'src') + path.sep))) {
+  fs.readFileSync(f, 'utf8').split('\n').forEach((line, i) => {
+    if (/_onDidChangeTreeData\.fire\((?!undefined\)|nodes\))/.test(line)) problems.push(`${path.relative(root, f)}:${i + 1}: redraw tree rows with this.redraw(…), not _onDidChangeTreeData.fire`);
+  });
+}
 for (const icon of [pkg.icon, ...pkg.contributes.viewsContainers.activitybar.map((a) => a.icon)].filter(Boolean)) {
   if (!fs.existsSync(path.join(root, icon))) problems.push(`missing file ${icon}`);
 }

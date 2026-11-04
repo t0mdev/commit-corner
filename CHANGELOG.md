@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.0
+
+- **A pull request's files and a worktree's *Changes vs main* mark what you have not seen like a commit's files do**: the *Viewed* checkboxes are gone; a file you have not opened has a dot, opening it marks it viewed (`Enter` keeps the keyboard in the list, `↓` goes on to the next). A push or an agent's edit that changes the file brings its dot back. A file's menu has *Mark as Viewed* / *Mark as Not Viewed*; Mark All as Viewed / Clear stay on the list's row, and so does its count ("2/5 viewed"). Files you had checked stay viewed. `Space` no longer ticks a file off. The dots follow `commitCorner.markUnviewedFiles`.
+- **Review** submenu in each Commit Corner view's `···` menu (while there are review comments): Copy Review for the Agent (with its shortcut, `Ctrl+Alt+G C`), Save Review to the Worktree, Delete All Review Comments….
+- Fixed: a large pull request opened for the first time could show only part of its files until you refreshed. The pull request's row was redrawn (it had just been fetched) while VS Code was still loading the rows below it; rows redrawn while a view loads now wait until it is done.
+
 ## 1.5.0
 
 - **Merge Resolution**: what a merge commit itself changed, beyond git's automatic merge of its parents: the conflicts it resolved (marked *conflict*, the markers on the left side) and anything else edited while merging. git merges the parents again for it (`merge-tree`, nothing in your working tree or index changes); a clean merge says so. With git older than 2.38 it is merged again without rename detection, merge drivers or several merge bases and marked approximate; a merge with more than 1000 files (or 64 MB) changed on both sides, or one in a partial clone, shows its resolution as unavailable there. A shallow clone without the merge's base says so.

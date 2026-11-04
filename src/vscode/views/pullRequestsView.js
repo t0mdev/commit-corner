@@ -124,9 +124,9 @@ class PullRequestNode {
     const scope = `pr:${this.repoRoot}:${this.remote}#${this.number}`;
     const ids = await this.repo.changedBlobIds(mergeBase, headSha).catch(() => new Map());
     const marks = files.map((f) => ({ path: f.path, fingerprint: fingerprintOf(ids, f) }));
-    // The group redraws itself when a checkbox changes (its count, its files): not the whole
-    // pull request, whose reviews and checks would be fetched again.
-    const filesGroup = new GroupNode(`Files changed (${files.length})`, () => fileNodes(this.repo, files, { leftRef: mergeBase, rightRef: headSha, diffLabel: `#${this.number}` }, { tree: true, viewed: { scope, ids, owner: filesGroup, provider: this.view } }), {
+    // The group redraws itself when a mark changes (its count): not the whole pull request,
+    // whose reviews and checks would be fetched again.
+    const filesGroup = new GroupNode(`Files changed (${files.length})`, () => fileNodes(this.repo, files, { leftRef: mergeBase, rightRef: headSha, diffLabel: `#${this.number}`, contextValue: 'file:pr' }, { tree: true, viewed: { scope, ids, owner: filesGroup, provider: this.view } }), {
       icon: 'files',
       description: () => {
         const seen = viewed.get().count(scope, marks);
@@ -137,12 +137,13 @@ class PullRequestNode {
       props: { repoRoot: this.repoRoot, prNumber: this.number, number: this.number, remote: this.remote, viewedScope: scope, viewedFiles: marks, viewedProvider: this.view },
     });
     filesGroup.viewedOwner = filesGroup;
+    this.view.viewedOwners.set(scope, filesGroup);
     return [
       ...status,
       new MessageNode(`Base: ${baseLabel} • merge base ${shortSha(mergeBase)}`, 'git-merge', { command: 'commitCorner.prChangeBase', title: 'Change Base', arguments: [this] }),
       new GroupNode(`Commits (${commits.length})`, commits.map((c) => new CommitNode(this.repo, c)), { icon: 'git-commit', collapsed: true }),
-      // Open when the pull request is opened, as a folder tree, each file
-      // with a "Viewed" checkbox like GitHub's (unchecked again when a push changes the file).
+      // Open when the pull request is opened, as a folder tree; a file you have not opened has a
+      // dot (again when a push changes it).
       filesGroup,
     ];
   }
@@ -165,8 +166,13 @@ class PullRequestsView extends TreeProvider {
     this.details = new Map();
     /** `${root}:${remote}:${n}` -> GitHub API summary, when listed through the API */
     this.metas = new Map();
-    this.view = require('../util').registerTreeView('commitCorner.pullRequests', vscode.window.createTreeView('commitCorner.pullRequests', { treeDataProvider: this, canSelectMany: true, showCollapseAll: true, manageCheckboxStateManually: true }));
-    this.disposables = [this.view, manager.onDidChangeActive(() => this.refresh()), viewed.watchCheckboxes(this.view, this)];
+    this.view = require('../util').registerTreeView('commitCorner.pullRequests', vscode.window.createTreeView('commitCorner.pullRequests', { treeDataProvider: this, canSelectMany: true, showCollapseAll: true }));
+    /** viewed scope -> the "Files changed" row that counts its marks (redrawn when they change) */
+    this.viewedOwners = new Map();
+    this.disposables = [this.view, manager.onDidChangeActive(() => this.refresh()), viewed.get().onDidChange((scope) => {
+      const owner = this.viewedOwners.get(scope);
+      if (owner) this.redraw(owner);
+    })];
     /** Show only PRs that still have GitHub's test-merge ref (in practice: open ones). */
     // Open pull requests by default; "Show All Pull Requests" (view menu) lists closed and merged ones too.
     this.openOnly = extContext.workspaceState.get('prOpenOnly', true);
@@ -292,8 +298,9 @@ class PullRequestsView extends TreeProvider {
         headSha = await withProgress(`Fetching pull request #${number}…`, (signal) => repo.fetchPullRequest(remote, number, { withMerge: node.hasMergeRef, signal, timeout: 120e3 }));
         const c = await repo.getCommit(headSha);
         node.fetched = { sha: headSha, subject: c.subject };
-        // The row itself said "not fetched yet": draw it again (after this expansion finishes).
-        if (node.getTreeItem) setTimeout(() => this._onDidChangeTreeData.fire(node), 0);
+        // The row itself said "not fetched yet": drawn again once VS Code has loaded the rows
+        // below it (TreeProvider.redraw; earlier, a large PR showed only part of its files).
+        if (node.getTreeItem) this.redraw(node);
       }
       return await this.computeDetails(repo, remote, number, headSha);
     } catch (e) {

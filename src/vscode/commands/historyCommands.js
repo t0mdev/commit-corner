@@ -195,6 +195,8 @@ function register(ctx) {
     });
     // A file of one commit: opened, it is no longer bold (here and in the graph).
     if (isFullSha(node.viewedSha)) await require('./fileCommands').markOpened(repo, node.viewedSha, { path: node.path, oldBlob: node.oldBlob, newBlob: node.newBlob }, true, isFullSha(node.base) ? node.base : undefined);
+    // A file of a pull request: opened, it is viewed (no dot) until a push changes it.
+    else if (node.viewed) await require('../viewed').markScoped(node.viewed, node.viewed.path);
   });
 
   cmd('commitCorner.openFileAtCommit', async (node) => {

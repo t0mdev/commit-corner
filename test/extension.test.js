@@ -848,6 +848,88 @@ test('Discard on a folder row never deletes a repository created in it after the
   }
 });
 
+test('a pull request\'s files have a dot until opened; Mark as Not Viewed brings it back', async (t) => {
+  // A remote that publishes pull request #7 the way GitHub does (its head and test merge).
+  const remote = path.join(require('os').tmpdir(), `cc-pr-remote-${process.pid}-${Date.now()}.git`);
+  t.after(() => fs.rmSync(remote, { recursive: true, force: true }));
+  r.git('init', '-q', '--bare', remote);
+  const index = path.join(require('os').tmpdir(), `cc-pr-index-${process.pid}`);
+  const env = { ...process.env, GIT_INDEX_FILE: index };
+  const plumb = (args, input) => require('child_process').execFileSync('git', args, { cwd: r.dir, env, input, encoding: 'utf8' }).trim();
+  const head = r.git('rev-parse', 'HEAD');
+  plumb(['read-tree', head]);
+  for (const [p, text] of [['pr/one.txt', 'one\n'], ['pr/two.txt', 'two\n']]) plumb(['update-index', '--add', '--cacheinfo', `100644,${plumb(['hash-object', '-w', '--stdin'], text)},${p}`]);
+  const tree = plumb(['write-tree']);
+  const pr = plumb(['commit-tree', tree, '-p', head, '-m', 'PR work']);
+  const testMerge = plumb(['commit-tree', tree, '-p', head, '-p', pr, '-m', 'Merge']);
+  fs.rmSync(index, { force: true });
+  r.git('push', '-q', remote, `${head}:refs/heads/main`, `${pr}:refs/pull/7/head`, `${testMerge}:refs/pull/7/merge`);
+  r.git('remote', 'add', 'prs', remote);
+  t.after(() => r.git('remote', 'remove', 'prs'));
+  const view = mock.treeViews.get('commitCorner.pullRequests').provider;
+  const fired = [];
+  const sub = view.onDidChangeTreeData((e) => fired.push(e));
+  t.after(() => sub.dispose());
+  const roots = await view.getChildren();
+  const prNode = roots.flatMap((n) => (n.number ? [n] : [])).find((n) => n.number === 7) || (await Promise.all(roots.filter((n) => n.getChildren && !n.number).map((g) => view.getChildren(g)))).flat().find((n) => n.number === 7);
+  assert.ok(prNode, `pull request #7 is listed: ${roots.map((n) => n.getTreeItem().label).join(' | ')}`);
+  const group = (await view.getChildren(prNode)).find((n) => /Files changed/.test(n.label));
+  const [folder] = await view.getChildren(group);
+  const files = await view.getChildren(folder);
+  assert.deepEqual(files.map((f) => f.path), ['pr/one.txt', 'pr/two.txt']);
+  const item = files[0].getTreeItem();
+  assert.equal(item.checkboxState, undefined, 'no checkbox');
+  assert.equal(item.contextValue, 'file:pr:new');
+  assert.match(String(item.resourceUri.query), /^vs=/);
+  // Opening it (its row's command) marks it viewed.
+  await run(item.command.command, ...item.command.arguments);
+  assert.equal(files[0].getTreeItem().contextValue, 'file:pr:viewed');
+  assert.equal(group.getTreeItem().description, '1/2 viewed');
+  // Its count is redrawn once VS Code has stopped loading rows (TreeProvider.redraw).
+  await new Promise((res) => setTimeout(res, 400));
+  assert.ok(fired.some((e) => Array.isArray(e) && e.includes(group)), 'the Files changed row is redrawn');
+  await run('commitCorner.markCommitFileUnviewed', files[0]);
+  assert.equal(files[0].getTreeItem().contextValue, 'file:pr:new');
+  await run('commitCorner.markCommitFileViewed', files[1]);
+  assert.equal(files[1].getTreeItem().contextValue, 'file:pr:viewed');
+  // The menus that work on any file still match (Open Working File and the others).
+  const when = pkg.contributes.menus['view/item/context'].find((m) => m.command === 'commitCorner.openWorkingFile').when;
+  const re = new RegExp(/viewItem =~ \/(.*?)\/ /.exec(when)[1]);
+  assert.ok(re.test('file:pr:new') && re.test('file:pr:viewed'));
+});
+
+test('a row redrawn while VS Code loads rows waits until loading has been quiet (else it shows only part of its children)', async () => {
+  const { TreeProvider } = require('../src/vscode/views/nodes');
+  const provider = new TreeProvider();
+  const fired = [];
+  provider.onDidChangeTreeData((e) => fired.push(e));
+  let finish;
+  const slow = { getChildren: () => new Promise((res) => (finish = res)) };
+  const loading = provider.getChildren(slow);
+  const row = { getTreeItem: () => ({}) };
+  provider.redraw(row);
+  provider.redraw([row]);
+  await new Promise((res) => setTimeout(res, 350));
+  assert.deepEqual(fired, [], 'held while loading');
+  finish([]);
+  await loading;
+  await new Promise((res) => setTimeout(res, 100));
+  assert.deepEqual(fired, [], 'and for a moment after (VS Code asks for the next level)');
+  await new Promise((res) => setTimeout(res, 300));
+  assert.deepEqual(fired, [[row]], 'then once');
+  // Idle: at once. A full refresh drops what was waiting.
+  provider.redraw(row);
+  assert.deepEqual(fired.length, 2);
+  const again = provider.getChildren(slow);
+  provider.redraw(row);
+  provider.refresh();
+  finish([]);
+  await again;
+  await new Promise((res) => setTimeout(res, 400));
+  assert.deepEqual(fired.slice(2), [undefined]);
+  provider.dispose();
+});
+
 test('no command reported an unexpected error', () => {
   const errors = mock.ui.messages.filter((m) => m.level === 'error');
   assert.deepEqual(errors, []);

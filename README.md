@@ -2,12 +2,12 @@
 
 **Watch and review what your AI coding agent does — and everything else you do with git.**
 A complete Git client for VS Code: a commit graph with a full staging area, worktree
-review with *Viewed* checkboxes, pull request diffs, generated commit messages and
-change summaries. Plain JavaScript, no runtime dependencies, no telemetry.
+review that marks what you have not seen yet, pull request diffs, generated commit messages
+and change summaries. Plain JavaScript, no runtime dependencies, no telemetry.
 
 <p>
   <img src="docs/images/graph-staging.png" alt="The sidebar graph: today's commits, an agent's branch with uncommitted work, and the staging area with its commit box" width="300">
-  <img src="docs/images/worktree-review.png" alt="An agent's worktree in the Worktrees view: Changes vs main, file by file, with Viewed checkboxes" width="300">
+  <img src="docs/images/worktree-review.png" alt="An agent's worktree in the Worktrees view: Changes vs main, file by file, a dot on each file not opened yet" width="300">
 </p>
 
 ### Review an agent's work in four steps
@@ -15,14 +15,16 @@ change summaries. Plain JavaScript, no runtime dependencies, no telemetry.
    (they glow for a moment) and a `✎ 2` chip on commits whose worktree has uncommitted
    work.
 2. **Review** — in **Worktrees**, the agent's worktree expands to **Changes vs main**:
-   everything it changed, committed or not. `Enter` shows a file's diff and keeps the
-   keyboard in the list, `Space` ticks it off as *Viewed*; a file the agent changes again
-   unticks itself.
+   everything it changed, committed or not. A file you have not opened has a dot; `Enter`
+   shows its diff (the keyboard stays in the list, `↓` goes on to the next) and the dot
+   goes. A file the agent changes again gets it back.
 3. **Comment** — the **+** in an editor's gutter adds a review comment on that line (in the
    agent's files or in a commit's diff). **Copy Review for the Agent** (`Ctrl+Alt+G C`)
    puts all of them together — file, line, the code as it is now, your comment — to paste
    into the agent's chat (or **Save Review to the Worktree** for the agent to read). When it
-   is done, **Delete All Review Comments…** in a comment's `…` menu clears them.
+   is done, **Delete All Review Comments…** in a comment's `…` menu clears them. The same
+   three are in the **Review** submenu of each Commit Corner view's `···` menu (while there
+   are comments).
 4. **Summarize** — the sparkle button on that row (or on a pull request, or selected commits) asks your
    language model what changed, **what looks risky** and which files to read first.
 
@@ -130,10 +132,9 @@ new tags (open them in the graph).
   come back to it later), and a commit's menu marks all of its files. A
   commit's mark belongs to the change, not the commit: when an agent amends or
   rebases, the files whose change stayed the same stay viewed. An uncommitted
-  file is bold again as soon as its content changes. Unlike the *Viewed*
-  checkboxes of a worktree's or pull request's review lists, which you tick
-  yourself, these are set when you open a file. On by default; off with
-  `commitCorner.markUnviewedFiles`.
+  file is bold again as soon as its content changes. A pull request's files
+  and a worktree's *Changes vs main* work the same way in their tree views (a
+  dot until opened). On by default; off with `commitCorner.markUnviewedFiles`.
 - Uncommitted changes are a row like a commit: its summary, a click opens
   Source Control, `▸`/`→` opens the staging area (see *Staging in the graph*
   above). Folders in expanded file trees collapse and expand (click, or
@@ -302,10 +303,11 @@ there is one and never asks for it; public repositories also work signed out.
 Private repositories show a "Sign in to GitHub" line until you do. Only
 api.github.com is contacted, and unchanged lists are revalidated with ETags.
 
-**Files changed** has a **Viewed** checkbox on each file, as on GitHub
-(kept per pull request in this workspace; a push that changes the file
-unchecks it), and **Summarize Pull Request** (sparkle button) describes what it does and what
-looks risky.
+In **Files changed**, a file you have not opened has a dot; opening it marks it
+viewed, as GitHub's *Viewed* checkbox does (kept per pull request in this
+workspace; a push that changes the file brings the dot back). Its menu has *Mark
+as Viewed* / *Mark as Not Viewed*, the row's menu marks them all. **Summarize
+Pull Request** (sparkle button) describes what it does and what looks risky.
 
 **The diffs always come from git.** GitHub publishes every pull request as
 `refs/pull/<n>/head` (and a test merge as `refs/pull/<n>/merge` while it is
@@ -431,11 +433,12 @@ newest commit.
   worktree.
 - **Reviewing an agent's work file by file.** An agent's worktree expands to
   **Changes vs main** (the branch it was created from): every file it changed,
-  committed or not, each with a **Viewed** checkbox like GitHub's. Click a
-  file to see its diff, tick it off when you have read it (or `Shift+F10` →
-  Toggle Viewed); the row counts "5/12 viewed". When the agent changes
-  a file again it unchecks itself. Mark All as Viewed / Clear in its menu,
-  Summarize (sparkle) and Open All Changes as inline buttons.
+  committed or not; a file you have not opened has a dot. Click a file (or
+  `Enter`) to see its diff, which marks it viewed; the row counts "5/12
+  viewed". When the agent changes a file again its dot comes back. A file's
+  menu has *Mark as Viewed* / *Mark as Not Viewed*; Mark All as Viewed /
+  Clear in the row's menu, Summarize (sparkle) and Open All Changes as
+  inline buttons.
 - **Review comments for the agent.** The **+** in the gutter of a worktree's
   files (or the repository's) and of a commit's diff adds a comment on that
   line (by keyboard: VS Code's *Comments: Add Comment on Current Selection*);
@@ -454,7 +457,9 @@ newest commit.
   never overwritten. Only submitted comments go in (not a reply still being
   typed). Copy, Save and **Delete All Review Comments…** (asks
   first; for when the agent has dealt with them) are also in each comment's
-  `…` menu; Delete All is in **Agent review**'s menu too. Settings:
+  `…` menu and, while there are comments, in the **Review** submenu of each
+  Commit Corner view's `···` menu (with their shortcuts); Delete All is in
+  **Agent review**'s menu too. Settings:
   `commitCorner.review.comments`, `commitCorner.review.fileName` (user setting).
 - Stashes are a group in the Repository view (`Delete` drops the focused one).
 - **Worktrees overview** (`Ctrl+Alt+G Shift+W`, or the dashboard button on the

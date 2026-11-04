@@ -423,8 +423,13 @@ function register(ctx) {
   };
   cmd('commitCorner.markCommitViewed', markCommits(true));
   cmd('commitCorner.markCommitUnviewed', markCommits(false));
-  // One file of a commit, from its menu in a tree (node: repoRoot, commitViewed = its commit, path, change).
+  // One file of a commit, from its menu in a tree (node: repoRoot, commitViewed = its commit, path,
+  // change), or of a pull request's or a worktree's list (node.viewed: its scope and fingerprint).
   const markFile = (on) => async (node) => {
+    if (node && node.viewed) {
+      await viewed.markScoped(node.viewed, node.path, on);
+      return;
+    }
     const repo = node && manager.getRepository(node.repoRoot);
     const sha = node && node.commitViewed;
     if (!repo || !isFullSha(sha) || typeof node.path !== 'string') return;

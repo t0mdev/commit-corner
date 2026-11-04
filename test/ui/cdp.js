@@ -24,8 +24,11 @@ function targets() {
   });
 }
 
-/** Evaluate `expr` in a webview's page (the inner frame that holds the extension's document). */
-async function evaluate(target, expr) {
+/**
+ * Evaluate `expr` in a webview's page (the inner frame that holds the extension's document), or
+ * with `o.frame` false in the target itself (the workbench: its tree views).
+ */
+async function evaluate(target, expr, o = {}) {
   const ws = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => {
     ws.onopen = resolve;
@@ -38,7 +41,7 @@ async function evaluate(target, expr) {
         if (d.id === 1) resolve(d);
       };
     });
-    const wrapped = `(() => { const fr = document.querySelector('iframe'); const w = fr ? fr.contentWindow : window; return (function (window, document) { return (${expr}); })(w, w.document); })()`;
+    const wrapped = o.frame === false ? expr : `(() => { const fr = document.querySelector('iframe'); const w = fr ? fr.contentWindow : window; return (function (window, document) { return (${expr}); })(w, w.document); })()`;
     ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: wrapped, returnByValue: true, awaitPromise: true } }));
     // A frame that went away never answers: give up after 5 s instead of hanging the suite.
     const d = await Promise.race([reply, new Promise((resolve, reject) => setTimeout(() => reject(new Error('the page did not answer')), 5000))]);

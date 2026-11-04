@@ -7,11 +7,11 @@ const KEY = 'viewedFiles';
 const MAX_SCOPES = 100;
 
 /**
- * "Viewed" marks, like GitHub's checkbox on each file of a pull request: per scope (a pull
- * request, a worktree compared with its base) and file, the fingerprint of the content you
- * looked at (its blob id). A file that changes again (the agent edits it, the PR gets a new
- * push) has another fingerprint, so it is unviewed again by itself. Kept in workspace state;
- * the least recently used scopes are forgotten past 100.
+ * "Viewed" marks of a pull request's files and of a worktree's changes (a dot until you open a
+ * file, like a commit's files): per scope (a pull request, a worktree compared with its base)
+ * and file, the fingerprint of the content you looked at (its blob id). A file that changes
+ * again (the agent edits it, the PR gets a new push) has another fingerprint, so it is unviewed
+ * again by itself. Kept in workspace state; the least recently used scopes are forgotten past 100.
  */
 class ViewedStore {
   /** @param {vscode.Memento|undefined} memento */
@@ -64,43 +64,46 @@ class ViewedStore {
   }
 }
 
-/** The checkbox of a file row: checked when viewed with the current content. */
-function checkbox(store, scope, file, fingerprint) {
-  const viewed = store.isViewed(scope, file, fingerprint);
-  return {
-    state: viewed ? vscode.TreeItemCheckboxState.Checked : vscode.TreeItemCheckboxState.Unchecked,
-    tooltip: viewed ? 'Viewed (unchecks itself when the file changes again)' : 'Mark as viewed',
-    accessibilityInformation: { label: viewed ? 'Viewed' : 'Not viewed', role: 'checkbox' },
-  };
+/**
+ * The files of a pull request's "Files changed" and of a worktree's "Changes vs …" carry their
+ * mark in their row's resource URI (query `vs=<key>`), like a commit's files: the decoration
+ * provider looks the key up here. Keys are hashes of scope, path and fingerprint, so a row drawn
+ * again finds its entry; the oldest are forgotten past MAX_SCOPED (a row that old is redrawn
+ * with a fresh key long before).
+ */
+const MAX_SCOPED = 50000;
+const scopedRows = new Map();
+
+/** The key of a file of a list with viewed marks (registered for the decorations). */
+function scopedKey(scope, file, fingerprint) {
+  const key = crypto.createHash('sha1').update(['s', scope, file, fingerprint || ''].join('\0')).digest('hex').slice(0, 12);
+  scopedRows.delete(key);
+  scopedRows.set(key, { scope, file, fingerprint });
+  while (scopedRows.size > MAX_SCOPED) scopedRows.delete(scopedRows.keys().next().value);
+  return key;
+}
+
+/** What a file can be fingerprinted as (its blob id, or "deleted"): only those can be marked. */
+const FINGERPRINT = /^([0-9a-f]{40}([0-9a-f]{24})?|deleted)$/;
+
+/**
+ * Whether file `file` of a list with viewed marks should look unviewed (a dot): not opened (or
+ * marked) with this content, the setting on, and a fingerprint to mark it with.
+ */
+function scopedUnviewed(scope, file, fingerprint) {
+  return marksUnviewed() && FINGERPRINT.test(fingerprint || '') && !get().isViewed(scope, file, fingerprint);
 }
 
 /**
- * Checkbox clicks in a tree: remember the marks of file rows (nodes with `viewed: {scope,
- * fingerprint, owner}`), then redraw their owners (which say "N of M viewed").
- * @param {vscode.TreeView<any>} treeView
- * @param {{refresh(node?: any): void}} provider
+ * Mark a file of a list viewed (or not): when it was opened, or from its menu. A file without a
+ * fingerprint (a symlink, a submodule, an unreadable file) has nothing to compare later: never
+ * marked (its row has no dot and no Mark menu).
+ * @param {{scope: string, fingerprint?: string}} v the row's `viewed`
  */
-function watchCheckboxes(treeView, provider) {
-  return treeView.onDidChangeCheckboxState(async (e) => {
-    const owners = new Set();
-    // One write per scope and state, however many boxes changed at once.
-    const batches = new Map();
-    for (const [node, state] of e.items) {
-      if (!node || !node.viewed) continue;
-      owners.add(node.viewed.owner);
-      if (!node.viewed.fingerprint) {
-        // A symlink, a submodule, an unreadable file: nothing to compare later.
-        vscode.window.setStatusBarMessage(`"${node.path}" cannot be marked as viewed: its content cannot be fingerprinted`, 4000);
-        continue;
-      }
-      const on = state === vscode.TreeItemCheckboxState.Checked;
-      const key = `${on}\0${node.viewed.scope}`;
-      if (!batches.has(key)) batches.set(key, { scope: node.viewed.scope, on, files: [] });
-      batches.get(key).files.push({ path: node.path, fingerprint: node.viewed.fingerprint });
-    }
-    for (const b of batches.values()) await get().set(b.scope, b.files, b.on);
-    for (const o of owners) provider.refresh(o);
-  });
+async function markScoped(v, file, on = true) {
+  if (!v || typeof v.scope !== 'string' || typeof file !== 'string' || !FINGERPRINT.test(v.fingerprint || '')) return;
+  if (get().isViewed(v.scope, file, v.fingerprint) === on) return;
+  await get().set(v.scope, [{ path: file, fingerprint: v.fingerprint }], on);
 }
 
 const CHANGES_KEY = 'viewedChanges';
@@ -223,7 +226,9 @@ function commitMarks() {
   return changes;
 }
 
-const marksUnviewed = () => require('./util').config().get('markUnviewedFiles', true);
+function marksUnviewed() {
+  return require('./util').config().get('markUnviewedFiles', true);
+}
 
 /** Whether you opened file `f` ({path, oldBlob?, newBlob?}) of commit `sha`, or marked it viewed. */
 const commitFileViewed = (sha, f) => commitMarks().has(ChangeMarks.key(sha, f));
@@ -240,23 +245,27 @@ function markCommitFiles(sha, files, on = true) {
 }
 
 /**
- * The dot on a commit's file in the tree views until you open it: their rows carry the mark key
- * in their resource URI (`…#commit-corner-history`, query `vk=<key>`).
+ * The dot on a file in the tree views until you open it: a commit's files carry their mark key in
+ * their resource URI (`…#commit-corner-history`, query `vk=<key>`), the files of a pull request
+ * or a worktree's changes theirs (`vs=<key>`, see scopedKey).
  */
 function registerDecorations() {
   const changed = new vscode.EventEmitter();
   const subs = [
     changed,
     commitMarks().onDidChange(() => changed.fire(undefined)),
+    get().onDidChange(() => changed.fire(undefined)),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('commitCorner.markUnviewedFiles')) changed.fire(undefined);
     }),
     vscode.window.registerFileDecorationProvider({
       onDidChangeFileDecorations: changed.event,
       provideFileDecoration(uri) {
-        if (uri.fragment !== 'commit-corner-history' || !uri.query.startsWith('vk=') || !marksUnviewed()) return undefined;
-        if (commitMarks().has(uri.query.slice(3))) return undefined;
-        return new vscode.FileDecoration('●', 'Not viewed', new vscode.ThemeColor('textLink.foreground'));
+        if (uri.fragment !== 'commit-corner-history' || !marksUnviewed()) return undefined;
+        const dot = new vscode.FileDecoration('●', 'Not viewed', new vscode.ThemeColor('textLink.foreground'));
+        if (uri.query.startsWith('vk=')) return commitMarks().has(uri.query.slice(3)) ? undefined : dot;
+        const row = uri.query.startsWith('vs=') && scopedRows.get(uri.query.slice(3));
+        return row && scopedUnviewed(row.scope, row.file, row.fingerprint) ? dot : undefined;
       },
     }),
   ];
@@ -269,4 +278,4 @@ function commitCount(sha, files) {
   return { viewed: files.filter((f) => m.has(ChangeMarks.key(sha, f))).length, total: files.length };
 }
 
-module.exports = { registerDecorations, ViewedStore, ChangeMarks, checkbox, watchCheckboxes, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };
+module.exports = { registerDecorations, ViewedStore, ChangeMarks, scopedKey, scopedUnviewed, markScoped, FINGERPRINT, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };

@@ -15,23 +15,11 @@ function register(ctx) {
   const { manager } = ctx;
   const cmd = ctx.command;
 
-  // On a list node with viewedScope / viewedFiles (and the provider and node to redraw).
+  // On a list node with viewedScope / viewedFiles (its view redraws it when the marks change).
   const mark = (on) => async (node) => {
     if (!node || typeof node.viewedScope !== 'string' || !Array.isArray(node.viewedFiles)) return;
     await viewed.get().set(node.viewedScope, node.viewedFiles, on);
-    if (node.viewedProvider) node.viewedProvider.refresh(node.viewedOwner);
   };
-  // One file, from its context menu (Shift+F10): the keyboard's way to the checkbox.
-  cmd('commitCorner.toggleViewed', async (node) => {
-    if (!node || !node.viewed) {
-      vscode.window.setStatusBarMessage('Only the files of a pull request\'s "Files changed" and of "Changes vs …" can be marked as viewed', 4000);
-      return;
-    }
-    const store = viewed.get();
-    const { scope, fingerprint, owner, provider } = node.viewed;
-    await store.set(scope, [{ path: node.path, fingerprint }], !store.isViewed(scope, node.path, fingerprint));
-    if (provider) provider.refresh(owner);
-  });
   cmd('commitCorner.viewedMarkAll', mark(true));
   cmd('commitCorner.viewedClear', mark(false));
 

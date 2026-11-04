@@ -170,7 +170,7 @@ test('a viewed mark holds for the content it was given, and goes when the file c
   assert.equal(Object.keys(store.all()).length, 100, 'the least recently used scopes go');
 });
 
-test('Changes vs Base in the Worktrees view: viewed files uncheck themselves when the agent edits them', async (t) => {
+test('Changes vs Base in the Worktrees view: a file has a dot until opened, and again when the agent edits it', async (t) => {
   const { r, repo } = await setup(t);
   r.commit('base', { 'a.txt': '1\n', 'b.txt': 'b\n' });
   const wtPath = path.join(r.dir, '..', `${path.basename(r.dir)}-agent`);
@@ -180,9 +180,15 @@ test('Changes vs Base in the Worktrees view: viewed files uncheck themselves whe
   fs.writeFileSync(path.join(wtPath, 'new.txt'), 'new\n');
   const viewed = require('../src/vscode/viewed');
   viewed.init(memento());
+  const providersBefore = mock.decorationProviders.length;
+  const decorations = viewed.registerDecorations();
+  t.after(() => decorations.dispose());
+  const deco = mock.decorationProviders[providersBefore];
   const { WorktreeNode } = require('../src/vscode/views/worktreesView');
-  const refreshed = [];
-  const provider = { refresh: (n) => refreshed.push(n) };
+  const redrawn = [];
+  const provider = { refresh() {}, viewedOwners: new Map() };
+  const sub = viewed.get().onDidChange((scope) => redrawn.push(provider.viewedOwners.get(scope)));
+  t.after(() => sub.dispose());
   const details = (await repo.getWorktreeDetails()).find((w) => w.path === fs.realpathSync(wtPath) || w.path === wtPath);
   const node = new WorktreeNode(repo, { ...details, isMain: false }, provider);
   const changes = (await node.getChildren()).find((c) => c.viewedScope);
@@ -190,22 +196,56 @@ test('Changes vs Base in the Worktrees view: viewed files uncheck themselves whe
   assert.equal(changes.getTreeItem().label, 'Changes vs main');
   const files = changes.getChildren();
   assert.deepEqual(files.map((f) => f.path), ['a.txt', 'new.txt']);
-  assert.equal(files[0].getTreeItem().checkboxState.state, mock.vscode.TreeItemCheckboxState.Unchecked);
-  // Check a.txt off, the way VS Code reports a click.
-  const { watchCheckboxes } = viewed;
-  const view = mock.vscode.window.createTreeView('test.worktrees', { treeDataProvider: provider });
-  watchCheckboxes(view, provider);
-  view.checkboxes.fire({ items: [[files[0], mock.vscode.TreeItemCheckboxState.Checked]] });
-  await new Promise((res) => setTimeout(res, 20));
-  assert.equal(refreshed[0], changes, 'the row with the count is redrawn');
+  const item = files[0].getTreeItem();
+  assert.equal(item.checkboxState, undefined, 'no checkbox');
+  assert.equal(item.contextValue, 'changedFile:worktree:new', 'its menu offers Mark as Viewed');
+  assert.match(item.tooltip, /Not viewed/);
+  assert.ok(deco.provideFileDecoration(item.resourceUri), 'a dot');
+  // Its row's click: the diff opens (keyboard kept in the list), and it is viewed.
+  assert.equal(item.command.command, 'commitCorner.worktreeOpenChangedFile');
+  mock.executed.length = 0;
+  await files[0].openAndMark();
+  assert.equal(mock.executed[0].id, 'vscode.diff');
+  assert.deepEqual(mock.executed[0].args[3], { preserveFocus: true, preview: true });
+  assert.equal(redrawn[0], changes, 'the row with the count is redrawn');
+  assert.equal(deco.provideFileDecoration(item.resourceUri), undefined, 'the dot is gone');
   const again = (await node.getChildren()).find((c) => c.viewedScope);
   assert.match(again.getTreeItem().description, /1\/2 viewed/);
-  assert.equal(again.getChildren()[0].getTreeItem().checkboxState.state, mock.vscode.TreeItemCheckboxState.Checked);
+  assert.equal(again.getChildren()[0].getTreeItem().contextValue, 'changedFile:worktree:viewed', 'its menu offers Mark as Not Viewed');
+  // The setting off: no dots (the marks stay).
+  mock.configValues.set('markUnviewedFiles', false);
+  try {
+    assert.equal(deco.provideFileDecoration(again.getChildren()[1].getTreeItem().resourceUri), undefined);
+  } finally {
+    mock.configValues.delete('markUnviewedFiles');
+  }
   // The agent edits a.txt again: unviewed.
   fs.writeFileSync(path.join(wtPath, 'a.txt'), 'agent 2\n');
   const later = (await node.getChildren()).find((c) => c.viewedScope);
-  assert.equal(later.getChildren()[0].getTreeItem().checkboxState.state, mock.vscode.TreeItemCheckboxState.Unchecked);
+  const edited = later.getChildren()[0].getTreeItem();
+  assert.equal(edited.contextValue, 'changedFile:worktree:new');
+  assert.ok(deco.provideFileDecoration(edited.resourceUri), 'its dot is back');
   assert.doesNotMatch(later.getTreeItem().description, /viewed/);
+});
+
+test('Mark as Viewed / Not Viewed on a file of a list with marks; one without a fingerprint is never marked', async () => {
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  const v = { scope: 'pr:/r:origin#7', fingerprint: 'a'.repeat(40) };
+  assert.equal(viewed.scopedUnviewed(v.scope, 'x.js', v.fingerprint), true);
+  await viewed.markScoped(v, 'x.js', true);
+  assert.equal(viewed.scopedUnviewed(v.scope, 'x.js', v.fingerprint), false);
+  await viewed.markScoped(v, 'x.js', false);
+  assert.equal(viewed.scopedUnviewed(v.scope, 'x.js', v.fingerprint), true);
+  // A deleted file has a fingerprint of its own; a symlink or submodule has none: no dot, no mark.
+  await viewed.markScoped({ scope: v.scope, fingerprint: 'deleted' }, 'gone.js', true);
+  assert.equal(viewed.get().isViewed(v.scope, 'gone.js', 'deleted'), true);
+  await viewed.markScoped({ scope: v.scope, fingerprint: undefined }, 'link', true);
+  assert.deepEqual(Object.keys(viewed.get().all()[v.scope].files).sort(), ['gone.js']);
+  assert.equal(viewed.scopedUnviewed(v.scope, 'link', undefined), false);
+  // Anything else handed in (a command link's JSON) marks nothing.
+  for (const bad of [undefined, {}, { scope: 3, fingerprint: v.fingerprint }, { scope: v.scope, fingerprint: '../x' }]) await viewed.markScoped(bad, 'y.js', true);
+  assert.equal(viewed.get().isViewed(v.scope, 'y.js', v.fingerprint), false);
 });
 
 // ------------------------------------------------------------------ language models
@@ -730,53 +770,6 @@ test('line counts of uncommitted files: staged against HEAD, changes against the
   const unstaged = await repo.numstat([]);
   assert.deepEqual([staged.get('a.txt').added, staged.get('a.txt').deleted], [1, 0]);
   assert.deepEqual([unstaged.get('a.txt').added, unstaged.get('a.txt').deleted], [2, 0]);
-});
-
-test('Space in a Viewed list ticks only the file whose diff is on screen', async () => {
-  const handlers = new Map();
-  const ctx = { command: (id, fn) => handlers.set(id, fn) };
-  const view = mock.vscode.window.createTreeView('test.viewed', { treeDataProvider: {} });
-  const provider = { view, refresh() {} };
-  require('../src/vscode/commands/viewKeys').register(ctx, { worktrees: provider });
-  const space = handlers.get('commitCorner.view.toggleViewedKey');
-  const fileNode = (p) => ({ path: p, viewed: { scope: 's', fingerprint: `f-${p}`, owner: {} }, openUris: () => [`file:///w/${p}`] });
-  const A = fileNode('a.js');
-  const B = fileNode('b.js');
-  const toggled = [];
-  const saved = mock.vscode.commands.executeCommand;
-  let focused;
-  mock.vscode.commands.executeCommand = async (id, arg) => {
-    if (id === 'list.select') {
-      // VS Code selects the focused row (and opens it).
-      if (view.selection[0] !== focused) {
-        view.selection = [focused];
-        view.selectionChanged.fire({ selection: view.selection });
-      }
-    } else if (id === 'commitCorner.toggleViewed') toggled.push(arg.path);
-  };
-  const shows = (uri) => {
-    mock.vscode.window.tabGroups = { activeTabGroup: { activeTab: uri ? { input: { uri } } : undefined } };
-  };
-  try {
-    // Enter on A, ↓ to B, Space: B opens, nothing is ticked.
-    view.selection = [A];
-    focused = B;
-    shows('file:///w/a.js');
-    await space('worktrees');
-    assert.deepEqual(toggled, []);
-    // Space again on B, now on screen: B is ticked.
-    shows('file:///w/b.js');
-    await space('worktrees');
-    assert.deepEqual(toggled, ['b.js']);
-    // Selected but not on screen (editors closed): Space opens it, no tick.
-    toggled.length = 0;
-    shows(undefined);
-    await space('worktrees');
-    assert.deepEqual(toggled, []);
-  } finally {
-    mock.vscode.commands.executeCommand = saved;
-    delete mock.vscode.window.tabGroups;
-  }
 });
 
 test('the secret filter stays fast on long runs of URL-like text, and catches subscript assignments', () => {

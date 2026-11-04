@@ -197,10 +197,16 @@ These hold everywhere and have tests (`test/regressions.test.js`):
 - `test/ui/*.test.js` (mocha TDD, `npm run test:ui`, also part of `vscode-test`): the
   webviews' DOM in a real VS Code 1.143 — the graph's staging area (keys and focus, the
   commit message across reloads, Generate Commit Message with undo, Enter commits) and the summary page (the
-  model's answer stays text). VS Code is started with a DevTools port and the tests read
+  model's answer stays text), and the tree views as VS Code draws them (`test/ui/trees.test.js`:
+  every file of a large pull request on its first expansion). VS Code is started with a DevTools port and the tests read
   and drive the pages through it with Node's own WebSocket (`test/ui/cdp.js`); a test
   language model (`test/ui/fakelm`, canned answers, no network) is loaded as a second
   development extension. No extra dependency.
 - `docs/SMOKE_TEST.md`: what still needs a human eye.
+
+Tree views redraw single rows only through `TreeProvider.redraw` (`src/vscode/views/nodes.js`),
+never with `_onDidChangeTreeData.fire(row)` directly: VS Code shows only part of a row's
+children when the row is redrawn while they are still loading, so `redraw` waits until the
+view's `getChildren` calls have been quiet for 300 ms.
 
 On Linux the VS Code windows need a display (WSLg or `xvfb-run`).

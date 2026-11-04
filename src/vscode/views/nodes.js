@@ -25,12 +25,20 @@ function statsText(stats) {
  * VS Code passes the node itself as the command argument.
  */
 
+/** How long loading must have been quiet before rows are redrawn (TreeProvider.redraw). */
+const REDRAW_QUIET_MS = 300;
+
 class TreeProvider {
   constructor() {
     this._onDidChangeTreeData = new vscode.EventEmitter();
     this.onDidChangeTreeData = this._onDidChangeTreeData.event;
     /** Bumped by a full refresh: stats still loading for the old rows are dropped. */
     this.statsEpoch = 0;
+    /** getChildren calls still running, when the last one ended, and rows waiting to be redrawn (see redraw). */
+    this.loading = 0;
+    this.loadedAt = 0;
+    this.pendingRedraw = new Set();
+    this.redrawTimer = undefined;
   }
 
   getTreeItem(node) {
@@ -39,11 +47,16 @@ class TreeProvider {
 
   async getChildren(node) {
     let children;
+    this.loading++;
     try {
       if (node) children = node.getChildren ? await node.getChildren() : [];
       else children = await this.getRoots();
     } catch (e) {
       return [new MessageNode(`Error: ${e.message}`, 'error')];
+    } finally {
+      this.loading--;
+      this.loadedAt = Date.now();
+      if (this.pendingRedraw.size) this.scheduleRedraw();
     }
     this.fillStats(children || []);
     this.trackCommitFiles(children || []);
@@ -72,7 +85,7 @@ class TreeProvider {
         const hit = new Set();
         for (const k of e.keys) for (const n of (this.commitFiles.get(k) || new Map()).values()) hit.add(n);
         if (e.sha) for (const m of this.commitFiles.values()) for (const n of m.values()) if (n instanceof CommitNode && n.sha === e.sha) hit.add(n);
-        if (hit.size) this._onDidChangeTreeData.fire([...hit]);
+        if (hit.size) this.redraw([...hit]);
       });
       this.settingSub = vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration('commitCorner.markUnviewedFiles')) this.refresh();
@@ -92,7 +105,7 @@ class TreeProvider {
         m.set(c, c);
       }
     }
-    if (counted.length) setTimeout(() => this._onDidChangeTreeData.fire([...new Set(counted)]), 0);
+    if (counted.length) this.redraw([...new Set(counted)]);
   }
 
   /**
@@ -126,7 +139,7 @@ class TreeProvider {
             if (st) n.commit.stats = st;
             return !!st;
           });
-          if (changed.length) this._onDidChangeTreeData.fire(changed);
+          if (changed.length) this.redraw(changed);
         }
       }
     };
@@ -138,14 +151,51 @@ class TreeProvider {
   }
 
   refresh(node) {
-    if (!node) {
-      this.statsEpoch++;
-      if (this.commitFiles) this.commitFiles.clear();
+    if (node) return this.redraw(node);
+    this.statsEpoch++;
+    if (this.commitFiles) this.commitFiles.clear();
+    // The rows waiting for a redraw are about to be replaced.
+    this.pendingRedraw.clear();
+    clearTimeout(this.redrawTimer);
+    this.redrawTimer = undefined;
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /**
+   * Draw rows again (their children too). Never while VS Code is still loading rows of this view:
+   * a row redrawn while its children (or theirs) load ends up with only part of them, e.g. a large
+   * pull request's files (until the next refresh). Held until loading has been quiet for 300 ms.
+   * @param {any|any[]} nodes
+   */
+  redraw(nodes) {
+    for (const n of Array.isArray(nodes) ? nodes : [nodes]) if (n) this.pendingRedraw.add(n);
+    if (this.pendingRedraw.size) this.scheduleRedraw();
+  }
+
+  scheduleRedraw() {
+    if (this.redrawTimer) return;
+    const wait = this.loading ? undefined : Math.max(0, this.loadedAt + REDRAW_QUIET_MS - Date.now());
+    // Still loading: the getChildren that ends last schedules it again.
+    if (wait === undefined) return;
+    if (!wait) {
+      this.flushRedraw();
+      return;
     }
-    this._onDidChangeTreeData.fire(node);
+    this.redrawTimer = setTimeout(() => {
+      this.redrawTimer = undefined;
+      if (this.loading || Date.now() - this.loadedAt < REDRAW_QUIET_MS) this.scheduleRedraw();
+      else this.flushRedraw();
+    }, wait);
+  }
+
+  flushRedraw() {
+    const nodes = [...this.pendingRedraw];
+    this.pendingRedraw.clear();
+    if (nodes.length) this._onDidChangeTreeData.fire(nodes);
   }
 
   dispose() {
+    clearTimeout(this.redrawTimer);
     if (this.viewedSub) this.viewedSub.dispose();
     if (this.settingSub) this.settingSub.dispose();
     this._onDidChangeTreeData.dispose();
@@ -504,7 +554,8 @@ class FileNode {
 
   getTreeItem() {
     const name = path.posix.basename(this.path);
-    const unviewed = !!this.commitViewed && viewed.commitFileUnviewed(this.commitViewed, this.change);
+    // Not opened yet (a dot): a commit's file, or one of a pull request's files (this.viewed).
+    const unviewed = this.viewed ? viewed.scopedUnviewed(this.viewed.scope, this.path, this.viewed.fingerprint) : !!this.commitViewed && viewed.commitFileUnviewed(this.commitViewed, this.change);
     const item = new vscode.TreeItem(name, vscode.TreeItemCollapsibleState.None);
     const dir = path.posix.dirname(this.path);
     const stats = this.change.added !== undefined && this.change.added !== null ? `+${this.change.added} −${this.change.deleted}` : this.change.binary ? 'binary' : '';
@@ -514,30 +565,34 @@ class FileNode {
     // The fragment keeps the file icon/theme but stops the working file's current
     // Explorer decorations (M, U, …) from showing on a historical entry.
     // A commit's file carries its viewed-mark key: not opened yet, it gets a dot (viewed.js).
-    item.resourceUri = vscode.Uri.file(this.repo.absolute(this.path)).with({ fragment: 'commit-corner-history', query: this.commitViewed ? `vk=${viewed.ChangeMarks.key(this.commitViewed, this.change)}` : '' });
+    const mark = this.viewed ? `vs=${viewed.scopedKey(this.viewed.scope, this.path, this.viewed.fingerprint)}` : this.commitViewed ? `vk=${viewed.ChangeMarks.key(this.commitViewed, this.change)}` : '';
+    item.resourceUri = vscode.Uri.file(this.repo.absolute(this.path)).with({ fragment: 'commit-corner-history', query: mark });
     item.iconPath = statusIcon(this.status);
     const why = this.change.conflict ? '\ngit\'s automatic merge left conflict markers here (left side); the right side is how the merge resolved them' : this.leftLabel ? '\nEdited in the merge beyond git\'s automatic merge' : '';
     item.tooltip = `${STATUS_LABELS[this.status] || this.status}: ${this.origPath ? `${this.origPath} → ` : ''}${this.path}${why}${unviewed ? '\n● Not viewed (the dot goes when you open it)' : ''}`;
-    // A commit's file not viewed yet: its menu offers Mark as Viewed (else Mark as Not Viewed).
-    item.contextValue = unviewed ? `${this.contextValue}:new` : this.contextValue;
-    if (this.viewed) item.checkboxState = viewed.checkbox(viewed.get(), this.viewed.scope, this.path, this.viewed.fingerprint);
+    // Not viewed yet: its menu offers Mark as Viewed (else Mark as Not Viewed). A pull request's
+    // file that cannot be fingerprinted (a symlink, a submodule) offers neither.
+    const markable = !this.viewed || viewed.FINGERPRINT.test(this.viewed.fingerprint || '');
+    item.contextValue = unviewed ? `${this.contextValue}:new` : this.viewed && markable ? `${this.contextValue}:viewed` : this.contextValue;
     item.command = {
       command: 'commitCorner.openCommitFile',
       title: 'Open Changes',
-      // In a list you check off (Viewed), the keyboard stays in the list: Enter shows, Space ticks.
+      // A pull request's files: the keyboard stays in the list (Enter shows a file, ↓ the next);
+      // opening one marks it viewed (scope and fingerprint: `viewed`).
       arguments: [{ repoRoot: this.repoRoot, sha: this.sha, path: this.rightPath, origPath: this.leftPath, status: this.status, leftRef: this.leftRef, rightRef: this.rightRef, preserveFocus: !!this.viewed, viewedSha: this.commitViewed, oldBlob: this.change.oldBlob, newBlob: this.change.newBlob, base: this.base, leftLabel: this.leftLabel,
+        viewed: this.viewed ? { scope: this.viewed.scope, fingerprint: this.viewed.fingerprint, path: this.path } : undefined,
         title: this.diffLabel ? `${name} (${this.diffLabel}, ${(STATUS_LABELS[this.status] || 'changed').toLowerCase()})` : undefined }],
     };
     return item;
   }
 }
 
-/** Build FileNodes, optionally as a folder tree depending on settings. */
 /**
+ * Build FileNodes, optionally as a folder tree depending on settings.
  * @param {{tree?: boolean, viewed?: {scope: string, ids: Map<string, string>, owner?: any, provider?: any}}} [opts] tree: always
- *        a folder tree (pull requests), whatever the fileLayout setting says; viewed: a "Viewed"
- *        checkbox on each file (ids: the files' content fingerprints, see viewed.js; owner: the
- *        node redrawn when a mark changes)
+ *        a folder tree (pull requests), whatever the fileLayout setting says; viewed: "Viewed"
+ *        marks on the files, a dot until opened (ids: the files' content fingerprints, see
+ *        viewed.js; owner: the node redrawn when a mark changes)
  */
 function fileNodes(repo, files, refs, opts = {}) {
   const nodes = files.map((f) => new FileNode(repo, f, refs));
