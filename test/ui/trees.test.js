@@ -82,11 +82,14 @@ suite('Tree views', () => {
       return out;
     };
     const { PullRequestsView } = require('../../src/vscode/views/pullRequestsView');
-    const getRoots = PullRequestsView.prototype.getRoots;
+    const getChildren = PullRequestsView.prototype.getChildren;
     let roots = [];
-    PullRequestsView.prototype.getRoots = async function () {
-      roots = await getRoots.call(this);
-      return roots;
+    const loaded = [];
+    PullRequestsView.prototype.getChildren = async function (node) {
+      const children = await getChildren.call(this, node);
+      if (!node) roots = children;
+      loaded.push(...children);
+      return children;
     };
     try {
       await vscode.commands.executeCommand('commitCorner.sidebar.pullRequests');
@@ -106,9 +109,21 @@ suite('Tree views', () => {
       // And it stays so once the row has been redrawn.
       await sleep(1500);
       assert.strictEqual(await pullRequestRows(), all);
+      // One of its files opened: its diff's title bar has Next Unviewed File, which opens the
+      // next file of this pull request.
+      const file = loaded.find((n) => n.path === 'pkg0/mod0/file0.txt');
+      await file.open({ preserveFocus: false });
+      const nextButton = () => inWorkbench(`!!document.querySelector('.editor-actions .action-label[aria-label^="Next Unviewed File"]')`);
+      for (let i = 0; i < 20 && !(await nextButton()); i++) await sleep(100);
+      assert.ok(await nextButton(), 'Next Unviewed File in the title bar');
+      await vscode.commands.executeCommand('commitCorner.nextUnviewedFile');
+      const tab = () => vscode.window.tabGroups.activeTabGroup.activeTab;
+      for (let i = 0; i < 20 && !/file1\.txt/.test(tab() && tab().label); i++) await sleep(100);
+      assert.match(tab().label, /file1\.txt/);
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     } finally {
       Object.assign(Repository.prototype, saved);
-      PullRequestsView.prototype.getRoots = getRoots;
+      PullRequestsView.prototype.getChildren = getChildren;
       git(dir, ['remote', 'remove', 'prs']);
       fs.rmSync(remote, { recursive: true, force: true });
       await vscode.commands.executeCommand('commitCorner.sidebar.graphView');

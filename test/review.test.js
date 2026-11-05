@@ -238,6 +238,49 @@ test('Changes vs Base in the Worktrees view: a file has a dot until opened, and 
   assert.doesNotMatch(later.getTreeItem().description, /viewed/);
 });
 
+test('Next Unviewed File in a diff stays in its own list, even when two pull requests share the base side of a file', async () => {
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  const fp = (c) => c.repeat(40);
+  // Two pull requests from the same merge base: the old side of a.js is the same in both.
+  const row = (pr, p) => ({ path: p, viewed: { scope: `pr:${pr}`, fingerprint: fp(pr === 1 ? 'a' : 'b') }, openUris: () => [`base:${p}`, `head${pr}:${p}`], ownUri: () => `head${pr}:${p}`, opened: 0, async open(o) { this.opened++; this.how = o; } });
+  const one = [row(1, 'a.js'), row(1, 'b.js')];
+  const two = [row(2, 'a.js'), row(2, 'c.js')];
+  viewed.registerList('pr:1', 'pull request #1', one);
+  viewed.registerList('pr:2', 'pull request #2', two); // the newer list
+  const shown = viewed.listOfShown(['head1:a.js', 'base:a.js']);
+  assert.equal(shown.list.label, 'pull request #1', 'the list of the diff shown, not the newest that shares a side');
+  assert.equal(viewed.nextUnviewedRow(shown.scope, shown.list, shown.at), one[1]);
+  assert.equal(viewed.listOfShown(['base:a.js']), undefined, 'the shared side alone is no one\'s');
+  // From b.js: around to the start (a.js); viewed ones are skipped; none left: undefined.
+  assert.equal(viewed.nextUnviewedRow(shown.scope, shown.list, 1), one[0]);
+  await viewed.markScoped(one[0].viewed, 'a.js');
+  assert.equal(viewed.nextUnviewedRow(shown.scope, shown.list, 1), undefined);
+});
+
+test('Next Unviewed File from a pull request\'s diff opens the next file with the keyboard in it', async () => {
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  const handlers = new Map();
+  const ctx = { command: (id, fn) => handlers.set(id, fn), manager: { getRepository: () => undefined, repositories: [] }, extContext: { workspaceState: memento(), subscriptions: [] } };
+  require('../src/vscode/commands/fileCommands').register(ctx);
+  const rows = ['a.js', 'b.js'].map((p) => ({ path: p, viewed: { scope: 'pr:x', fingerprint: 'c'.repeat(40) }, openUris: () => [`base:${p}`, `head:${p}`], ownUri: () => `head:${p}`, async open(o) { this.how = o; } }));
+  viewed.registerList('pr:x', 'pull request #3', rows);
+  const saved = { tabGroups: mock.vscode.window.tabGroups, diff: mock.vscode.TabInputTextDiff, text: mock.vscode.TabInputText };
+  mock.vscode.TabInputTextDiff = class { constructor(original, modified) { Object.assign(this, { original, modified }); } };
+  mock.vscode.TabInputText = class {};
+  const uri = (s) => ({ toString: () => s });
+  mock.vscode.window.tabGroups = { activeTabGroup: { activeTab: { input: new mock.vscode.TabInputTextDiff(uri('base:a.js'), uri('head:a.js')) } } };
+  try {
+    await handlers.get('commitCorner.nextUnviewedFile')();
+    assert.deepEqual(rows[1].how, { preserveFocus: false });
+  } finally {
+    mock.vscode.window.tabGroups = saved.tabGroups;
+    mock.vscode.TabInputTextDiff = saved.diff;
+    mock.vscode.TabInputText = saved.text;
+  }
+});
+
 test('Mark as Viewed / Not Viewed on a file of a list with marks; one without a fingerprint is never marked', async () => {
   const viewed = require('../src/vscode/viewed');
   viewed.init(memento());

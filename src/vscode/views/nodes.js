@@ -46,6 +46,10 @@ class TreeProvider {
     /** row -> since when it waits for its redraw (since its own children loaded, if they were loading) */
     this.pendingRedraw = new Map();
     this.redrawTimer = undefined;
+    // The viewed dots switched on or off: rows say so in their tooltips and menus too.
+    this.settingSub = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('commitCorner.markUnviewedFiles')) this.refresh();
+    });
   }
 
   getTreeItem(node) {
@@ -103,9 +107,6 @@ class TreeProvider {
         for (const k of e.keys) for (const n of (this.commitFiles.get(k) || new Map()).values()) hit.add(n);
         if (e.sha) for (const m of this.commitFiles.values()) for (const n of m.values()) if (n instanceof CommitNode && n.sha === e.sha) hit.add(n);
         if (hit.size) this.redraw([...hit]);
-      });
-      this.settingSub = vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('commitCorner.markUnviewedFiles')) this.refresh();
       });
     }
     const counted = [];
@@ -562,10 +563,14 @@ class FileNode {
     this.leftLabel = refs.leftLabel;
   }
 
-  /** Show its diff as its row's click does (and so mark it viewed, in a list with marks). */
-  async open() {
-    const { command, arguments: args } = this.getTreeItem().command;
-    await vscode.commands.executeCommand(command, ...args);
+  /**
+   * Show its diff as its row's click does (and so mark it viewed, in a list with marks).
+   * @param {{preserveFocus?: boolean}} [o] preserveFocus false: the keyboard goes to the diff
+   *        (Next Unviewed File, pressed in the diff before)
+   */
+  async open(o = {}) {
+    const { command, arguments: [args] } = this.getTreeItem().command;
+    await vscode.commands.executeCommand(command, o.preserveFocus === undefined ? args : { ...args, preserveFocus: o.preserveFocus });
   }
 
   /** The URIs its diff shows (to tell whether that diff is the editor you are looking at). */
@@ -576,6 +581,15 @@ class FileNode {
     const extra = this.commitViewed ? { commit: this.commitViewed, ...(this.base ? { base: this.base } : {}) } : undefined;
     const leftExtra = this.leftLabel ? { ...extra, label: this.leftLabel } : extra;
     return [uriAt(this.repo, leftRef, this.leftPath, leftExtra), uriAt(this.repo, this.status === 'D' ? null : this.rightRef || this.sha, this.rightPath, extra)].map(String);
+  }
+
+  /**
+   * The one side of its diff that is this row's alone: the new version (the old one, for a
+   * deletion). Two pull requests from the same base share the old side of a file both change.
+   */
+  ownUri() {
+    const [left, right] = this.openUris();
+    return this.status === 'D' ? left : right;
   }
 
   getTreeItem() {

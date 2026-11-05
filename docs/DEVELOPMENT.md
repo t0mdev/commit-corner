@@ -206,7 +206,9 @@ These hold everywhere and have tests (`test/regressions.test.js`):
 
 Tree views redraw single rows only through `TreeProvider.redraw` (`src/vscode/views/nodes.js`),
 never with `_onDidChangeTreeData.fire(row)` directly: VS Code shows only part of a row's
-children when the row is redrawn while they are still loading, so `redraw` waits until the
-view's `getChildren` calls have been quiet for 300 ms.
+children when the row is redrawn while they are still loading. So `redraw` holds a row while
+its own `getChildren` runs (without limit: that load has its own timeouts), then until the
+view's `getChildren` calls have been quiet for 300 ms, but at most 3 s (another slow load in
+the view must not hold it).
 
 On Linux the VS Code windows need a display (WSLg or `xvfb-run`).

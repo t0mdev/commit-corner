@@ -3319,7 +3319,7 @@
         },
         {
           "command": "commitCorner.nextUnviewedFile",
-          "when": "commitCorner.hasRepository && commitCorner.activeEditorIsCommitFile && config.commitCorner.markUnviewedFiles",
+          "when": "commitCorner.hasRepository && (commitCorner.activeEditorIsCommitFile && config.commitCorner.markUnviewedFiles || commitCorner.activeEditorInViewedList)",
           "group": "navigation@-89"
         }
       ],

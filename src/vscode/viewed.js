@@ -80,7 +80,8 @@ const scopedRows = new Map();
 
 /** The key of a file of a list with viewed marks (registered for the decorations). */
 function scopedKey(scope, file, fingerprint) {
-  const key = crypto.createHash('sha1').update(['s', scope, file, fingerprint || ''].join('\0')).digest('hex').slice(0, 12);
+  // The whole hash: these keys are never stored, and no file can take another one's dot.
+  const key = crypto.createHash('sha1').update(['s', scope, file, fingerprint || ''].join('\0')).digest('hex');
   scopedRows.delete(key);
   scopedRows.set(key, { scope, file, fingerprint });
   while (scopedRows.size > MAX_SCOPED) scopedRows.delete(scopedRows.keys().next().value);
@@ -147,8 +148,9 @@ async function markScopedMany(rows, on = true) {
 
 /**
  * The lists with viewed marks shown lately (a pull request's files, a worktree's changes), for
- * Next Unviewed File in their diffs: scope -> {label, rows}. Rows have openUris() (what their
- * diff shows) and open() (shows the diff and marks the file viewed). The 20 last loaded.
+ * Next Unviewed File in their diffs: scope -> {label, rows}. Rows have ownUri() (the side of
+ * their diff no other list shares) and open() (shows the diff and marks the file viewed). The 20
+ * last loaded.
  */
 const MAX_LISTS = 20;
 const lists = new Map();
@@ -167,7 +169,8 @@ function registerList(scope, label, rows) {
 function listOfShown(uris) {
   const shown = new Set(uris);
   for (const [scope, list] of [...lists].reverse()) {
-    const at = list.rows.findIndex((r) => r.openUris().some((u) => shown.has(u)));
+    // By the side only this row opens: pull requests from the same base share the other one.
+    const at = list.rows.findIndex((r) => shown.has(r.ownUri()));
     if (at >= 0) return { scope, list, at };
   }
   return undefined;

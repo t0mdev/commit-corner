@@ -442,9 +442,10 @@ newest commit.
   committed or not; a file you have not opened has a dot. Click a file (or
   `Enter`) to see its diff, which marks it viewed; the row counts "5/12
   viewed". When the agent changes a file again its dot comes back. A file's
-  menu has *Mark as Viewed* / *Mark as Not Viewed* (also for several selected
-  files); Mark All as Viewed / Not Viewed in the row's menu, Summarize (sparkle) and Open All Changes as
-  inline buttons.
+  menu has *Mark as Viewed* / *Mark as Not Viewed*, and *Next Unviewed File*
+  (`Ctrl+Alt+G N`, or its button in the diff's title bar) opens the next one;
+  Mark All as Viewed / Not Viewed in the row's menu, Summarize (sparkle) and
+  Open All Changes as inline buttons.
 - **Review comments for the agent.** The **+** in the gutter of a worktree's
   files (or the repository's) and of a commit's diff adds a comment on that
   line (by keyboard: VS Code's *Comments: Add Comment on Current Selection*);

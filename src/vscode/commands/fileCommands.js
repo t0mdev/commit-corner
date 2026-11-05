@@ -433,15 +433,13 @@ function register(ctx) {
   // Several selected rows, or a folder of a pull request's files: all the files of lists with marks in them.
   const markFile = (on) => async (node, selected) => {
     const rows = (Array.isArray(selected) && selected.includes(node) ? selected : [node]).flatMap((n) => (n && n.marks && typeof n.files === 'function' ? n.files() : [n]));
-    if (rows.some((n) => n && n.viewed)) {
-      await viewed.markScopedMany(rows.filter((n) => n && n.viewed), on);
-      return;
+    await viewed.markScopedMany(rows.filter((n) => n && n.viewed), on);
+    // A commit's files among them (selected with a pull request's, say): each by its own mark.
+    for (const n of rows.filter((x) => x && !x.viewed && isFullSha(x.commitViewed) && typeof x.path === 'string').slice(0, 1000)) {
+      const repo = manager.getRepository(n.repoRoot);
+      const change = n.change || {};
+      if (repo) await markOpened(repo, n.commitViewed, { path: n.path, oldBlob: change.oldBlob, newBlob: change.newBlob }, on);
     }
-    const repo = node && manager.getRepository(node.repoRoot);
-    const sha = node && node.commitViewed;
-    if (!repo || !isFullSha(sha) || typeof node.path !== 'string') return;
-    const change = node.change || {};
-    await markOpened(repo, sha, { path: node.path, oldBlob: change.oldBlob, newBlob: change.newBlob }, on);
   };
   cmd('commitCorner.markCommitFileViewed', markFile(true));
   cmd('commitCorner.markCommitFileUnviewed', markFile(false));
@@ -474,7 +472,8 @@ function register(ctx) {
       const shown = viewed.listOfShown(activeUris().map(String));
       if (shown) {
         const next = viewed.nextUnviewedRow(shown.scope, shown.list, shown.at);
-        if (next) await next.open();
+        // As in a commit's diff: the keyboard goes to the diff it opens.
+        if (next) await next.open({ preserveFocus: false });
         else vscode.window.setStatusBarMessage(`All ${shown.list.rows.length} file${shown.list.rows.length === 1 ? '' : 's'} of ${shown.list.label} are viewed`, 4000);
         return;
       }

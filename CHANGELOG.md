@@ -4,8 +4,8 @@
 
 - **Changed: the *Viewed* checkboxes are gone, and so is `Space` to tick a file.** A pull request's *Files changed* and a worktree's *Changes vs main* now show what you have not seen the way a commit's files do: a file you have not opened has a dot, and opening it (click or `Enter`; the keyboard stays in the list, `↓` `Enter` for the next) marks it viewed. *Mark as Not Viewed* in its menu (`Shift+F10`) brings the dot back. Files you had checked stay viewed.
   - A push or an agent's edit that changes a file brings its dot back.
-  - *Next Unviewed File* (`Ctrl+Alt+G N`) works in their diffs too: it opens the next file of that list not viewed yet.
-  - *Mark as Viewed* / *Mark as Not Viewed* on a file, on several selected files, or on a folder of a pull request's files. The list's row keeps its count ("2/5 viewed") and *Mark All as Viewed* / *Mark All as Not Viewed* (formerly "Clear Viewed Marks").
+  - *Next Unviewed File* (`Ctrl+Alt+G N`, or its button in the diff's title bar) works in their diffs too: it opens the next file of that list not viewed yet.
+  - *Mark as Viewed* / *Mark as Not Viewed* on a file, and in the Pull Requests view also on several selected files or a folder. The list's row keeps its count ("2/5 viewed") and *Mark All as Viewed* / *Mark All as Not Viewed* (formerly "Clear Viewed Marks").
   - The dots follow `commitCorner.markUnviewedFiles`. With it off these lists show no dots but still count what you opened, and their Mark menus stay.
   - A file that cannot be marked (a symbolic link, a submodule) says so in its tooltip.
   - *Copy Relative Path* on a worktree's changed file.

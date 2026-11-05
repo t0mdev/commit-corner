@@ -97,6 +97,12 @@ class WorktreeFileNode {
     return this.uris;
   }
 
+  /** The side of its diff that is this worktree's file alone (the base's version, for a deletion). */
+  ownUri() {
+    const [file, left] = this.openUris();
+    return this.change.status === 'D' ? left : file;
+  }
+
   constructor(owner, change) {
     this.owner = owner;
     this.change = change;
@@ -133,10 +139,15 @@ class WorktreeFileNode {
     return item;
   }
 
-  /** Show it (as its row's click does) and mark it viewed. */
-  async open() {
+  /**
+   * Show it (as its row's click does) and mark it viewed.
+   * @param {{preserveFocus?: boolean}} [o] preserveFocus false: the keyboard goes to the diff
+   */
+  async open(o = {}) {
     if (!this.opener) this.getTreeItem();
-    await vscode.commands.executeCommand(...this.opener);
+    const args = [...this.opener];
+    if (o.preserveFocus !== undefined) args[args.length - 1] = { ...args[args.length - 1], preserveFocus: o.preserveFocus };
+    await vscode.commands.executeCommand(...args);
     await viewed.markScoped(this.viewed, this.path);
   }
 }
@@ -445,11 +456,12 @@ function register(ctx) {
     else if (open === 'Add to Workspace') vscode.workspace.updateWorkspaceFolders((vscode.workspace.workspaceFolders || []).length, 0, { uri: vscode.Uri.file(folder) });
   });
 
-  /** A worktree's uncommitted changes (its HEAD ↔ its files) in the multi-diff editor. */
   // A file of "Changes vs …" (only its own row passes itself here).
   cmd('commitCorner.worktreeOpenChangedFile', async (node) => {
     if (node instanceof WorktreeFileNode) await node.open();
   });
+
+  /** A worktree's uncommitted changes (its HEAD ↔ its files) in the multi-diff editor. */
 
   cmd('commitCorner.worktreeOpenChanges', async (node) => {
     const repo = await manager.pick(node);

@@ -215,8 +215,11 @@ function register(ctx) {
     // Deleted in that commit: the version to restore is the one just before it.
     const deleted = node.status === 'D';
     const rev = deleted ? beforeRev(node) : node.sha;
-    const ok = await notify.warn(`Replace "${node.path}" in the working tree with its version from ${deleted ? `before ${shortSha(node.sha)} (deleted there)` : shortSha(node.sha)}?`, { modal: true }, 'Restore');
-    if (ok) await repo.restoreFile(deleted ? node.origPath || node.path : node.path, rev);
+    const file = deleted ? node.origPath || node.path : node.path;
+    // Named as it is restored: from the row's left side (a pull request's merge base) or the parent.
+    const from = deleted ? (isFullSha(rev) ? `${shortSha(rev)} (before it was deleted)` : `before ${shortSha(node.sha)} (deleted there)`) : shortSha(node.sha);
+    const ok = await notify.warn(`Replace "${file}" in the working tree with its version from ${from}?`, { modal: true }, 'Restore');
+    if (ok) await repo.restoreFile(file, rev);
   });
 
   cmd('commitCorner.compareWithRef', async (uri) => {

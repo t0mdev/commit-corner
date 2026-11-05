@@ -507,6 +507,11 @@ class RepositoryManager {
     vscode.commands.executeCommand('setContext', 'commitCorner.activeFileChanged', changed);
     vscode.commands.executeCommand('setContext', 'commitCorner.activeEditorIsIndex', isIndex);
     vscode.commands.executeCommand('setContext', 'commitCorner.activeEditorIsCommitFile', commitFile);
+    // A diff opened from a pull request's files or a worktree's changes (Next Unviewed File there too).
+    const tab = vscode.window.tabGroups && vscode.window.tabGroups.activeTabGroup && vscode.window.tabGroups.activeTabGroup.activeTab;
+    const input = tab && tab.input;
+    const shown = input ? [input.modified, input.original, input.uri].filter(Boolean).map(String) : uri ? [String(uri)] : [];
+    vscode.commands.executeCommand('setContext', 'commitCorner.activeEditorInViewedList', !!(shown.length && require('./viewed').listOfShown(shown)));
     vscode.commands.executeCommand('setContext', 'commitCorner.builtInGitOff', !require('./scm').builtInGitEnabled());
   }
 
