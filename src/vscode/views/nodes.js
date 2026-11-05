@@ -283,13 +283,24 @@ class TreeProvider {
   repositoryRow() {
     if (!this.showsRepository || !this.manager || !this.manager.repositories || this.manager.repositories.length < 2) return undefined;
     const repo = this.shownRepository();
-    return repo ? new RepositoryRow(repo) : undefined;
+    return repo ? new RepositoryRow(repo, this) : undefined;
   }
 
-  /** Redraw when repositories open or close (the repository row comes or goes). */
+  /** After a switch from this view's repository row (Compare and File History show the new one). */
+  repositorySwitched() {}
+
+  /** Redraw when the repository row comes or goes (a second repository opens, the last but one closes). */
   watchRepositories(manager) {
     this.showsRepository = true;
-    return [manager.onDidOpen(() => this.refresh()), manager.onDidClose(() => this.refresh())];
+    let multi = manager.repositories.length > 1;
+    const changed = () => {
+      const now = manager.repositories.length > 1;
+      if (now !== multi) {
+        multi = now;
+        this.refresh();
+      }
+    };
+    return [manager.onDidOpen(changed), manager.onDidClose(changed)];
   }
 
   /** The row above (VS Code needs it to reveal a row): a file's folder, a list's row, … */
@@ -831,19 +842,22 @@ function fileNodes(repo, files, refs, opts = {}) {
 
 /** A view's first row with several repositories open: which one it shows; a click switches. */
 class RepositoryRow {
-  constructor(repo) {
+  constructor(repo, provider) {
     this.repo = repo;
     this.repoRoot = repo.root;
+    this.provider = provider;
   }
 
   getTreeItem() {
     const item = new vscode.TreeItem(this.repo.name, vscode.TreeItemCollapsibleState.None);
-    item.iconPath = new vscode.ThemeIcon('repo');
-    item.description = 'switch repository';
-    item.tooltip = `Repository ${this.repo.name} (${this.repo.root}): click to switch to another (Ctrl+Alt+G Shift+O)`;
+    // (Not a repository icon: in Worktrees it would read as one more worktree.)
+    item.iconPath = new vscode.ThemeIcon('arrow-swap');
+    item.description = 'switch';
+    const mod = process.platform === 'darwin' ? 'Cmd' : 'Ctrl';
+    item.tooltip = `Repository ${this.repo.name} (${this.repo.root}): click to switch to another (${mod}+Alt+G Shift+O)`;
     item.contextValue = 'repositoryRow';
     item.id = 'repositoryRow';
-    item.command = { command: 'commitCorner.switchRepository', title: 'Switch Repository' };
+    item.command = { command: 'commitCorner.switchRepositoryFromRow', title: 'Switch Repository', arguments: [this] };
     return item;
   }
 }
@@ -969,4 +983,4 @@ function buildFolderTree(nodes) {
   return root.children;
 }
 
-module.exports = { TreeProvider, MessageNode, GroupNode, CommitNode, MergeViewNode, FileNode, FolderNode, TimeSeparatorNode, fileNodes, fingerprintOf, commitTooltip, withTimeSeparators, timeRangeOf };
+module.exports = { RepositoryRow, TreeProvider, MessageNode, GroupNode, CommitNode, MergeViewNode, FileNode, FolderNode, TimeSeparatorNode, fileNodes, fingerprintOf, commitTooltip, withTimeSeparators, timeRangeOf };

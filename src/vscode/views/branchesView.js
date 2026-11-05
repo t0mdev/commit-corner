@@ -97,7 +97,7 @@ class BranchesView extends TreeProvider {
   async getRoots() {
     const repo = this.manager.active;
     if (!repo) return []; // VS Code shows the welcome (Initialize / Clone / Open Repository)
-    this.view.description = this.manager.repositories.length > 1 ? repo.name : undefined;
+    // (Its repository: the row at the top, with several open.)
     const refs = await repo.getRefs();
     const headBranch = repo.state && repo.state.head.branch;
     const sortByName = config().get('branchSort', 'date') === 'name';

@@ -62,6 +62,12 @@ class CompareView extends TreeProvider {
     return (this.state && this.state.repo) || this.manager.active;
   }
 
+  /** Another repository picked from the row: this comparison was of the old one. */
+  repositorySwitched() {
+    if (this.state && this.state.repo !== this.manager.active) this.clear();
+    else this.refresh();
+  }
+
   setContext() {
     vscode.commands.executeCommand('setContext', 'commitCorner.compareActive', !!this.state);
     vscode.commands.executeCommand('setContext', 'commitCorner.compareMode', this.state ? this.state.mode : undefined);
@@ -133,7 +139,10 @@ class CompareView extends TreeProvider {
       : new Map(files.filter((f) => f.status !== 'D' && f.newBlob).map((f) => [f.path, f.newBlob]));
     const marks = files.map((f) => ({ path: f.path, fingerprint: fingerprintOf(ids, f) }));
     const signature = files.map((f, i) => `${f.status}\0${f.path}\0${f.origPath || ''}\0${f.added}\0${f.deleted}\0${marks[i].fingerprint || ''}`).join('\n');
-    return { seq, base, rightRef, files, ids, marks, signature };
+    const data = { seq, base, rightRef, files, ids, marks, signature };
+    // The newest data of this comparison, whichever load (a refresh or a reload) finishes first.
+    if (!this.latest || this.latest.state !== state || this.latest.data.seq < seq) this.latest = { state, data };
+    return data;
   }
 
   /**
@@ -214,9 +223,11 @@ class CompareView extends TreeProvider {
 
     this.lastSignature = repo.refTips;
     const state = this.state;
-    const loaded = await this.loadFiles(state);
+    let loaded = await this.loadFiles(state);
     // Another comparison since (Swap, a mode switch): its own drawing shows it, not this one.
     if (this.state !== state) return [];
+    // A reload that started later finished first: its data is the newer one.
+    if (this.latest && this.latest.state === state && this.latest.data.seq > loaded.seq) loaded = this.latest.data;
     // Viewed marks, as in a pull request: per comparison, by content (the right side's), so a file
     // that changes again (a new commit there, an edit in the working tree) is unviewed again.
     const scope = `compare:${repo.root}:${left}:${right === WORKTREE ? 'working tree' : right}:${mode}`;

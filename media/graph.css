@@ -429,6 +429,10 @@ body.no-repo .toolbar, body.no-repo .details, body.no-repo .splitter, body.no-re
 .top-bar .repo-switch .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .top-bar .repo-switch:disabled { opacity: 1; cursor: default; background: none; border-color: transparent; color: var(--vscode-descriptionForeground); }
 .compact .top-bar .repo-switch ~ .summary-bar { flex: 1 1 0; }
+/* What room is left for the activity summary: each part shortened with an ellipsis; too little
+   (a bare icon would look like a stray button): nothing shown, the bar still clickable. */
+.compact .top-bar .summary-bar > span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.compact .top-bar .summary-bar.tight > * { visibility: hidden; }
 .top-bar .repo-switch .repo-chevron { transform: rotate(90deg); opacity: 0.7; }
 .top-bar .repo-switch:not(.switchable) .repo-chevron { display: none; }
 

@@ -338,10 +338,18 @@ function registerList(scope, label, rows) {
   if (!before || before.signature !== signature) listsEmitter.fire(scope);
 }
 
+/**
+ * How a URI is looked up: a working file's on a file system that ignores case (Windows, macOS)
+ * in lower case — VS Code reports a tab's file in the casing it saw first, which may differ from
+ * the path git gave.
+ */
+const CASELESS = process.platform !== 'linux';
+const uriKey = (u) => (CASELESS && u.startsWith('file:') ? u.toLowerCase() : u);
+
 function indexOf(list) {
   if (!list.index) {
     list.index = new Map();
-    list.rows.forEach((r, i) => list.index.set(r.ownUri(), i));
+    list.rows.forEach((r, i) => list.index.set(uriKey(r.ownUri()), i));
   }
   return list.index;
 }
@@ -358,13 +366,14 @@ function listOfShown(shown) {
   const found = [];
   for (const [scope, list] of [...lists].reverse()) {
     const index = indexOf(list);
-    for (const u of shown.uris) {
+    const uris = shown.uris.map(uriKey);
+    for (const u of uris) {
       const at = index.get(u);
       // And its other side, where that is this list's own too (not another diff of the same file,
       // such as Source Control's of a working file).
       const row = at === undefined ? undefined : list.rows[at];
       const left = row && row.leftUri && row.leftUri();
-      if (row && !row.single === shown.diff && (!left || shown.uris.includes(left))) {
+      if (row && !row.single === shown.diff && (!left || uris.includes(uriKey(left)))) {
         found.push({ scope, list, at });
         break;
       }

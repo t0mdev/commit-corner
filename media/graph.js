@@ -88,6 +88,8 @@
   const repoChevron = ui.icon('chevron', { size: 11 });
   repoChevron.classList.add('repo-chevron');
   repoLabel.appendChild(repoChevron);
+  // The chord's first key as this platform names it (Cmd on a Mac).
+  const chordMod = /Mac/.test(navigator.platform || '') ? 'Cmd' : 'Ctrl';
   const switchRepo = () => {
     if (repoLabel.classList.contains('switchable')) vscode.postMessage({ type: 'switchRepo' });
   };
@@ -103,14 +105,14 @@
     // (Called once the page is built: the sidebar's chip exists by then.)
     repoChip.classList.toggle('switchable', !!multi);
     repoChip.disabled = !multi;
-    repoChip.title = multi ? `Repository ${repoName.textContent}: switch to another (Ctrl+Alt+G Shift+O)` : `Repository ${repoName.textContent}`;
+    repoChip.title = multi ? `Repository ${repoName.textContent}: switch to another (${chordMod}+Alt+G Shift+O)` : `Repository ${repoName.textContent}`;
     repoChip.setAttribute('aria-label', repoChip.title);
     repoChipName.textContent = repoName.textContent;
     repoLabel.classList.toggle('switchable', !!multi);
     repoLabel.tabIndex = multi ? 0 : -1;
     if (multi) {
       repoLabel.setAttribute('role', 'button');
-      repoLabel.title = 'Switch repository (Ctrl+Alt+G Shift+O)';
+      repoLabel.title = `Switch repository (${chordMod}+Alt+G Shift+O)`;
     } else {
       repoLabel.removeAttribute('role');
       repoLabel.removeAttribute('title');
@@ -197,6 +199,8 @@
   const repoChipChevron = repoChip.appendChild(ui.icon('chevron', { size: 10 }));
   repoChipChevron.classList.add('repo-chevron');
   topBar.append(viewBtn, repoChip, summaryBar);
+  // The summary next to a long repository name: hidden when it would be a bare icon.
+  if (window.ResizeObserver) new ResizeObserver(() => summaryBar.classList.toggle('tight', summaryBar.clientWidth < 70)).observe(summaryBar);
   root.append(topBar, toolbar, listWrap, splitter, detailsPane);
   document.body.appendChild(root);
   if (saved.detailsHeight) detailsPane.style.height = saved.detailsHeight + 'px';

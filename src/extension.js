@@ -129,6 +129,16 @@ async function activate(extContext) {
     const repo = await require('./vscode/pickers').pickRepository(manager, manager.active);
     if (repo) manager.setActive(repo);
   });
+  // A view's repository row: from the repository that view shows; then the view shows the one picked
+  // (Compare and File History may show another than the active one).
+  ctx.command('commitCorner.switchRepositoryFromRow', async (row) => {
+    const { RepositoryRow } = require('./vscode/views/nodes');
+    if (!(row instanceof RepositoryRow)) return;
+    const repo = await require('./vscode/pickers').pickRepository(manager, row.repo);
+    if (!repo) return;
+    manager.setActive(repo);
+    row.provider.repositorySwitched();
+  });
 
   extContext.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
     if (e.affectsConfiguration('commitCorner.gitPath')) exec.configure({ gitPath: config().get('gitPath') || 'git' });

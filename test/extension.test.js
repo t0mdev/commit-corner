@@ -1144,7 +1144,8 @@ test('with several repositories a view starts with a row naming its own; folders
   let roots = await provider.getChildren();
   assert.equal(roots[0].constructor.name, 'RepositoryRow');
   assert.equal(roots[0].getTreeItem().label, 'app');
-  assert.equal(roots[0].getTreeItem().command.command, 'commitCorner.switchRepository');
+  assert.equal(roots[0].getTreeItem().command.command, 'commitCorner.switchRepositoryFromRow');
+  assert.equal(roots[0].getTreeItem().command.arguments[0], roots[0]);
   manager.repositories = [repos[0]];
   roots = await provider.getChildren();
   assert.notEqual(roots[0].constructor.name, 'RepositoryRow', 'one repository: no row');
@@ -1156,6 +1157,21 @@ test('with several repositories a view starts with a row naming its own; folders
   assert.equal(provider.folderRows.size, 0);
   subs.forEach((d) => d.dispose());
   provider.dispose();
+});
+
+test('switching from a repository row: Compare and File History leave the old repository', () => {
+  const { CompareView } = require('../src/vscode/views/compareView');
+  const { FileHistoryView } = require('../src/vscode/views/fileHistoryView');
+  const cmp = { state: { repo: 'A' }, manager: { active: 'B' }, clear() { this.cleared = true; }, refresh() { this.refreshed = true; } };
+  CompareView.prototype.repositorySwitched.call(cmp);
+  assert.ok(cmp.cleared, 'a comparison of the old repository is cleared');
+  const same = { state: { repo: 'B' }, manager: { active: 'B' }, clear() { this.cleared = true; }, refresh() { this.refreshed = true; } };
+  CompareView.prototype.repositorySwitched.call(same);
+  assert.ok(!same.cleared && same.refreshed, 'the same repository picked: kept');
+  const hist = { target: { repo: 'A' }, pinned: true, manager: { active: 'B' }, setPinnedContext() {}, setTarget(t) { this.target = t; } };
+  FileHistoryView.prototype.repositorySwitched.call(hist);
+  assert.equal(hist.target, undefined);
+  assert.equal(hist.pinned, false);
 });
 
 test('no command reported an unexpected error', () => {

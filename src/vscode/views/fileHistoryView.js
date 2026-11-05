@@ -87,6 +87,15 @@ class FileHistoryView extends TreeProvider {
     return (this.target && this.target.repo) || this.manager.active;
   }
 
+  /** Another repository picked from the row: the file shown was of the old one. */
+  repositorySwitched() {
+    if (this.target && this.target.repo !== this.manager.active) {
+      this.pinned = false;
+      if (this.setPinnedContext) this.setPinnedContext();
+      this.setTarget(undefined);
+    } else this.refresh();
+  }
+
   setTarget(t) {
     this.target = t;
     this.limit = config().get('fileHistoryLimit', 200);

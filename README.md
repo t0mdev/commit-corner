@@ -425,8 +425,8 @@ newest commit.
   when the sidebar shows one view at a time). With several repositories open,
   the other views start with a row naming theirs, and the name (there, in the
   Graph and in the editor graph's toolbar) switches: a click is **Switch
-  Repository**, as are the button in the other views' title bars and
-  `Ctrl+Alt+G Shift+O`. The repositories you used last come first, each with
+  Repository** (also in each view's `···` menu and on `Ctrl+Alt+G Shift+O`).
+  Compare and File History then show the repository picked. The repositories you used last come first, each with
   its branch, uncommitted changes and ↑ahead ↓behind; the one you used before
   is preselected, so `Enter` switches back.
 - A repository found *above* a workspace folder (a dotfiles repo in `$HOME`)
