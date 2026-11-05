@@ -132,12 +132,13 @@ new tags (open them in the graph).
   come back to it later), and a commit's menu marks all of its files. A
   commit's mark belongs to the change, not the commit: when an agent amends or
   rebases, the files whose change stayed the same stay viewed. An uncommitted
-  file is bold again as soon as its content changes. A pull request's files
-  and a worktree's *Changes vs main* have a dot until opened, and *Next
+  file is bold again as soon as its content changes. A pull request's files,
+  a worktree's *Changes vs main* and the Compare view's files have a dot until
+  opened (their folders too, while a file in them is new), and *Next
   Unviewed File* (`Ctrl+Alt+G N`) in their diffs opens the next one of that
-  list; their marks are kept per pull request or worktree, by content, so a
-  push or an agent's edit brings the dot back. On by default; off with
-  `commitCorner.markUnviewedFiles` (those two lists then still count what you
+  list and selects it there; their marks are kept per list, by content, so a
+  push or an edit brings the dot back. On by default; off with
+  `commitCorner.markUnviewedFiles` (those lists then still count what you
   opened and keep their *Mark as Viewed* menus, without dots).
 - Uncommitted changes are a row like a commit: its summary, a click opens
   Source Control, `▸`/`→` opens the staging area (see *Staging in the graph*
@@ -360,6 +361,11 @@ newest commit.
   aliases for github.com are recognised via `commitCorner.githubHostAliases`.
 - Commits only on each side, changed files with stats, open everything in the
   multi-diff editor.
+- A changed file you have not opened has a dot, as in a pull request: opening
+  it marks it viewed (per comparison, by content), *Next Unviewed File*
+  (`Ctrl+Alt+G N`) in its diff opens the next one, and the **Files changed**
+  row counts them. Compared with the working tree, a file you edit again gets
+  its dot back.
 - **Merge preview**: which files would conflict, computed in memory without
   touching your working tree. Exact on git ≥ 2.38; on older git it is
   marked approximate (no rename detection).

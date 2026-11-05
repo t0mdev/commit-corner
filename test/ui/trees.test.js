@@ -135,6 +135,9 @@ suite('Tree views', () => {
       const tab = () => vscode.window.tabGroups.activeTabGroup.activeTab;
       for (let i = 0; i < 20 && !/file1\.txt/.test(tab() && tab().label); i++) await sleep(100);
       assert.match(tab().label, /file1\.txt/);
+      // …and selects that file in the tree (Enter / ↓ there go on from it).
+      for (let i = 0; i < 20 && !(view.selection[0] && view.selection[0].path === 'pkg0/mod0/file1.txt'); i++) await sleep(100);
+      assert.strictEqual(view.selection[0] && view.selection[0].path, 'pkg0/mod0/file1.txt');
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     } finally {
       Object.assign(Repository.prototype, saved);
@@ -170,16 +173,19 @@ suite('Tree views', () => {
       for (const [id, name] of [...views].reverse()) {
         await showView(id, name);
         assert.ok((await openViewMenu()).includes('Review Comments []'), `Review in the ··· menu (${id})`);
-        await inWorkbench(`(() => {
-          const roots = [document, ...[...document.querySelectorAll('*')].filter((h) => h.shadowRoot).map((h) => h.shadowRoot)];
-          const item = roots.flatMap((r) => [...r.querySelectorAll('.action-menu-item')]).find((i) => (i.querySelector('.action-label') || {}).textContent === 'Review Comments');
-          item.focus();
-        })()`);
-        await press(await workbench(), 'ArrowRight');
+        // The submenu opens on → from its focused item (tried again if the menu was still settling).
         let sub;
-        for (let i = 0; i < 20 && !sub; i++) {
-          await sleep(100);
-          sub = (await openMenus())[1];
+        for (let attempt = 0; attempt < 3 && !sub; attempt++) {
+          await inWorkbench(`(() => {
+            const roots = [document, ...[...document.querySelectorAll('*')].filter((h) => h.shadowRoot).map((h) => h.shadowRoot)];
+            const item = roots.flatMap((r) => [...r.querySelectorAll('.action-menu-item')]).find((i) => (i.querySelector('.action-label') || {}).textContent === 'Review Comments');
+            item.focus();
+          })()`);
+          await press(await workbench(), 'ArrowRight');
+          for (let i = 0; i < 10 && !sub; i++) {
+            await sleep(100);
+            sub = (await openMenus())[1];
+          }
         }
         assert.deepStrictEqual(sub, ['Copy Review for the Agent [Ctrl+Alt+G C]', 'Save Review to the Worktree []', 'Delete All Review Comments… []']);
         await closeMenus();

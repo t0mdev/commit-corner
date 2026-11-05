@@ -3863,22 +3863,22 @@
         },
         {
           "command": "commitCorner.compareFileWithWorkingTree",
-          "when": "viewItem =~ /^file(:commit|:pr)?(:new|:viewed)?$/ && !listMultiSelection",
+          "when": "viewItem =~ /^file(:commit|:pr|:compare)?(:new|:viewed)?$/ && !listMultiSelection",
           "group": "inline@2"
         },
         {
           "command": "commitCorner.openFileAtCommit",
-          "when": "viewItem =~ /^file(:commit|:pr)?(:new|:viewed)?$/ && !listMultiSelection",
+          "when": "viewItem =~ /^file(:commit|:pr|:compare)?(:new|:viewed)?$/ && !listMultiSelection",
           "group": "1@1"
         },
         {
           "command": "commitCorner.compareFileWithWorkingTree",
-          "when": "viewItem =~ /^file(:commit|:pr)?(:new|:viewed)?$/ && !listMultiSelection",
+          "when": "viewItem =~ /^file(:commit|:pr|:compare)?(:new|:viewed)?$/ && !listMultiSelection",
           "group": "1@2"
         },
         {
           "command": "commitCorner.restoreFileFromCommit",
-          "when": "viewItem =~ /^file(:commit|:pr)?(:new|:viewed)?$/ && !listMultiSelection",
+          "when": "viewItem =~ /^file(:commit|:pr|:compare)?(:new|:viewed)?$/ && !listMultiSelection",
           "group": "2@1"
         },
         {
@@ -4098,12 +4098,12 @@
         },
         {
           "command": "commitCorner.viewedMarkAll",
-          "when": "viewItem =~ /^viewedGroup/",
+          "when": "viewItem =~ /^(viewedGroup|compareFiles$)/",
           "group": "1_viewed@1"
         },
         {
           "command": "commitCorner.viewedClear",
-          "when": "viewItem =~ /^viewedGroup/",
+          "when": "viewItem =~ /^(viewedGroup|compareFiles$)/",
           "group": "1_viewed@2"
         },
         {
@@ -4133,32 +4133,32 @@
         },
         {
           "command": "commitCorner.openWorkingFile",
-          "when": "viewItem =~ /^(commit:file|file|file:other|file:(commit|pr)(:new|:viewed)?|stashFile)$/ && !listMultiSelection",
+          "when": "viewItem =~ /^(commit:file|file|file:other|file:(commit|pr|compare|compareWork)(:new|:viewed)?|stashFile)$/ && !listMultiSelection",
           "group": "inline@0"
         },
         {
           "command": "commitCorner.openWorkingFile",
-          "when": "viewItem =~ /^(commit:file|file|file:other|file:(commit|pr)(:new|:viewed)?|stashFile)$/ && !listMultiSelection",
+          "when": "viewItem =~ /^(commit:file|file|file:other|file:(commit|pr|compare|compareWork)(:new|:viewed)?|stashFile)$/ && !listMultiSelection",
           "group": "1_show@0"
         },
         {
           "command": "commitCorner.compareFileWithBase",
-          "when": "viewItem =~ /^(commit:file|file|file:other|file:(commit|pr)(:new|:viewed)?|stashFile)$/ && !listMultiSelection",
+          "when": "viewItem =~ /^(commit:file|file|file:other|file:(commit|pr|compare|compareWork)(:new|:viewed)?|stashFile)$/ && !listMultiSelection",
           "group": "3_compareFile@1"
         },
         {
           "command": "commitCorner.compareFileWithRefPick",
-          "when": "viewItem =~ /^(commit:file|file|file:other|file:(commit|pr)(:new|:viewed)?|stashFile)$/ && !listMultiSelection",
+          "when": "viewItem =~ /^(commit:file|file|file:other|file:(commit|pr|compare|compareWork)(:new|:viewed)?|stashFile)$/ && !listMultiSelection",
           "group": "3_compareFile@2"
         },
         {
           "command": "commitCorner.copyFilePath",
-          "when": "viewItem =~ /^(commit:file|file|file:other|file:(commit|pr)(:new|:viewed)?|stashFile)$/ && !listMultiSelection",
+          "when": "viewItem =~ /^(commit:file|file|file:other|file:(commit|pr|compare|compareWork)(:new|:viewed)?|stashFile)$/ && !listMultiSelection",
           "group": "9_copy@1"
         },
         {
           "command": "commitCorner.revealFileInExplorer",
-          "when": "viewItem =~ /^(commit:file|file|file:other|file:(commit|pr)(:new|:viewed)?|stashFile)$/ && !listMultiSelection",
+          "when": "viewItem =~ /^(commit:file|file|file:other|file:(commit|pr|compare|compareWork)(:new|:viewed)?|stashFile)$/ && !listMultiSelection",
           "group": "9_copy@2"
         },
         {
@@ -4183,12 +4183,12 @@
         },
         {
           "command": "commitCorner.markCommitFileViewed",
-          "when": "viewItem =~ /^((file:pr|changedFile:worktree):new|folder:marks)$/",
+          "when": "viewItem =~ /^((file:pr|file:compare|file:compareWork|changedFile:worktree):new|folder:marks)$/",
           "group": "8_viewed@1"
         },
         {
           "command": "commitCorner.markCommitFileUnviewed",
-          "when": "viewItem =~ /^((file:pr|changedFile:worktree):viewed|folder:marks)$/",
+          "when": "viewItem =~ /^((file:pr|file:compare|file:compareWork|changedFile:worktree):viewed|folder:marks)$/",
           "group": "8_viewed@2"
         },
         {
@@ -5672,7 +5672,7 @@
           "commitCorner.markUnviewedFiles": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Show files you have not viewed in **bold** (graph) or with a dot (tree views, also a pull request's files and a worktree's *Changes vs main*, whose *Mark as Viewed* / *Not Viewed* menus work either way); a commit you started on counts what you have seen (\"3/12\"). Opening a file marks it viewed. Marks survive an amend or rebase that leaves a change as it was; an uncommitted file is bold again when its content changes.",
+            "markdownDescription": "Show files you have not viewed in **bold** (graph) or with a dot (tree views, also a pull request's files, a worktree's *Changes vs main* and the Compare view's files, whose *Mark as Viewed* / *Not Viewed* menus work either way); a commit you started on counts what you have seen (\"3/12\"). Opening a file marks it viewed. Marks survive an amend or rebase that leaves a change as it was; an uncommitted file is bold again when its content changes.",
             "order": 1
           },
           "commitCorner.review.comments": {

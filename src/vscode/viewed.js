@@ -11,12 +11,16 @@ const MAX_SCOPES = 100;
  * file, like a commit's files): per scope (a pull request, a worktree compared with its base)
  * and file, the fingerprint of the content you looked at (its blob id). A file that changes
  * again (the agent edits it, the PR gets a new push) has another fingerprint, so it is unviewed
- * again by itself. Kept in workspace state; the least recently used scopes are forgotten past 100.
+ * again by itself. Kept in memory and written to workspace state a second after a change
+ * (opening file after file is one write); the least recently used scopes are forgotten past 100.
  */
 class ViewedStore {
   /** @param {vscode.Memento|undefined} memento */
   constructor(memento) {
     this.memento = memento;
+    /** The marks as last written or set (read from workspace state once). */
+    this.data = undefined;
+    this.timer = undefined;
     this.emitter = new vscode.EventEmitter();
     this.onDidChange = this.emitter.event;
     /** The files whose mark changed: {scope, paths} (the dots redraw only those). */
@@ -25,8 +29,11 @@ class ViewedStore {
   }
 
   all() {
-    const v = this.memento && this.memento.get(KEY);
-    return v && typeof v === 'object' ? v : {};
+    if (!this.data) {
+      const v = this.memento && this.memento.get(KEY);
+      this.data = v && typeof v === 'object' ? v : {};
+    }
+    return this.data;
   }
 
   /** Whether `file` was viewed with this fingerprint (undefined fingerprint: never viewed). */
@@ -62,12 +69,28 @@ class ViewedStore {
       scopes.sort((a, b) => (all[a].used || 0) - (all[b].used || 0));
       for (const old of scopes.slice(0, scopes.length - MAX_SCOPES)) delete all[old];
     }
-    if (this.memento) await this.memento.update(KEY, all);
+    this.data = all;
+    this.save();
     this.emitter.fire(scope);
     this.filesEmitter.fire({ scope, paths: files.map((f) => f.path) });
   }
 
+  /** Written a moment later: opening file after file is one write. */
+  save() {
+    if (!this.memento || this.timer) return;
+    this.timer = setTimeout(() => this.flush(), 1000);
+    if (this.timer.unref) this.timer.unref();
+  }
+
+  flush() {
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    if (this.memento && this.data) return Promise.resolve(this.memento.update(KEY, this.data)).then(undefined, () => {});
+    return Promise.resolve();
+  }
+
   dispose() {
+    if (this.timer) this.flush();
     this.emitter.dispose();
     this.filesEmitter.dispose();
   }
@@ -92,6 +115,30 @@ function scopedKey(scope, file, fingerprint) {
   scopedRows.set(key, { scope, file, fingerprint, uri: before && before.uri });
   while (scopedRows.size > MAX_SCOPED) scopedRows.delete(scopedRows.keys().next().value);
   return key;
+}
+
+/**
+ * Folders of file trees with marks (a pull request's, a comparison's, a commit's): a dot while a
+ * file in them is not viewed. key -> {files (rows with unviewed() and markId()), ids (their
+ * markIds), uri}; as many as the files' entries.
+ */
+const folderRows = new Map();
+
+/** @param {any[]} files the folder's file rows (and its sub-folders') @param {string} id its list and path */
+function folderKey(files, id) {
+  const key = crypto.createHash('sha1').update(['d', id].join('\0')).digest('hex');
+  const before = folderRows.get(key);
+  folderRows.delete(key);
+  folderRows.set(key, { files, ids: new Set(files.map((f) => f.markId())), uri: before && before.uri });
+  while (folderRows.size > MAX_SCOPED) folderRows.delete(folderRows.keys().next().value);
+  return key;
+}
+
+/** The URIs of the folders shown with any of these files (by markId), to redraw their dots. */
+function foldersWith(ids) {
+  const out = [];
+  for (const f of folderRows.values()) if (f.uri && ids.some((id) => f.ids.has(id))) out.push(f.uri);
+  return out;
 }
 
 /** What a file can be fingerprinted as (its blob id, or "deleted"): only those can be marked. */
@@ -381,10 +428,10 @@ function registerDecorations() {
   };
   const subs = [
     changed,
-    commitMarks().onDidChange((e) => redraw([...e.keys].map((k) => commitUris.get(k)).filter(Boolean))),
+    commitMarks().onDidChange((e) => redraw([...[...e.keys].map((k) => commitUris.get(k)).filter(Boolean), ...foldersWith([...e.keys].map((k) => `k\0${k}`))])),
     get().onDidChangeFiles((e) => {
       const paths = new Set(e.paths);
-      redraw([...scopedRows.values()].filter((r) => r.uri && r.scope === e.scope && paths.has(r.file)).map((r) => r.uri));
+      redraw([...[...scopedRows.values()].filter((r) => r.uri && r.scope === e.scope && paths.has(r.file)).map((r) => r.uri), ...foldersWith(e.paths.map((p) => `s\0${e.scope}\0${p}`))]);
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('commitCorner.markUnviewedFiles')) changed.fire(undefined);
@@ -394,6 +441,12 @@ function registerDecorations() {
       provideFileDecoration(uri) {
         if (uri.fragment !== 'commit-corner-history' || !marksUnviewed()) return undefined;
         const dot = new vscode.FileDecoration('●', 'Not viewed', new vscode.ThemeColor('textLink.foreground'));
+        if (uri.query.startsWith('vf=')) {
+          const folder = folderRows.get(uri.query.slice(3));
+          if (!folder) return undefined;
+          folder.uri = uri;
+          return folder.files.some((f) => f.unviewed()) ? new vscode.FileDecoration('●', 'Has files not viewed', new vscode.ThemeColor('textLink.foreground')) : undefined;
+        }
         if (uri.query.startsWith('vk=')) {
           const key = uri.query.slice(3);
           commitUris.delete(key);
@@ -417,4 +470,4 @@ function commitCount(sha, files) {
   return { viewed: files.filter((f) => m.has(ChangeMarks.key(sha, f))).length, total: files.length };
 }
 
-module.exports = { registerDecorations, ViewedStore, ChangeMarks, scopedKey, scopedUnviewed, scopedState, scopedTooltip, markScoped, markScopedMany, registerList, onDidChangeLists, listOfShown, activeShown, nextUnviewedRow, FINGERPRINT, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };
+module.exports = { registerDecorations, ViewedStore, ChangeMarks, scopedKey, folderKey, scopedUnviewed, scopedState, scopedTooltip, markScoped, markScopedMany, registerList, onDidChangeLists, listOfShown, activeShown, nextUnviewedRow, FINGERPRINT, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };

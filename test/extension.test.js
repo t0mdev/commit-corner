@@ -917,8 +917,17 @@ test('a pull request\'s files have a dot until opened; Mark as Not Viewed brings
   assert.equal(files[1].getTreeItem().contextValue, 'file:pr:new');
   assert.equal(group.getTreeItem().description, undefined, 'none viewed');
   assert.equal(folder.getTreeItem().contextValue, 'folder:marks');
+  // Each row knows the one above it (Next Unviewed File selects the file it opens in the tree).
+  assert.equal(view.getParent(files[0]), folder);
+  assert.equal(view.getParent(folder), group);
+  assert.equal(view.getParent(group), prNode);
+  // The folder has a dot while a file in it is not viewed (a collapsed folder says so too).
+  const folderDeco = () => mock.decorationProviders.map((d) => d.provideFileDecoration(folder.getTreeItem().resourceUri)).find(Boolean);
+  assert.ok(folderDeco(), 'folder dot');
+  assert.match(folder.getTreeItem().tooltip, /2 files in it not viewed yet/);
   await run('commitCorner.markCommitFileViewed', folder, [folder]);
   assert.equal(group.getTreeItem().description, '2/3 viewed');
+  assert.equal(folderDeco(), undefined, 'no folder dot once all in it are viewed');
   // With the dots off, a file still offers its Mark menus (by its state) and the list counts.
   mock.configValues.set('markUnviewedFiles', false);
   try {
@@ -1028,6 +1037,42 @@ test('a row is redrawn after its own children have loaded and the view has been 
   await sleep(500);
   assert.deepEqual(fired.slice(3), [undefined]);
   provider.dispose();
+});
+
+test('Compare with the working tree: a file has a dot until opened, and again when it changes', async (t) => {
+  const { WORKTREE } = require('../src/git/repository');
+  r.write('cmp-work.txt', 'one\n');
+  t.after(() => fs.rmSync(path.join(r.dir, 'cmp-work.txt'), { force: true }));
+  await api.manager.refresh(repo());
+  const view = mock.treeViews.get('commitCorner.compare').provider;
+  t.after(() => view.clear());
+  await view.setComparison(repo(), 'HEAD', WORKTREE, 'twoDot');
+  const row = async () => {
+    const roots = await view.getChildren();
+    const group = roots.find((n) => /Files changed/.test(n.label || ''));
+    const flat = async (list) => (await Promise.all(list.map(async (n) => (n.path ? [n] : flat(await view.getChildren(n)))))).flat();
+    return { group, file: (await flat(await view.getChildren(group))).find((n) => n.path === 'cmp-work.txt') };
+  };
+  let { group, file } = await row();
+  assert.equal(file.getTreeItem().contextValue, 'file:compareWork:new');
+  const { command, arguments: args } = file.getTreeItem().command;
+  await run(command, ...args);
+  assert.equal(file.getTreeItem().contextValue, 'file:compareWork:viewed');
+  assert.match(group.getTreeItem().description, /viewed/);
+  // Edited again: its dot is back.
+  r.write('cmp-work.txt', 'two\n');
+  ({ group, file } = await row());
+  assert.equal(file.getTreeItem().contextValue, 'file:compareWork:new');
+  assert.doesNotMatch(group.getTreeItem().description, /viewed/);
+  // Compare between two refs keeps the marks of an unchanged file.
+  await view.setComparison(repo(), 'feature~1', 'feature');
+  const roots = await view.getChildren();
+  const refGroup = roots.find((n) => /Files changed/.test(n.label || ''));
+  const [b] = await view.getChildren(refGroup);
+  assert.equal(b.getTreeItem().contextValue, 'file:compare:new');
+  await run('commitCorner.markCommitFileViewed', b);
+  const [again] = await view.getChildren((await view.getChildren()).find((n) => /Files changed/.test(n.label || '')));
+  assert.equal(again.getTreeItem().contextValue, 'file:compare:viewed', 'still viewed when drawn again');
 });
 
 test('no command reported an unexpected error', () => {

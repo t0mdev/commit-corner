@@ -107,6 +107,7 @@ class WorktreeFileNode {
     this.owner = owner;
     this.change = change;
     this.path = change.path;
+    this.treeParent = owner;
     // Added or deleted: opens as a plain editor (else as a diff); Next Unviewed File tells them apart.
     this.single = change.status === 'A' || change.status === 'D';
     this.viewed = { scope: owner.viewedScope, fingerprint: fingerprintOf(owner.ids, change), owner, provider: owner.provider };
@@ -284,7 +285,9 @@ class WorktreeNode {
           const files = changes.filter((c) => !c.path.endsWith('/')); // not a repository nested there
           if (files.length) {
             const ids = await this.repo.worktreeFileIds(wt.path, files.map((c) => c.path));
-            out.push(new WorktreeChangesNode(this, base, { mergeBase, changes: files, ids }));
+            const changesRow = new WorktreeChangesNode(this, base, { mergeBase, changes: files, ids });
+            changesRow.treeParent = this;
+            out.push(changesRow);
           } else out.push(new MessageNode(`No changes since it left ${base}`, 'check'));
         }
       } catch (e) {
@@ -317,8 +320,6 @@ class WorktreesView extends TreeProvider {
     /** worktree root -> its "Agent review" row (redrawn alone when a comment moves) */
     this.reviewNodes = new Map();
     this.view = require('../util').registerTreeView('commitCorner.worktrees', vscode.window.createTreeView('commitCorner.worktrees', { treeDataProvider: this }));
-    /** viewed scope -> the "Changes vs …" row that counts its marks (redrawn when they change) */
-    this.viewedOwners = new Map();
     const refresh = debounce(() => this.refresh(), 1500);
     // An "Agent review" row redrawn once typing pauses for 300 ms (a comment moves with every keystroke above it).
     const pendingReview = new Set();
@@ -360,10 +361,6 @@ class WorktreesView extends TreeProvider {
         } else if (node && !this.reviewCountChanged(node[1])) redrawReview(node[1]);
         else refresh();
       })] : []),
-      viewed.get().onDidChange((scope) => {
-        const owner = this.viewedOwners.get(scope);
-        if (owner) this.redraw(owner);
-      }),
       // Which "Changes vs …" rows are open (a redraw must not close the one you are reviewing).
       this.view.onDidExpandElement((e) => {
         if (e.element instanceof WorktreeChangesNode) this.openChanges.add(e.element.worktreePath);

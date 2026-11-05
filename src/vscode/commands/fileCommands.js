@@ -484,8 +484,13 @@ function register(ctx) {
       const shown = viewed.listOfShown(viewed.activeShown());
       if (shown) {
         const next = viewed.nextUnviewedRow(shown.scope, shown.list, shown.at);
-        // As in a commit's diff: the keyboard goes to the diff it opens.
-        if (next) await next.open({ preserveFocus: false });
+        // As in a commit's diff: the keyboard goes to the diff it opens; its row is selected in
+        // its list (Enter / ↓ there go on from it).
+        if (next) {
+          await next.open({ preserveFocus: false });
+          const tree = next.viewed && next.viewed.provider && next.viewed.provider.view;
+          if (tree && tree.visible) await Promise.resolve(tree.reveal(next, { select: true, focus: false })).catch(() => {});
+        }
         else vscode.window.setStatusBarMessage(`All ${shown.list.rows.length} file${shown.list.rows.length === 1 ? '' : 's'} of ${shown.list.label} are viewed`, 4000);
         return;
       }

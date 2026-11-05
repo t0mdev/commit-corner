@@ -137,6 +137,7 @@ class PullRequestNode {
       props: { repoRoot: this.repoRoot, prNumber: this.number, number: this.number, remote: this.remote, viewedScope: scope, viewedFiles: marks, viewedProvider: this.view },
     });
     filesGroup.viewedOwner = filesGroup;
+    filesGroup.treeParent = this;
     this.view.viewedOwners.set(scope, filesGroup);
     return [
       ...status,
@@ -167,12 +168,7 @@ class PullRequestsView extends TreeProvider {
     /** `${root}:${remote}:${n}` -> GitHub API summary, when listed through the API */
     this.metas = new Map();
     this.view = require('../util').registerTreeView('commitCorner.pullRequests', vscode.window.createTreeView('commitCorner.pullRequests', { treeDataProvider: this, canSelectMany: true, showCollapseAll: true }));
-    /** viewed scope -> the "Files changed" row that counts its marks (redrawn when they change) */
-    this.viewedOwners = new Map();
-    this.disposables = [this.view, manager.onDidChangeActive(() => this.refresh()), viewed.get().onDidChange((scope) => {
-      const owner = this.viewedOwners.get(scope);
-      if (owner) this.redraw(owner);
-    })];
+    this.disposables = [this.view, manager.onDidChangeActive(() => this.refresh())];
     /** Show only PRs that still have GitHub's test-merge ref (in practice: open ones). */
     // Open pull requests by default; "Show All Pull Requests" (view menu) lists closed and merged ones too.
     this.openOnly = extContext.workspaceState.get('prOpenOnly', true);
@@ -199,7 +195,9 @@ class PullRequestsView extends TreeProvider {
     for (const remote of remotes) {
       const nodes = await this.remoteChildren(repo, remote.name, remote);
       if (remotes.length === 1) return nodes;
-      groups.push(new GroupNode(remote.name, nodes, { icon: 'cloud', props: { repoRoot: repo.root, remote: remote.name } }));
+      const group = new GroupNode(remote.name, nodes, { icon: 'cloud', props: { repoRoot: repo.root, remote: remote.name } });
+      for (const n of nodes) n.treeParent = group;
+      groups.push(group);
     }
     return groups;
   }

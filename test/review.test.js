@@ -173,6 +173,8 @@ test('a viewed mark holds for the content it was given, and goes when the file c
   assert.equal(odd.isViewed('pr:9', '__proto__', 'p'), true);
   assert.equal(odd.isViewed('pr:9', 'constructor', 'c'), true);
   assert.equal(odd.isViewed('pr:9', 'toString', undefined), false);
+  assert.equal(m.get('viewedFiles'), undefined, 'written a moment later');
+  await odd.flush();
   const reloaded = new ViewedStore({ get: (k) => JSON.parse(JSON.stringify(m.get(k))), update: async () => {} });
   assert.equal(reloaded.isViewed('pr:9', '__proto__', 'p'), true);
   assert.equal(reloaded.isViewed('__proto__', 'x', 'p'), false);

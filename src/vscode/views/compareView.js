@@ -2,7 +2,8 @@
 
 const vscode = require('vscode');
 const notify = require('../notify');
-const { TreeProvider, MessageNode, GroupNode, CommitNode, fileNodes } = require('./nodes');
+const { TreeProvider, MessageNode, GroupNode, CommitNode, fileNodes, fingerprintOf } = require('./nodes');
+const viewed = require('../viewed');
 const { WORKTREE } = require('../../git/repository');
 const { shortSha, showError, debounce } = require('../util');
 const { openMultiDiff, refLabel } = require('../diffs');
@@ -81,6 +82,16 @@ class CompareView extends TreeProvider {
     return left;
   }
 
+  /**
+   * Each file's fingerprint on the right side: its blob id there, or for the working tree the
+   * blob id of the file as it is now (hashed again only when it changed).
+   */
+  async fingerprints(base, files) {
+    const { repo, right } = this.state;
+    if (right !== WORKTREE) return repo.changedBlobIds(base, right);
+    return repo.worktreeFileIds(repo.root, files.filter((f) => f.status !== 'D').map((f) => f.path));
+  }
+
   async files() {
     const { repo, right } = this.state;
     const base = await this.fileBase();
@@ -142,9 +153,23 @@ class CompareView extends TreeProvider {
     const { base, files } = await this.files();
     const added = files.reduce((n, f) => n + (f.added || 0), 0);
     const deleted = files.reduce((n, f) => n + (f.deleted || 0), 0);
-    roots.push(new GroupNode(`Files changed (${files.length})`, fileNodes(repo, files, { leftRef: base, rightRef: right }), {
-      icon: 'files', description: `+${added} −${deleted}`, contextValue: 'compareFiles',
-    }));
+    // Viewed marks, as in a pull request: per comparison, by content, so a file that changes again
+    // (a new commit on a side, an edit in the working tree) is unviewed again.
+    const scope = `compare:${repo.root}:${left}:${right === WORKTREE ? 'working tree' : right}:${mode}`;
+    const ids = await this.fingerprints(base, files).catch(() => new Map());
+    const marks = files.map((f) => ({ path: f.path, fingerprint: fingerprintOf(ids, f) }));
+    const filesGroup = new GroupNode(`Files changed (${files.length})`, () => fileNodes(repo, files, { leftRef: base, rightRef: right, contextValue: right === WORKTREE ? 'file:compareWork' : 'file:compare' }, { viewed: { scope, ids, owner: filesGroup, provider: this, label: `${L} ↔ ${R}` } }), {
+      icon: 'files',
+      description: () => {
+        const seen = viewed.get().count(scope, marks);
+        const count = !seen ? '' : seen === files.length ? (seen === 1 ? ' · viewed' : ` · all ${seen} viewed`) : ` · ${seen}/${files.length} viewed`;
+        return `+${added} −${deleted}${count}`;
+      },
+      contextValue: 'compareFiles',
+      props: { repoRoot: repo.root, viewedScope: scope, viewedFiles: marks },
+    });
+    this.viewedOwners.set(scope, filesGroup);
+    roots.push(filesGroup);
 
     if (right !== WORKTREE) {
       roots.push(new GroupNode('Merge preview', async () => {

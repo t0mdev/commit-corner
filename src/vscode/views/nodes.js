@@ -46,6 +46,12 @@ class TreeProvider {
     /** row -> since when it waits for its redraw (since its own children loaded, if they were loading) */
     this.pendingRedraw = new Map();
     this.redrawTimer = undefined;
+    /** viewed scope -> the row that counts its marks ("2/5 viewed"; a list's files register it) */
+    this.viewedOwners = new Map();
+    this.storeSub = viewed.get().onDidChange((scope) => {
+      const owner = this.viewedOwners.get(scope);
+      if (owner) this.redraw(owner);
+    });
     // The viewed dots switched on or off: rows with marks say so in their tooltips and menus too
     // (only they are redrawn: a full refresh would list pull requests again).
     this.settingSub = vscode.workspace.onDidChangeConfiguration((e) => {
@@ -167,8 +173,9 @@ class TreeProvider {
     run().catch((e) => log().warn(`Tree stats: ${e.message}`));
   }
 
+  /** The row above (VS Code needs it to reveal a row): a file's folder, a list's row, … */
   getParent(node) {
-    return node && node.parent;
+    return node && (node.treeParent || node.parent);
   }
 
   refresh(node) {
@@ -222,6 +229,7 @@ class TreeProvider {
     clearTimeout(this.redrawTimer);
     if (this.viewedSub) this.viewedSub.dispose();
     if (this.settingSub) this.settingSub.dispose();
+    this.storeSub.dispose();
     this._onDidChangeTreeData.dispose();
   }
 }
@@ -576,6 +584,17 @@ class FileNode {
     await vscode.commands.executeCommand(command, o.preserveFocus === undefined ? args : { ...args, preserveFocus: o.preserveFocus });
   }
 
+  /** Not opened yet (its dot): a commit's file, or one of a list with marks (this.viewed). */
+  unviewed() {
+    return this.viewed ? viewed.scopedUnviewed(this.viewed.scope, this.path, this.viewed.fingerprint) : !!this.commitViewed && viewed.commitFileUnviewed(this.commitViewed, this.change);
+  }
+
+  /** What its viewed mark changes with (to redraw only the dots that change): see viewed.folderKey. */
+  markId() {
+    if (this.viewed) return `s\0${this.viewed.scope}\0${this.path}`;
+    return this.commitViewed ? `k\0${viewed.ChangeMarks.key(this.commitViewed, this.change)}` : undefined;
+  }
+
   /** The URIs its diff shows (to tell whether that diff is the editor you are looking at). */
   openUris() {
     const { uriAt } = require('../diffs');
@@ -598,7 +617,7 @@ class FileNode {
   getTreeItem() {
     const name = path.posix.basename(this.path);
     // Not opened yet (a dot): a commit's file, or one of a pull request's files (this.viewed).
-    const unviewed = this.viewed ? viewed.scopedUnviewed(this.viewed.scope, this.path, this.viewed.fingerprint) : !!this.commitViewed && viewed.commitFileUnviewed(this.commitViewed, this.change);
+    const unviewed = this.unviewed();
     const item = new vscode.TreeItem(name, vscode.TreeItemCollapsibleState.None);
     const dir = path.posix.dirname(this.path);
     const stats = this.change.added !== undefined && this.change.added !== null ? `+${this.change.added} −${this.change.deleted}` : this.change.binary ? 'binary' : '';
@@ -645,6 +664,14 @@ function fileNodes(repo, files, refs, opts = {}) {
   if (opts.viewed) for (const n of nodes) n.viewed = { scope: opts.viewed.scope, fingerprint: fingerprintOf(opts.viewed.ids, n), owner: opts.viewed.owner, provider: opts.viewed.provider };
   // A tree even for a single file: its folder is part of what you need to see.
   const out = !opts.tree && config().get('fileLayout', 'tree') !== 'tree' ? nodes : buildFolderTree(nodes);
+  // Each row knows the row it is under (getParent), so a file can be revealed in the tree.
+  const link = (list, up) => {
+    for (const n of list) {
+      if (up) n.treeParent = up;
+      if (n instanceof FolderNode) link(n.children, n);
+    }
+  };
+  link(out, (opts.viewed && opts.viewed.owner) || refs.parent);
   if (opts.viewed) {
     // Folders get Mark as Viewed / Not Viewed for their files; Next Unviewed File in the diffs
     // goes through the files in the order shown.
@@ -675,6 +702,14 @@ class FolderNode {
     item.iconPath = vscode.ThemeIcon.Folder;
     // In a list with viewed marks (a pull request's files): Mark as Viewed / Not Viewed for all in it.
     item.contextValue = this.marks ? 'folder:marks' : 'folder';
+    // A dot while a file in it (or below) has not been opened, so a collapsed folder says so too.
+    const files = this.files().filter((f) => f.markId && f.markId());
+    if (files.length && files[0].repo) {
+      const key = viewed.folderKey(files, `${files[0].viewed ? files[0].viewed.scope : files[0].commitViewed}\0${this.fullPath}`);
+      item.resourceUri = vscode.Uri.file(files[0].repo.absolute(this.fullPath)).with({ fragment: 'commit-corner-history', query: `vf=${key}` });
+      const left = files.filter((f) => f.unviewed()).length;
+      if (left) item.tooltip = `${left} file${left === 1 ? '' : 's'} in it not viewed yet`;
+    }
     return item;
   }
 

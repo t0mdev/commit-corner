@@ -9,6 +9,9 @@
   - The dots follow `commitCorner.markUnviewedFiles`. With it off these lists show no dots but still count what you opened, and their Mark menus stay.
   - A file that cannot be marked (a symbolic link, a submodule) says so in its tooltip.
   - *Copy Relative Path* on a worktree's changed file.
+- **The Compare view marks what you have not seen too**: a dot on each changed file until you open it, counted on *Files changed*, with the same menus and *Next Unviewed File*. Compared with the working tree, a file you (or an agent) edit again gets its dot back; between two refs, a file keeps its mark until its content on a side changes.
+- A folder in these trees (and in a commit's files) has a dot while a file in it has not been opened, so a collapsed folder says so too.
+- *Next Unviewed File* selects the file it opens in its list, so `Enter` / `↓` there go on from it.
 - **Review Comments** submenu in each Commit Corner view's `···` menu, while there are review comments: Copy Review for the Agent (with its shortcut, `Ctrl+Alt+G C`), Save Review to the Worktree, Delete All Review Comments….
 - Fixed: a large pull request opened for the first time could show only part of its files until you refreshed. The pull request's row was redrawn (it had just been fetched) while VS Code was still loading the rows below it; a row is now redrawn only after the rows below it have loaded.
 - Fixed: *Open File at Commit*, *Compare with Working Tree* and *Restore File from Commit* on a file a pull request (or a merge's other side) deleted now use the version before the pull request, not the parent of its last commit.
