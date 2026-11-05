@@ -19,6 +19,9 @@ class ViewedStore {
     this.memento = memento;
     this.emitter = new vscode.EventEmitter();
     this.onDidChange = this.emitter.event;
+    /** The files whose mark changed: {scope, paths} (the dots redraw only those). */
+    this.filesEmitter = new vscode.EventEmitter();
+    this.onDidChangeFiles = this.filesEmitter.event;
   }
 
   all() {
@@ -61,10 +64,12 @@ class ViewedStore {
     }
     if (this.memento) await this.memento.update(KEY, all);
     this.emitter.fire(scope);
+    this.filesEmitter.fire({ scope, paths: files.map((f) => f.path) });
   }
 
   dispose() {
     this.emitter.dispose();
+    this.filesEmitter.dispose();
   }
 }
 
@@ -82,8 +87,9 @@ const scopedRows = new Map();
 function scopedKey(scope, file, fingerprint) {
   // The whole hash: these keys are never stored, and no file can take another one's dot.
   const key = crypto.createHash('sha1').update(['s', scope, file, fingerprint || ''].join('\0')).digest('hex');
+  const before = scopedRows.get(key);
   scopedRows.delete(key);
-  scopedRows.set(key, { scope, file, fingerprint });
+  scopedRows.set(key, { scope, file, fingerprint, uri: before && before.uri });
   while (scopedRows.size > MAX_SCOPED) scopedRows.delete(scopedRows.keys().next().value);
   return key;
 }
@@ -139,7 +145,10 @@ async function markScopedMany(rows, on = true) {
   for (const r of rows) {
     const v = r && r.viewed;
     if (!v || typeof v.scope !== 'string' || typeof r.path !== 'string' || v.scope.length > MAX_KEY || r.path.length > MAX_KEY) continue;
-    if (!FINGERPRINT.test(v.fingerprint || '') || get().isViewed(v.scope, r.path, v.fingerprint) === on) continue;
+    if (!FINGERPRINT.test(v.fingerprint || '')) continue;
+    // Opened from this list (even a file viewed before): the list meant when two show the same diff.
+    if (on) lastScope = v.scope;
+    if (get().isViewed(v.scope, r.path, v.fingerprint) === on) continue;
     if (!byScope.has(v.scope)) byScope.set(v.scope, []);
     byScope.get(v.scope).push({ path: r.path, fingerprint: v.fingerprint });
   }
@@ -154,26 +163,62 @@ async function markScopedMany(rows, on = true) {
  */
 const MAX_LISTS = 20;
 const lists = new Map();
+const listsEmitter = new vscode.EventEmitter();
+/** A list was shown (again): the active diff may belong to it now (the title-bar button). */
+const onDidChangeLists = listsEmitter.event;
+/** The list a file was last opened from: the one meant when two lists show the same diff. */
+let lastScope;
 
-/** @param {string} scope @param {string} label ("pull request #7") @param {any[]} rows in the order shown */
+/**
+ * @param {string} scope @param {string} label ("pull request #7")
+ * @param {any[]} rows in the order shown; `single`: opens as a plain editor (else as a diff)
+ */
 function registerList(scope, label, rows) {
   lists.delete(scope);
-  lists.set(scope, { label, rows });
+  // index: ownUri -> row number, built when first looked up (once per drawing of the list).
+  lists.set(scope, { label, rows, index: undefined });
   while (lists.size > MAX_LISTS) lists.delete(lists.keys().next().value);
+  listsEmitter.fire(scope);
+}
+
+function indexOf(list) {
+  if (!list.index) {
+    list.index = new Map();
+    list.rows.forEach((r, i) => list.index.set(r.ownUri(), i));
+  }
+  return list.index;
 }
 
 /**
- * The list (and row) whose file is shown in the active diff, if one is: `uris` are the active
- * editor's (as strings).
+ * The list (and row) whose file the active tab shows, if one does: `shown` as viewed.activeShown()
+ * gives it. By the side only that row opens (pull requests from the same base share the other),
+ * and in the way it opens (a diff, or a plain editor for a worktree's added or deleted file: a
+ * worktree's file opened to edit it is not its diff). Two lists that still match (two pull
+ * requests deleting the same file): the one a file was last opened from, else the newest.
+ * @param {{uris: string[], diff: boolean}} shown
  */
-function listOfShown(uris) {
-  const shown = new Set(uris);
+function listOfShown(shown) {
+  const found = [];
   for (const [scope, list] of [...lists].reverse()) {
-    // By the side only this row opens: pull requests from the same base share the other one.
-    const at = list.rows.findIndex((r) => shown.has(r.ownUri()));
-    if (at >= 0) return { scope, list, at };
+    const index = indexOf(list);
+    for (const u of shown.uris) {
+      const at = index.get(u);
+      if (at !== undefined && !list.rows[at].single === shown.diff) {
+        found.push({ scope, list, at });
+        break;
+      }
+    }
   }
-  return undefined;
+  return found.find((f) => f.scope === lastScope) || found[0];
+}
+
+/** What the active tab shows: its URIs (as strings) and whether it is a diff. */
+function activeShown() {
+  const tab = vscode.window.tabGroups && vscode.window.tabGroups.activeTabGroup && vscode.window.tabGroups.activeTabGroup.activeTab;
+  const input = tab && tab.input;
+  if (vscode.TabInputTextDiff && input instanceof vscode.TabInputTextDiff) return { uris: [String(input.modified), String(input.original)], diff: true };
+  if (vscode.TabInputText && input instanceof vscode.TabInputText) return { uris: [String(input.uri)], diff: false };
+  return { uris: [], diff: false };
 }
 
 /** The next row of a list (after index `at`, around to the start) not viewed yet. */
@@ -328,10 +373,19 @@ function markCommitFiles(sha, files, on = true) {
  */
 function registerDecorations() {
   const changed = new vscode.EventEmitter();
+  // Only the rows whose mark changed are asked again (all at once would make every dot blink).
+  // The URIs come from the rows VS Code asked about: commit marks by key, the lists' entries.
+  const commitUris = new Map();
+  const redraw = (uris) => {
+    if (uris.length) changed.fire(uris);
+  };
   const subs = [
     changed,
-    commitMarks().onDidChange(() => changed.fire(undefined)),
-    get().onDidChange(() => changed.fire(undefined)),
+    commitMarks().onDidChange((e) => redraw([...e.keys].map((k) => commitUris.get(k)).filter(Boolean))),
+    get().onDidChangeFiles((e) => {
+      const paths = new Set(e.paths);
+      redraw([...scopedRows.values()].filter((r) => r.uri && r.scope === e.scope && paths.has(r.file)).map((r) => r.uri));
+    }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('commitCorner.markUnviewedFiles')) changed.fire(undefined);
     }),
@@ -340,9 +394,17 @@ function registerDecorations() {
       provideFileDecoration(uri) {
         if (uri.fragment !== 'commit-corner-history' || !marksUnviewed()) return undefined;
         const dot = new vscode.FileDecoration('●', 'Not viewed', new vscode.ThemeColor('textLink.foreground'));
-        if (uri.query.startsWith('vk=')) return commitMarks().has(uri.query.slice(3)) ? undefined : dot;
+        if (uri.query.startsWith('vk=')) {
+          const key = uri.query.slice(3);
+          commitUris.delete(key);
+          commitUris.set(key, uri);
+          while (commitUris.size > MAX_SCOPED) commitUris.delete(commitUris.keys().next().value);
+          return commitMarks().has(key) ? undefined : dot;
+        }
         const row = uri.query.startsWith('vs=') && scopedRows.get(uri.query.slice(3));
-        return row && scopedUnviewed(row.scope, row.file, row.fingerprint) ? dot : undefined;
+        if (!row) return undefined;
+        row.uri = uri;
+        return scopedUnviewed(row.scope, row.file, row.fingerprint) ? dot : undefined;
       },
     }),
   ];
@@ -355,4 +417,4 @@ function commitCount(sha, files) {
   return { viewed: files.filter((f) => m.has(ChangeMarks.key(sha, f))).length, total: files.length };
 }
 
-module.exports = { registerDecorations, ViewedStore, ChangeMarks, scopedKey, scopedUnviewed, scopedState, scopedTooltip, markScoped, markScopedMany, registerList, listOfShown, nextUnviewedRow, FINGERPRINT, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };
+module.exports = { registerDecorations, ViewedStore, ChangeMarks, scopedKey, scopedUnviewed, scopedState, scopedTooltip, markScoped, markScopedMany, registerList, onDidChangeLists, listOfShown, activeShown, nextUnviewedRow, FINGERPRINT, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };

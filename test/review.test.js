@@ -214,7 +214,12 @@ test('Changes vs Base in the Worktrees view: a file has a dot until opened, and 
   // Its row's click: the diff opens (keyboard kept in the list), and it is viewed.
   assert.equal(item.command.command, 'commitCorner.worktreeOpenChangedFile');
   mock.executed.length = 0;
+  const decoChanges = [];
+  const decoSub = deco.onDidChangeFileDecorations((e) => decoChanges.push(e));
+  t.after(() => decoSub.dispose());
   await files[0].open();
+  // Only that row's dot is asked again (all of them at once would make every dot blink).
+  assert.deepEqual(decoChanges, [[item.resourceUri]]);
   assert.equal(mock.executed[0].id, 'vscode.diff');
   assert.deepEqual(mock.executed[0].args[3], { preserveFocus: true, preview: true });
   assert.equal(redrawn[0], changes, 'the row with the count is redrawn');
@@ -248,14 +253,29 @@ test('Next Unviewed File in a diff stays in its own list, even when two pull req
   const two = [row(2, 'a.js'), row(2, 'c.js')];
   viewed.registerList('pr:1', 'pull request #1', one);
   viewed.registerList('pr:2', 'pull request #2', two); // the newer list
-  const shown = viewed.listOfShown(['head1:a.js', 'base:a.js']);
+  const shown = viewed.listOfShown({ uris: ['head1:a.js', 'base:a.js'], diff: true });
   assert.equal(shown.list.label, 'pull request #1', 'the list of the diff shown, not the newest that shares a side');
   assert.equal(viewed.nextUnviewedRow(shown.scope, shown.list, shown.at), one[1]);
-  assert.equal(viewed.listOfShown(['base:a.js']), undefined, 'the shared side alone is no one\'s');
+  assert.equal(viewed.listOfShown({ uris: ['base:a.js'], diff: true }), undefined, 'the shared side alone is no one\'s');
+  assert.equal(viewed.listOfShown({ uris: ['head1:a.js'], diff: false }), undefined, 'the same file in a plain editor is not its diff');
   // From b.js: around to the start (a.js); viewed ones are skipped; none left: undefined.
   assert.equal(viewed.nextUnviewedRow(shown.scope, shown.list, 1), one[0]);
   await viewed.markScoped(one[0].viewed, 'a.js');
   assert.equal(viewed.nextUnviewedRow(shown.scope, shown.list, 1), undefined);
+  // Both delete d.js (their own side is the same base version): the list a file was last opened
+  // from wins over the newest.
+  const del = (pr) => ({ ...row(pr, 'd.js'), ownUri: () => 'base:d.js' });
+  one.push(del(1));
+  two.push(del(2));
+  viewed.registerList('pr:1', 'pull request #1', one);
+  viewed.registerList('pr:2', 'pull request #2', two);
+  await viewed.markScoped(one[1].viewed, 'b.js'); // opened again: already viewed, still the list last used
+  assert.equal(viewed.listOfShown({ uris: ['base:d.js'], diff: true }).list.label, 'pull request #1');
+  await viewed.markScoped(one[1].viewed, 'b.js', false);
+  // A worktree's added file opens as a plain editor: matched there, and only there.
+  viewed.registerList('wt', 'Changes vs main', [{ ...row(3, 'n.js'), single: true, ownUri: () => 'file:///wt/n.js' }]);
+  assert.equal(viewed.listOfShown({ uris: ['file:///wt/n.js'], diff: false }).list.label, 'Changes vs main');
+  assert.equal(viewed.listOfShown({ uris: ['file:///wt/n.js', 'x'], diff: true }), undefined);
 });
 
 test('Next Unviewed File from a pull request\'s diff opens the next file with the keyboard in it', async () => {

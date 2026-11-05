@@ -46,9 +46,12 @@ class TreeProvider {
     /** row -> since when it waits for its redraw (since its own children loaded, if they were loading) */
     this.pendingRedraw = new Map();
     this.redrawTimer = undefined;
-    // The viewed dots switched on or off: rows say so in their tooltips and menus too.
+    // The viewed dots switched on or off: rows with marks say so in their tooltips and menus too
+    // (only they are redrawn: a full refresh would list pull requests again).
     this.settingSub = vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('commitCorner.markUnviewedFiles')) this.refresh();
+      if (!e.affectsConfiguration('commitCorner.markUnviewedFiles')) return;
+      const rows = [...(this.viewedOwners ? this.viewedOwners.values() : []), ...[...(this.commitFiles ? this.commitFiles.values() : [])].flatMap((m) => [...m.values()])];
+      if (rows.length) this.redraw([...new Set(rows)]);
     });
   }
 

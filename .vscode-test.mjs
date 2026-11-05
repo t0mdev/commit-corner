@@ -47,6 +47,8 @@ function workspace(label, settings) {
  */
 function uiWorkspace() {
   const dir = workspace('ui');
+  // The fake pull request remote test/ui/trees.test.js makes next to it (gone even if it fails).
+  made.push(`${dir}-prs.git`);
   const git = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: 'pipe' });
   git(dir, 'worktree', 'add', '-q', '-b', 'agent', `${dir}-agent`);
   fs.writeFileSync(path.join(`${dir}-agent`, 'agent.txt'), 'the agent was here\n');

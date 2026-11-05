@@ -39,6 +39,21 @@ async function openViewMenu() {
   throw new Error('the ··· menu did not open');
 }
 
+/** Show a Commit Corner view in the sidebar, once its title says so (its ··· menu is then its own). */
+async function showView(id, name) {
+  await vscode.commands.executeCommand(`commitCorner.sidebar.${id}`);
+  for (let i = 0; i < 50; i++) {
+    if (await inWorkbench(`/${name}/i.test((document.querySelector('.part.sidebar .title-label') || {}).textContent || '')`)) return;
+    await sleep(100);
+  }
+  throw new Error(`the ${name} view is not shown`);
+}
+
+/** Close the context menus that are open (a failed assertion must not leave one behind). */
+async function closeMenus() {
+  for (let i = 0; i < 3 && (await openMenus()).length; i++) await press(await workbench(), 'Escape');
+}
+
 /** How many rows the Pull Requests tree has (it draws only those on screen; its height counts all). */
 async function pullRequestRows() {
   return inWorkbench(`(() => {
@@ -133,11 +148,17 @@ suite('Tree views', () => {
   test('each view\'s ··· menu has Review (Copy with its shortcut, Save, Delete All) while there are review comments', async function () {
     this.timeout(60000);
     const api = await vscode.extensions.getExtension(`${pkg.publisher}.${pkg.name}`).activate();
-    for (const id of ['graphView', 'worktrees']) {
-      await vscode.commands.executeCommand(`commitCorner.sidebar.${id}`);
-      await sleep(500);
-      assert.ok(!(await openViewMenu()).some((x) => x.startsWith('Review Comments ')), `no Review without comments (${id})`);
-      await press(await workbench(), 'Escape');
+    const views = [['graphView', 'Graph'], ['worktrees', 'Worktrees']];
+    // No comments now (a test before may have left some: none of this file's).
+    if (api.review.store.roots().length) this.skip();
+    try {
+      for (const [id, name] of views) {
+        await showView(id, name);
+        assert.ok(!(await openViewMenu()).some((x) => x.startsWith('Review Comments ')), `no Review without comments (${id})`);
+        await closeMenus();
+      }
+    } finally {
+      await closeMenus();
     }
     const file = path.join(root(), 'review-menu.txt');
     fs.writeFileSync(file, 'one\ntwo\n');
@@ -146,9 +167,8 @@ suite('Tree views', () => {
     const thread = api.review.controller.createCommentThread(doc.uri, new vscode.Range(1, 0, 1, 0), []);
     try {
       await vscode.commands.executeCommand('commitCorner.review.add', { thread, text: 'Rename this.' });
-      for (const id of ['worktrees', 'graphView']) {
-        await vscode.commands.executeCommand(`commitCorner.sidebar.${id}`);
-        await sleep(500);
+      for (const [id, name] of [...views].reverse()) {
+        await showView(id, name);
         assert.ok((await openViewMenu()).includes('Review Comments []'), `Review in the ··· menu (${id})`);
         await inWorkbench(`(() => {
           const roots = [document, ...[...document.querySelectorAll('*')].filter((h) => h.shadowRoot).map((h) => h.shadowRoot)];
@@ -162,10 +182,10 @@ suite('Tree views', () => {
           sub = (await openMenus())[1];
         }
         assert.deepStrictEqual(sub, ['Copy Review for the Agent [Ctrl+Alt+G C]', 'Save Review to the Worktree []', 'Delete All Review Comments… []']);
-        await press(await workbench(), 'Escape');
-        await press(await workbench(), 'Escape');
+        await closeMenus();
       }
     } finally {
+      await closeMenus();
       await vscode.commands.executeCommand('commitCorner.review.deleteThread', thread);
       await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
       fs.rmSync(file, { force: true });

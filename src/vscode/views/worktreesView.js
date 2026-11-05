@@ -107,6 +107,8 @@ class WorktreeFileNode {
     this.owner = owner;
     this.change = change;
     this.path = change.path;
+    // Added or deleted: opens as a plain editor (else as a diff); Next Unviewed File tells them apart.
+    this.single = change.status === 'A' || change.status === 'D';
     this.viewed = { scope: owner.viewedScope, fingerprint: fingerprintOf(owner.ids, change), owner, provider: owner.provider };
   }
 

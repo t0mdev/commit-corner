@@ -901,15 +901,20 @@ test('a pull request\'s files have a dot until opened; Mark as Not Viewed brings
   assert.equal(files[0].getTreeItem().contextValue, 'file:pr:new');
   // Next Unviewed File in that diff: the next file of the list not viewed yet, in the order shown.
   const viewed = require('../src/vscode/viewed');
-  const shown = viewed.listOfShown(files[0].openUris());
+  const shown = viewed.listOfShown({ uris: files[0].openUris(), diff: true });
   assert.equal(shown.list.label, 'pull request #7');
   assert.deepEqual(shown.list.rows.map((n) => n.path), ['pr/one.txt', 'pr/two.txt', gone]);
   const next = viewed.nextUnviewedRow(shown.scope, shown.list, shown.at);
   assert.equal(next.path, 'pr/two.txt');
   await next.open();
   assert.equal(files[1].getTreeItem().contextValue, 'file:pr:viewed');
-  // Several selected files, or a folder: all of them at once.
+  // Several selected files, or a folder: all of them at once (both viewed first, so marking only
+  // the one right-clicked would show).
+  await run('commitCorner.markCommitFileViewed', files[0]);
+  assert.equal(group.getTreeItem().description, '2/3 viewed');
   await run('commitCorner.markCommitFileUnviewed', files[1], [files[0], files[1]]);
+  assert.equal(files[0].getTreeItem().contextValue, 'file:pr:new');
+  assert.equal(files[1].getTreeItem().contextValue, 'file:pr:new');
   assert.equal(group.getTreeItem().description, undefined, 'none viewed');
   assert.equal(folder.getTreeItem().contextValue, 'folder:marks');
   await run('commitCorner.markCommitFileViewed', folder, [folder]);
@@ -928,6 +933,35 @@ test('a pull request\'s files have a dot until opened; Mark as Not Viewed brings
   await run('commitCorner.compareFileWithWorkingTree', deleted);
   const diff = mock.executed.find((e) => e.id === 'vscode.diff');
   assert.ok(diff && String(diff.args[0]).includes(head) && !String(diff.args[0]).includes(first), `left side from the merge base: ${diff && diff.args[0]}`);
+  // Restore and Open File at Commit read it from there too.
+  const repo = api.manager.getRepository(r.dir);
+  const restored = [];
+  const saved = { restoreFile: repo.restoreFile };
+  repo.restoreFile = async (file, rev) => restored.push([file, rev]);
+  try {
+    mock.ui.answers.push('Restore');
+    await run('commitCorner.restoreFileFromCommit', deleted);
+  } finally {
+    repo.restoreFile = saved.restoreFile;
+  }
+  assert.deepEqual(restored, [[gone, head]]);
+  assert.ok(mock.ui.messages.some((m) => m.msg.includes(head.slice(0, 7)) && m.msg.includes('before it was deleted')), 'the dialog names that version');
+  // The dots setting switched: the rows with marks are redrawn, the pull requests are not listed again.
+  fired.length = 0;
+  const listed = view.getRoots;
+  let relisted = 0;
+  view.getRoots = async () => {
+    relisted++;
+    return listed.call(view);
+  };
+  try {
+    mock.events.onDidChangeConfiguration.fire({ affectsConfiguration: (k) => k === 'commitCorner.markUnviewedFiles' });
+    await new Promise((res) => setTimeout(res, 400));
+  } finally {
+    view.getRoots = listed;
+  }
+  assert.ok(fired.some((e) => Array.isArray(e) && e.includes(group)), 'the Files changed row');
+  assert.ok(!fired.includes(undefined) && relisted === 0, 'no full refresh');
   // The menus that work on any file still match (Open Working File and the others).
   const when = pkg.contributes.menus['view/item/context'].find((m) => m.command === 'commitCorner.openWorkingFile').when;
   const re = new RegExp(/viewItem =~ \/(.*?)\/ /.exec(when)[1]);
@@ -959,6 +993,20 @@ test('a row is redrawn after its own children have loaded and the view has been 
   assert.deepEqual(fired, [], 'and for a moment after (VS Code asks for the next level)');
   await sleep(450);
   assert.deepEqual(fired, [[pr.node]], 'then once');
+  // Its own children loading for long (a slow fetch): it waits for them, beyond the 3 s that
+  // other rows wait at most; then for the rows below.
+  const slowPr = pending();
+  const slowLoad = provider.getChildren(slowPr.node);
+  provider.redraw(slowPr.node);
+  await sleep(3500);
+  assert.equal(fired.length, 1, 'still held after 3.5 s');
+  slowPr.finish([]);
+  await slowLoad;
+  await sleep(50);
+  assert.equal(fired.length, 1, 'and a moment after');
+  await sleep(450);
+  assert.deepEqual(fired[1], [slowPr.node]);
+  fired.splice(1);
   // Idle: at once.
   provider.redraw(pr.node);
   assert.equal(fired.length, 2);

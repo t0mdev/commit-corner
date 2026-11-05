@@ -57,6 +57,13 @@ class RepositoryManager {
       this._onDidOpen, this._onDidClose, this._onDidChangeState, this._onDidChangeActive,
       vscode.workspace.onDidChangeWorkspaceFolders((e) => this.onFoldersChanged(e)),
       vscode.window.onDidChangeActiveTextEditor((ed) => this.onActiveEditor(ed)),
+      // A pull request's or worktree's files shown (again): the diff in front of you may be one of
+      // theirs now (its Next Unviewed File button), checked once they have settled.
+      require('./viewed').onDidChangeLists(() => {
+        clearTimeout(this.listsTimer);
+        this.listsTimer = setTimeout(() => this.updateEditorContext(), 200);
+      }),
+      { dispose: () => clearTimeout(this.listsTimer) },
       vscode.window.onDidChangeWindowState((s) => {
         if (s.focused) for (const repo of this.repos.values()) this.scheduleRefresh(repo);
       }),
@@ -507,11 +514,10 @@ class RepositoryManager {
     vscode.commands.executeCommand('setContext', 'commitCorner.activeFileChanged', changed);
     vscode.commands.executeCommand('setContext', 'commitCorner.activeEditorIsIndex', isIndex);
     vscode.commands.executeCommand('setContext', 'commitCorner.activeEditorIsCommitFile', commitFile);
-    // A diff opened from a pull request's files or a worktree's changes (Next Unviewed File there too).
-    const tab = vscode.window.tabGroups && vscode.window.tabGroups.activeTabGroup && vscode.window.tabGroups.activeTabGroup.activeTab;
-    const input = tab && tab.input;
-    const shown = input ? [input.modified, input.original, input.uri].filter(Boolean).map(String) : uri ? [String(uri)] : [];
-    vscode.commands.executeCommand('setContext', 'commitCorner.activeEditorInViewedList', !!(shown.length && require('./viewed').listOfShown(shown)));
+    // A diff opened from a pull request's files or a worktree's changes (Next Unviewed File there
+    // too): what the command itself looks at.
+    const viewed = require('./viewed');
+    vscode.commands.executeCommand('setContext', 'commitCorner.activeEditorInViewedList', !!viewed.listOfShown(viewed.activeShown()));
     vscode.commands.executeCommand('setContext', 'commitCorner.builtInGitOff', !require('./scm').builtInGitEnabled());
   }
 

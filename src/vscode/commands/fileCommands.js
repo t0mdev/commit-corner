@@ -434,11 +434,23 @@ function register(ctx) {
   const markFile = (on) => async (node, selected) => {
     const rows = (Array.isArray(selected) && selected.includes(node) ? selected : [node]).flatMap((n) => (n && n.marks && typeof n.files === 'function' ? n.files() : [n]));
     await viewed.markScopedMany(rows.filter((n) => n && n.viewed), on);
-    // A commit's files among them (selected with a pull request's, say): each by its own mark.
+    // A commit's files among them (selected with a pull request's, say): by their own marks, one
+    // change per commit.
+    const byCommit = new Map();
     for (const n of rows.filter((x) => x && !x.viewed && isFullSha(x.commitViewed) && typeof x.path === 'string').slice(0, 1000)) {
-      const repo = manager.getRepository(n.repoRoot);
-      const change = n.change || {};
-      if (repo) await markOpened(repo, n.commitViewed, { path: n.path, oldBlob: change.oldBlob, newBlob: change.newBlob }, on);
+      if (!byCommit.has(n.commitViewed)) byCommit.set(n.commitViewed, []);
+      byCommit.get(n.commitViewed).push(n);
+    }
+    for (const [sha, list] of byCommit) {
+      const repo = manager.getRepository(list[0].repoRoot);
+      if (!repo) continue;
+      const files = [];
+      for (const n of list) {
+        const change = n.change || {};
+        const f = await withBlobs(repo, sha, { path: n.path, oldBlob: change.oldBlob, newBlob: change.newBlob });
+        if (f) files.push(f);
+      }
+      if (files.length) viewed.markCommitFiles(sha, files, on);
     }
   };
   cmd('commitCorner.markCommitFileViewed', markFile(true));
@@ -469,7 +481,7 @@ function register(ctx) {
     }
     if (!repo || !sha) {
       // A diff opened from a pull request's files or a worktree's changes: the next of that list.
-      const shown = viewed.listOfShown(activeUris().map(String));
+      const shown = viewed.listOfShown(viewed.activeShown());
       if (shown) {
         const next = viewed.nextUnviewedRow(shown.scope, shown.list, shown.at);
         // As in a commit's diff: the keyboard goes to the diff it opens.
