@@ -292,13 +292,15 @@ test('a folder keeps one entry for its dot however often its files change (no gr
   const files = Array.from({ length: 50 }, (_, k) => ({ status: 'M', path: `src/d${k % 5}/f${k}.js` }));
   const draw = (gen) => {
     const ids = new Map(files.map((f) => [f.path, gen.toString(16).padStart(40, '0')]));
-    const walk = (list) => list.forEach((n) => n.children && (n.getTreeItem(), walk(n.children)));
+    const walk = (list) => list.forEach((n) => (n.getTreeItem(), n.children && walk(n.children)));
     walk(fileNodes(repo, files, { leftRef: 'a'.repeat(40), rightRef: 'b'.repeat(40), contextValue: 'file:compare' }, { tree: true, viewed: { scope: 'leak', ids, label: 'x' } }));
   };
   draw(1);
   const after1 = viewed.folderCount();
+  const rows1 = viewed.scopedCount();
   for (let gen = 2; gen < 200; gen++) draw(gen); // an agent editing: new contents each time
   assert.equal(viewed.folderCount(), after1, 'one entry per folder, not one per version');
+  assert.equal(viewed.scopedCount(), rows1, 'one entry per file, not one per version');
   // Same files and contents on new commits (a rebase): the list is looked up anew.
   const row = (head) => ({ path: 'a.js', viewed: { scope: 'rb', fingerprint: 'c'.repeat(40) }, leftRef: 'base', rightRef: head, ownUri: () => `${head}:a.js`, async open() {} });
   viewed.registerList('rb', 'pull request #9', [row('h1')]);

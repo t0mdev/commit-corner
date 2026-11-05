@@ -25,6 +25,12 @@ class CompareView extends TreeProvider {
     this.state = undefined;
     this.view = require('../util').registerTreeView('commitCorner.compare', vscode.window.createTreeView('commitCorner.compare', { treeDataProvider: this, canSelectMany: true, showCollapseAll: true }));
     this.disposables = [
+      // With several repositories, a first row names the one shown (a click switches).
+      ...this.watchRepositories(manager),
+      // Nothing shown yet: the repository row follows the active repository.
+      manager.onDidChangeActive(() => {
+        if (!this.state) this.refresh();
+      }),
       this.view,
       manager.onDidClose((repo) => {
         if (this.state && this.state.repo === repo) this.clear();
@@ -51,6 +57,11 @@ class CompareView extends TreeProvider {
     this.setContext();
   }
 
+  /** The compared repository (else the active one). */
+  shownRepository() {
+    return (this.state && this.state.repo) || this.manager.active;
+  }
+
   setContext() {
     vscode.commands.executeCommand('setContext', 'commitCorner.compareActive', !!this.state);
     vscode.commands.executeCommand('setContext', 'commitCorner.compareMode', this.state ? this.state.mode : undefined);
@@ -63,12 +74,6 @@ class CompareView extends TreeProvider {
     this.setContext();
     this.refresh();
     await require('../sidebar').showView('compare');
-  }
-
-  /** A full refresh: its data is newer than any reload still running (see reloadFiles). */
-  refresh(node) {
-    if (!node) this.epoch = (this.epoch || 0) + 1;
-    return super.refresh(node);
   }
 
   clear() {
@@ -119,6 +124,8 @@ class CompareView extends TreeProvider {
    * changed) and a signature to tell whether anything shown changed.
    */
   async loadFiles(state = this.state) {
+    // Numbered when started: of two loads, the one started later shows what is newer.
+    const seq = (this.loadSeq = (this.loadSeq || 0) + 1);
     const { repo, right } = state;
     const { base, right: rightRef, files } = await this.files(state);
     const ids = right === WORKTREE
@@ -126,7 +133,7 @@ class CompareView extends TreeProvider {
       : new Map(files.filter((f) => f.status !== 'D' && f.newBlob).map((f) => [f.path, f.newBlob]));
     const marks = files.map((f) => ({ path: f.path, fingerprint: fingerprintOf(ids, f) }));
     const signature = files.map((f, i) => `${f.status}\0${f.path}\0${f.origPath || ''}\0${f.added}\0${f.deleted}\0${marks[i].fingerprint || ''}`).join('\n');
-    return { base, rightRef, files, ids, marks, signature };
+    return { seq, base, rightRef, files, ids, marks, signature };
   }
 
   /**
@@ -140,12 +147,12 @@ class CompareView extends TreeProvider {
     }
     this.reloading = true;
     const state = this.state;
-    const group = this.filesGroup;
-    const epoch = this.epoch;
     try {
       const data = await this.loadFiles(state);
-      // A refresh meanwhile (a ref moved, another comparison) has newer data: this one is dropped.
-      if (this.state !== state || this.epoch !== epoch || this.filesGroup !== group || !group || !group.data || data.signature === group.data.signature) return;
+      // Onto the row shown now (a refresh meanwhile may have replaced it), unless what it shows
+      // was loaded later than this (then it is the newer one) or is the same.
+      const group = this.filesGroup;
+      if (this.state !== state || !group || !group.data || group.data.seq > data.seq || data.signature === group.data.signature) return;
       group.data = data;
       group.label = `Files changed (${data.files.length})`;
       this.redraw(group);
@@ -170,7 +177,7 @@ class CompareView extends TreeProvider {
     const { repo, left, right, mode, title } = this.state;
     const L = this.label(left);
     const R = this.label(right);
-    this.view.description = this.titleFor(repo, `${title ? `${title}: ` : ''}${L} ${mode === 'threeDot' ? '...' : '..'} ${R}`);
+    this.view.description = `${title ? `${title}: ` : ''}${L} ${mode === 'threeDot' ? '...' : '..'} ${R}`;
     const roots = [];
     const header = new MessageNode(`${L} ↔ ${R}`, 'git-compare');
     header.getTreeItem = () => {

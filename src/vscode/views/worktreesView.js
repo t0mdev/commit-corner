@@ -340,6 +340,8 @@ class WorktreesView extends TreeProvider {
       flushReview();
     };
     this.disposables = [
+      // With several repositories, a first row names the one shown (a click switches).
+      ...this.watchRepositories(manager),
       this.view,
       manager.onDidChangeActive(() => this.refresh()),
       manager.onDidChangeState((repo) => {
@@ -395,7 +397,7 @@ class WorktreesView extends TreeProvider {
     if (!repo) return [];
     // "This window" is the worktree open in this window, whichever repository is active.
     const list = (await repo.getWorktreeDetails()).map((w) => ({ ...w, isCurrent: inThisWindow(w.path) }));
-    this.view.description = this.titleFor(repo, list.length > 1 ? String(list.length) : '');
+    this.view.description = list.length > 1 ? String(list.length) : undefined;
     return list.map((w) => new WorktreeNode(repo, w, this));
   }
 

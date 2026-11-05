@@ -81,6 +81,8 @@ class BranchesView extends TreeProvider {
       }
     }, 400);
     this.disposables = [
+      // With several repositories, a first row names the one shown (a click switches).
+      ...this.watchRepositories(manager),
       this.view,
       manager.onDidChangeActive(() => {
         this.lastSignature = '';

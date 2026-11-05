@@ -79,7 +79,7 @@ class TreeProvider {
     /** row -> since when it waits for its redraw (since its own children loaded, if they were loading) */
     this.pendingRedraw = new Map();
     this.redrawTimer = undefined;
-    /** Rows handed to VS Code (see owns); folder collapse key -> its latest row. */
+    /** Rows handed to VS Code (see owns); folder collapse key -> its new row (while a collapse waits). */
     this.shown = new WeakSet();
     this.folderRows = new Map();
     /** row -> how many times VS Code has loaded its children */
@@ -123,10 +123,17 @@ class TreeProvider {
     if (node) this.loadingRows.set(node, (this.loadingRows.get(node) || 0) + 1);
     try {
       if (node) children = node.getChildren ? await node.getChildren() : [];
-      else children = await this.getRoots();
+      else {
+        children = await this.getRoots();
+        const row = this.repositoryRow();
+        if (row && children) children = [row, ...children];
+      }
     } catch (e) {
       return [new MessageNode(`Error: ${e.message}`, 'error')];
     } finally {
+      // (Counted per parent, failed or not: Collapse waits for its parent's rows to be drawn again.)
+      const parentKey = node || ROOT_ROW;
+      this.childrenLoads.set(parentKey, (this.childrenLoads.get(parentKey) || 0) + 1);
       this.loading--;
       this.loadedAt = clock();
       if (node) {
@@ -146,15 +153,10 @@ class TreeProvider {
     // each folder's latest row (drawn again, a folder is a new row object).
     for (const c of children || []) {
       this.shown.add(c);
-      if (c instanceof FolderNode && c.collapseKey) {
-        this.folderRows.delete(c.collapseKey);
-        this.folderRows.set(c.collapseKey, c);
-      }
+      // A folder's new row, only while a collapse waits for it (keeping every one would keep
+      // whole old file trees alive).
+      if (c instanceof FolderNode && c.collapseKey && this.folderRows.has(c.collapseKey)) this.folderRows.set(c.collapseKey, c);
     }
-    while (this.folderRows.size > MAX_COLLAPSED) this.folderRows.delete(this.folderRows.keys().next().value);
-    // (Counted per parent: Collapse waits for its parent's rows to be drawn again.)
-    const parentKey = node || ROOT_ROW;
-    this.childrenLoads.set(parentKey, (this.childrenLoads.get(parentKey) || 0) + 1);
     return withTimeSeparators(children || []);
   }
 
@@ -169,11 +171,18 @@ class TreeProvider {
     const parent = node.treeParent;
     const parentKey = parent || ROOT_ROW;
     const loads = this.childrenLoads.get(parentKey) || 0;
-    if (parent) this.redraw(parent);
-    else this.refresh();
-    // Until VS Code has loaded the parent's rows again (2 s at most).
-    for (let i = 0; i < 40 && (this.childrenLoads.get(parentKey) || 0) === loads; i++) await new Promise((r) => setTimeout(r, 50));
-    return this.folderRows.get(node.collapseKey) || node;
+    // Waiting for the folder's new row (getChildren records it).
+    this.folderRows.set(node.collapseKey, undefined);
+    try {
+      if (parent) this.redraw(parent);
+      else this.refresh();
+      // Until VS Code has loaded the parent's rows again (longer than a redraw is ever held).
+      const waitMs = REDRAW_MAX_HOLD_MS + 1000;
+      for (let t = 0; t < waitMs && (this.childrenLoads.get(parentKey) || 0) === loads; t += 50) await new Promise((r) => setTimeout(r, 50));
+      return this.folderRows.get(node.collapseKey) || node;
+    } finally {
+      this.folderRows.delete(node.collapseKey);
+    }
   }
 
   /** Whether `node` is one of the rows this view has handed to VS Code. */
@@ -261,14 +270,26 @@ class TreeProvider {
     run().catch((e) => log().warn(`Tree stats: ${e.message}`));
   }
 
+  /** The repository this view shows (the active one, unless the view says otherwise). */
+  shownRepository() {
+    return this.manager && this.manager.active;
+  }
+
   /**
-   * The view's title description: with several repositories open, which one it shows first
-   * ("app · main ... feature"); the switch is the title bar's repository button.
+   * With several repositories open, a view that shows one repository (showsRepository) starts with
+   * a row naming it — a click switches — as the sidebar Graph has at its top. (A view's own title
+   * is not drawn when the sidebar shows one view at a time.)
    */
-  titleFor(repo, rest) {
-    const multi = this.manager && this.manager.repositories && this.manager.repositories.length > 1;
-    const parts = [multi && repo ? repo.name : '', rest || ''].filter(Boolean);
-    return parts.length ? parts.join(' · ') : undefined;
+  repositoryRow() {
+    if (!this.showsRepository || !this.manager || !this.manager.repositories || this.manager.repositories.length < 2) return undefined;
+    const repo = this.shownRepository();
+    return repo ? new RepositoryRow(repo) : undefined;
+  }
+
+  /** Redraw when repositories open or close (the repository row comes or goes). */
+  watchRepositories(manager) {
+    this.showsRepository = true;
+    return [manager.onDidOpen(() => this.refresh()), manager.onDidClose(() => this.refresh())];
   }
 
   /** The row above (VS Code needs it to reveal a row): a file's folder, a list's row, … */
@@ -806,6 +827,25 @@ function fileNodes(repo, files, refs, opts = {}) {
     if (opts.viewed.label) viewed.registerList(opts.viewed.scope, opts.viewed.label, shown);
   }
   return out;
+}
+
+/** A view's first row with several repositories open: which one it shows; a click switches. */
+class RepositoryRow {
+  constructor(repo) {
+    this.repo = repo;
+    this.repoRoot = repo.root;
+  }
+
+  getTreeItem() {
+    const item = new vscode.TreeItem(this.repo.name, vscode.TreeItemCollapsibleState.None);
+    item.iconPath = new vscode.ThemeIcon('repo');
+    item.description = 'switch repository';
+    item.tooltip = `Repository ${this.repo.name} (${this.repo.root}): click to switch to another (Ctrl+Alt+G Shift+O)`;
+    item.contextValue = 'repositoryRow';
+    item.id = 'repositoryRow';
+    item.command = { command: 'commitCorner.switchRepository', title: 'Switch Repository' };
+    return item;
+  }
 }
 
 /** Folders with more files than this below them (or deeper than this) get no dot. */

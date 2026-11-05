@@ -25,6 +25,12 @@ class FileHistoryView extends TreeProvider {
     this.view = require('../util').registerTreeView('commitCorner.fileHistory', vscode.window.createTreeView('commitCorner.fileHistory', { treeDataProvider: this, canSelectMany: true }));
     const follow = debounce(() => this.followEditor(), 250);
     this.disposables = [
+      // With several repositories, a first row names the one shown (a click switches).
+      ...this.watchRepositories(manager),
+      // Nothing shown yet: the repository row follows the active repository.
+      manager.onDidChangeActive(() => {
+        if (!this.target) this.refresh();
+      }),
       this.view,
       vscode.window.onDidChangeActiveTextEditor(follow),
       this.view.onDidChangeVisibility((e) => {
@@ -76,6 +82,11 @@ class FileHistoryView extends TreeProvider {
     this.setTarget(t);
   }
 
+  /** The repository of the file whose history is shown (else the active one). */
+  shownRepository() {
+    return (this.target && this.target.repo) || this.manager.active;
+  }
+
   setTarget(t) {
     this.target = t;
     this.limit = config().get('fileHistoryLimit', 200);
@@ -90,7 +101,7 @@ class FileHistoryView extends TreeProvider {
       return [new MessageNode('Open a file in a git repository to see its history', 'info')];
     }
     const name = path.posix.basename(t.rel) || t.repo.name;
-    this.view.description = this.titleFor(t.repo, t.lines ? `${name}:${t.lines.start}–${t.lines.end}` : t.folder ? `${name}/` : name);
+    this.view.description = t.lines ? `${name}:${t.lines.start}–${t.lines.end}` : t.folder ? `${name}/` : name;
     if (t.folder) {
       // Folder history: every commit touching something inside; each expands into its files.
       const commits = await t.repo.log({ revs: ['HEAD'], paths: t.rel ? [`:(literal)${t.rel}`] : [], maxCount: this.limit });

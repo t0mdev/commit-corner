@@ -133,27 +133,38 @@ const MAX_SCOPED = 200000;
 const scopedRows = new Map();
 /** scope -> its keys in scopedRows (a mark redraws the dots of its list only) */
 const scopedByScope = new Map();
+/** A file of a list (scope and path) -> its current key. */
+const scopedPlaces = new Map();
 
 /** The key of a file of a list with viewed marks (registered for the decorations). */
 function scopedKey(scope, file, fingerprint) {
   // The whole hash: these keys are never stored, and no file can take another one's dot.
   const key = crypto.createHash('sha1').update(['s', scope, file, fingerprint || ''].join('\0')).digest('hex');
+  // One entry per file of a list: its contents changed (a new key), the old entry goes.
+  const place = `${scope}\0${file}`;
+  const previous = scopedPlaces.get(place);
+  if (previous && previous !== key) dropScoped(previous);
+  scopedPlaces.set(place, key);
   const before = scopedRows.get(key);
   scopedRows.delete(key);
   scopedRows.set(key, { scope, file, fingerprint, uri: before && before.uri });
   if (!scopedByScope.has(scope)) scopedByScope.set(scope, new Set());
   scopedByScope.get(scope).add(key);
-  while (scopedRows.size > MAX_SCOPED) {
-    const old = scopedRows.keys().next().value;
-    const entry = scopedRows.get(old);
-    scopedRows.delete(old);
-    const keys = scopedByScope.get(entry.scope);
-    if (keys) {
-      keys.delete(old);
-      if (!keys.size) scopedByScope.delete(entry.scope);
-    }
-  }
+  while (scopedRows.size > MAX_SCOPED) dropScoped(scopedRows.keys().next().value);
   return key;
+}
+
+function dropScoped(key) {
+  const entry = scopedRows.get(key);
+  if (!entry) return;
+  scopedRows.delete(key);
+  const keys = scopedByScope.get(entry.scope);
+  if (keys) {
+    keys.delete(key);
+    if (!keys.size) scopedByScope.delete(entry.scope);
+  }
+  const place = `${entry.scope}\0${entry.file}`;
+  if (scopedPlaces.get(place) === key) scopedPlaces.delete(place);
 }
 
 /** The dots shown for these files of a list (their URIs), to redraw just those. */
@@ -317,7 +328,9 @@ function registerList(scope, label, rows) {
   // index: ownUri -> row number, built when first looked up; kept while the list is drawn again
   // with the same files and contents (each open redraws it).
   // (Its sides too: a rebase that leaves the files as they were still moves every diff.)
-  const signature = rows.map((r) => `${r.path}\0${r.viewed ? r.viewed.fingerprint : ''}\0${r.leftRef || ''}\0${r.rightRef || r.sha || ''}\0${(r.owner && r.owner.mergeBase) || ''}`).join('\n');
+  // (Not their contents: a row's diff is the same whatever the file holds, and an agent editing
+  // must not make every draw build it again.)
+  const signature = rows.map((r) => `${r.path}\0${r.status || (r.change && r.change.status) || ''}\0${r.leftRef || ''}\0${r.rightRef || r.sha || ''}\0${(r.owner && r.owner.mergeBase) || ''}`).join('\n');
   const before = lists.get(scope);
   lists.delete(scope);
   lists.set(scope, { label, rows, signature, index: before && before.signature === signature ? before.index : undefined });
@@ -587,4 +600,4 @@ function commitCount(sha, files) {
   return { viewed: files.filter((f) => m.has(ChangeMarks.key(sha, f))).length, total: files.length };
 }
 
-module.exports = { flushAll, folderCount: () => folderRows.size, registerDecorations, ViewedStore, ChangeMarks, scopedKey, folderKey, scopedUnviewed, scopedState, scopedTooltip, markScoped, markScopedMany, registerList, onDidChangeLists, listOfShown, activeShown, nextUnviewedRow, FINGERPRINT, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };
+module.exports = { flushAll, folderCount: () => folderRows.size, scopedCount: () => scopedRows.size, registerDecorations, ViewedStore, ChangeMarks, scopedKey, folderKey, scopedUnviewed, scopedState, scopedTooltip, markScoped, markScopedMany, registerList, onDidChangeLists, listOfShown, activeShown, nextUnviewedRow, FINGERPRINT, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };

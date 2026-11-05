@@ -1131,6 +1131,33 @@ test('folder dots stay cheap on a very deep tree (none past the depth limit)', (
   assert.ok(Date.now() - t0 < 3000, `drawn in ${Date.now() - t0} ms`);
 });
 
+test('with several repositories a view starts with a row naming its own; folders are not kept for collapsing unless asked', async () => {
+  const { TreeProvider, fileNodes } = require('../src/vscode/views/nodes');
+  const repos = [{ name: 'app', root: '/w/app', absolute: (p) => `/w/app/${p}` }, { name: 'lib', root: '/w/lib' }];
+  const events = { onDidOpen: () => ({ dispose() {} }), onDidClose: () => ({ dispose() {} }) };
+  const manager = { repositories: repos, active: repos[0], ...events };
+  const provider = new TreeProvider();
+  provider.manager = manager;
+  const subs = provider.watchRepositories(manager);
+  const files = Array.from({ length: 20 }, (_, k) => ({ status: 'M', path: `src/d${k % 4}/f${k}.js` }));
+  provider.getRoots = async () => fileNodes(repos[0], files, { leftRef: 'a'.repeat(40), rightRef: 'b'.repeat(40), parent: {} }, { tree: true });
+  let roots = await provider.getChildren();
+  assert.equal(roots[0].constructor.name, 'RepositoryRow');
+  assert.equal(roots[0].getTreeItem().label, 'app');
+  assert.equal(roots[0].getTreeItem().command.command, 'commitCorner.switchRepository');
+  manager.repositories = [repos[0]];
+  roots = await provider.getChildren();
+  assert.notEqual(roots[0].constructor.name, 'RepositoryRow', 'one repository: no row');
+  // Drawn again and again (a refresh of a commit's files): nothing kept per folder.
+  for (let k = 0; k < 50; k++) {
+    const list = await provider.getChildren();
+    for (const f of list) if (f.children) await provider.getChildren(f);
+  }
+  assert.equal(provider.folderRows.size, 0);
+  subs.forEach((d) => d.dispose());
+  provider.dispose();
+});
+
 test('no command reported an unexpected error', () => {
   const errors = mock.ui.messages.filter((m) => m.level === 'error');
   assert.deepEqual(errors, []);

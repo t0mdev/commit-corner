@@ -171,7 +171,8 @@ class PullRequestsView extends TreeProvider {
     /** `${root}:${remote}:${n}` -> GitHub API summary, when listed through the API */
     this.metas = new Map();
     this.view = require('../util').registerTreeView('commitCorner.pullRequests', vscode.window.createTreeView('commitCorner.pullRequests', { treeDataProvider: this, canSelectMany: true, showCollapseAll: true }));
-    this.disposables = [this.view, manager.onDidChangeActive(() => this.refresh())];
+    // With several repositories, a first row names the one shown (a click switches).
+    this.disposables = [this.view, manager.onDidChangeActive(() => this.refresh()), ...this.watchRepositories(manager)];
     /** Show only PRs that still have GitHub's test-merge ref (in practice: open ones). */
     // Open pull requests by default; "Show All Pull Requests" (view menu) lists closed and merged ones too.
     this.openOnly = extContext.workspaceState.get('prOpenOnly', true);
@@ -191,7 +192,6 @@ class PullRequestsView extends TreeProvider {
 
   async getRoots() {
     const repo = this.manager.active;
-    this.view.description = this.titleFor(repo);
     if (!repo) return [];
     const remotes = await this.githubRemotes(repo);
     if (!remotes.length) return [new MessageNode('This repository has no remotes', 'info')];
