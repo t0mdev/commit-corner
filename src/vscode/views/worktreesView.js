@@ -326,6 +326,8 @@ class WorktreesView extends TreeProvider {
     this.openChanges = new Set();
     /** worktree root -> its "Agent review" row (redrawn alone when a comment moves) */
     this.reviewNodes = new Map();
+    // Its repository row's icon: a repository's would read as one more worktree here.
+    this.repositoryRowIcon = 'arrow-swap';
     this.view = require('../util').registerTreeView('commitCorner.worktrees', vscode.window.createTreeView('commitCorner.worktrees', { treeDataProvider: this }));
     const refresh = debounce(() => this.refresh(), 1500);
     // An "Agent review" row redrawn once typing pauses for 300 ms (a comment moves with every keystroke above it).

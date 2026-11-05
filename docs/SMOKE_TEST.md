@@ -48,8 +48,10 @@ reloading the window. Use a scratch clone with a GitHub remote.
 - [ ] File History: select two revisions → Compare Selected Revisions.
 - [ ] Current-line blame shows after the line; the hover links work; Blame Before This Change opens the older revision.
 - [ ] Pull Requests view (github.com remote) shows titles, authors, state icons and Today / This week / … lines; expanding one shows review state and checks, then commits and files. With `commitCorner.pullRequests.githubApi` set to `off` it lists PR numbers from git.
-- [ ] A large pull request (hundreds of files) shows all of them the first time it is expanded. Compare with the working tree: an opened file loses its dot, editing it brings the dot back; folders show a dot while a file in them is new. Its files have a dot until opened; opening one (or *Mark as Viewed*) removes it and counts it on **Files changed**; *Mark as Not Viewed* brings it back. The same in a worktree's **Changes vs main**.
-- [ ] Two repositories open: the sidebar Graph names the active one at the top (click: Switch Repository); Pull Requests, Compare, File History, Worktrees and Repository start with a row naming theirs.
+- [ ] A large pull request (hundreds of files) shows all of them the first time it is expanded. Its files have a dot until opened; opening one (or *Mark as Viewed*, also on several selected files or a folder) removes it and counts it on **Files changed**; *Mark as Not Viewed* brings it back; `Space` marks nothing. The same in a worktree's **Changes vs main**.
+- [ ] In a diff of those files, `Ctrl+Alt+G N` (or its title-bar button) opens the next unviewed one and selects it in its list.
+- [ ] Compare with the working tree: an opened file loses its dot, editing it brings the dot back; folders show a dot while a file in them is new.
+- [ ] Two repositories open: the sidebar Graph names the active one at the top (click: Switch Repository); Pull Requests, Compare, File History, Worktrees and Repository start with a row naming theirs; clicking that row in Compare or File History, then picking the other repository, shows that one there. The views' title bars have no separate Switch Repository button (it is in their `···` menu).
 - [ ] Right-click a folder in Compare or a pull request: Collapse This Level closes it and the folders next to it.
 - [ ] With review comments, each view's `···` menu has **Review Comments** → Copy (showing `Ctrl+Alt+G C`), Save, Delete All…; without comments it is not there.
 - [ ] File History and branch commit lists show Today / Yesterday / … separator rows.

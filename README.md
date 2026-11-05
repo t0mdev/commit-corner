@@ -423,12 +423,12 @@ newest commit.
   per workspace (nested ones included), workspaces opened through symlinks.
 - The sidebar Graph shows the repository's name at its top (next to **☰ Graph**
   when the sidebar shows one view at a time). With several repositories open,
-  the other views start with a row naming theirs, and the name (there, in the
-  Graph and in the editor graph's toolbar) switches: a click is **Switch
-  Repository** (also in each view's `···` menu and on `Ctrl+Alt+G Shift+O`).
-  Compare and File History then show the repository picked. The repositories you used last come first, each with
-  its branch, uncommitted changes and ↑ahead ↓behind; the one you used before
-  is preselected, so `Enter` switches back.
+  the other views start with a row naming theirs, and a click on the name (in
+  the Graph, the editor graph's toolbar or that row) is **Switch Repository**,
+  also in the other views' `···` menu and on `Ctrl+Alt+G Shift+O`. Compare and
+  File History then show the repository picked. The repositories you used last
+  come first, each with its branch, uncommitted changes and ↑ahead ↓behind; the
+  one you used before is preselected, so `Enter` switches back.
 - A repository found *above* a workspace folder (a dotfiles repo in `$HOME`)
   is only opened after asking (`commitCorner.openRepositoryInParentFolders`).
   Repositories git refuses for "dubious ownership" get an explanation and the
@@ -627,7 +627,7 @@ The keys used most are single letters; pull and push on their own take `Shift`
 | `A` / `Shift+A` | Stage / unstage the current file (also from the staged side of a diff); not while a list or tree has focus |
 | `D` | Open the changes of the current file (not while a list or tree has focus) |
 | `←` / `→` | Previous / next revision of the file in a diff |
-| `N` | Next unviewed file of the commit (in a diff opened from a commit's files) |
+| `N` | Next unviewed file (in a diff opened from the files of a commit, a pull request, a worktree's *Changes vs main* or Compare) |
 | `W` | Open the working file at the same line (in a revision or diff) |
 | `C` | Copy the review comments for the agent (those of the file in front of you, else pick a worktree) |
 | `Shift+D` | Changes of a worktree vs its base (an agent's work) |

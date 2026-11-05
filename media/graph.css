@@ -433,6 +433,8 @@ body.no-repo .toolbar, body.no-repo .details, body.no-repo .splitter, body.no-re
    (a bare icon would look like a stray button): nothing shown, the bar still clickable. */
 .compact .top-bar .summary-bar > span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .compact .top-bar .summary-bar.tight > * { visibility: hidden; }
+/* Then the repository's name may take that room too. */
+.compact .top-bar:has(.summary-bar.tight) .repo-switch { max-width: none; flex: 0 1 auto; }
 .top-bar .repo-switch .repo-chevron { transform: rotate(90deg); opacity: 0.7; }
 .top-bar .repo-switch:not(.switchable) .repo-chevron { display: none; }
 

@@ -286,7 +286,7 @@ class TreeProvider {
     return repo ? new RepositoryRow(repo, this) : undefined;
   }
 
-  /** After a switch from this view's repository row (Compare and File History show the new one). */
+  /** After Switch Repository (Compare and File History then show the repository picked). */
   repositorySwitched() {}
 
   /** Redraw when the repository row comes or goes (a second repository opens, the last but one closes). */
@@ -850,11 +850,10 @@ class RepositoryRow {
 
   getTreeItem() {
     const item = new vscode.TreeItem(this.repo.name, vscode.TreeItemCollapsibleState.None);
-    // (Not a repository icon: in Worktrees it would read as one more worktree.)
-    item.iconPath = new vscode.ThemeIcon('arrow-swap');
+    // A repository's icon; in Worktrees (where that reads as one more worktree) a switch's.
+    item.iconPath = new vscode.ThemeIcon((this.provider && this.provider.repositoryRowIcon) || 'repo');
     item.description = 'switch';
-    const mod = process.platform === 'darwin' ? 'Cmd' : 'Ctrl';
-    item.tooltip = `Repository ${this.repo.name} (${this.repo.root}): click to switch to another (${mod}+Alt+G Shift+O)`;
+    item.tooltip = `Repository ${this.repo.name} (${this.repo.root}): click to switch to another`;
     item.contextValue = 'repositoryRow';
     item.id = 'repositoryRow';
     item.command = { command: 'commitCorner.switchRepositoryFromRow', title: 'Switch Repository', arguments: [this] };

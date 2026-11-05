@@ -5710,7 +5710,7 @@
           "commitCorner.markUnviewedFiles": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Show files you have not viewed in **bold** (graph) or with a dot (tree views, also a pull request's files, a worktree's *Changes vs main* and the Compare view's files, whose *Mark as Viewed* / *Not Viewed* menus work either way); a commit you started on counts what you have seen (\"3/12\"). Opening a file marks it viewed. Marks survive an amend or rebase that leaves a change as it was; an uncommitted file is bold again when its content changes.",
+            "markdownDescription": "Show files you have not opened in **bold** (graph) or with a dot (a commit's files, a pull request's files, a worktree's *Changes vs main*, Compare). Opening a file marks it viewed; a commit you started on counts what you have seen (\"3/12\"). When off, pull requests, worktrees and Compare still count viewed files and keep *Mark as Viewed* / *Not Viewed*. Marks survive an amend or rebase that leaves a change as it was; an uncommitted file is bold again when its content changes.",
             "order": 1
           },
           "commitCorner.review.comments": {

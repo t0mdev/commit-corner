@@ -125,9 +125,16 @@ async function activate(extContext) {
     if (!repo) notify.warn(`${pick[0].fsPath} is not inside a git repository.`);
     else manager.setActive(repo);
   });
+  // Views that show another repository than the active one (Compare, File History) then show the
+  // one picked, whichever way you switched.
+  const switched = () => {
+    for (const p of require('./vscode/views/nodes').TreeProvider.all) p.repositorySwitched();
+  };
   ctx.command('commitCorner.switchRepository', async () => {
     const repo = await require('./vscode/pickers').pickRepository(manager, manager.active);
-    if (repo) manager.setActive(repo);
+    if (!repo) return;
+    manager.setActive(repo);
+    switched();
   });
   // A view's repository row: from the repository that view shows; then the view shows the one picked
   // (Compare and File History may show another than the active one).
@@ -137,7 +144,7 @@ async function activate(extContext) {
     const repo = await require('./vscode/pickers').pickRepository(manager, row.repo);
     if (!repo) return;
     manager.setActive(repo);
-    row.provider.repositorySwitched();
+    switched();
   });
 
   extContext.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {

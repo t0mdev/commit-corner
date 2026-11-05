@@ -513,7 +513,7 @@ function register(ctx) {
         else vscode.window.setStatusBarMessage(`All ${shown.list.rows.length} file${shown.list.rows.length === 1 ? '' : 's'} of ${shown.list.label} are viewed`, 4000);
         return;
       }
-      vscode.window.setStatusBarMessage('Next Unviewed File works in a diff opened from the files of a commit, a pull request or a worktree\'s changes', 4000);
+      vscode.window.setStatusBarMessage('Next Unviewed File works in a diff opened from the files of a commit, a pull request, a worktree\'s changes or Compare', 4000);
       return;
     }
     let parent;

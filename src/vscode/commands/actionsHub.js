@@ -24,7 +24,7 @@ const GROUPS = [
     ['$(diff) Changes Since You Last Looked', 'commitCorner.graphView.sinceLastLook'],
   ]],
   ['Review', [
-    ['$(eye) Next Unviewed File (in a commit\'s, pull request\'s or worktree\'s diff)', 'commitCorner.nextUnviewedFile'],
+    ['$(eye) Next Unviewed File (in a diff of a commit, pull request, worktree or Compare)', 'commitCorner.nextUnviewedFile'],
     ['$(go-to-file) Open Working File (from a revision or diff)', 'commitCorner.openWorkingFile'],
     ['$(copy) Copy Review for the Agent', 'commitCorner.review.copy'],
     ['$(save) Save Review to the Worktree', 'commitCorner.review.save'],

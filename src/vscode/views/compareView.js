@@ -238,16 +238,19 @@ class CompareView extends TreeProvider {
       return fileNodes(repo, files, { leftRef: base, rightRef, contextValue: right === WORKTREE ? 'file:compareWork' : 'file:compare' }, { viewed: { scope, ids, owner: filesGroup, provider: this, label: `${L} ↔ ${R}` } });
     }, {
       icon: 'files',
-      // Short (a narrow sidebar cuts the end): "+12 −3 · 2/5".
+      // Short (a narrow sidebar cuts the end): "+12 −3 · 2/5 viewed".
       description: () => {
         const { files, marks } = data();
         const added = files.reduce((n, f) => n + (f.added || 0), 0);
         const deleted = files.reduce((n, f) => n + (f.deleted || 0), 0);
         const seen = viewed.get().count(scope, marks);
-        const count = !seen ? '' : seen === files.length ? ' · all viewed' : ` · ${seen}/${files.length}`;
+        const count = !seen ? '' : seen === files.length ? ' · all viewed' : ` · ${seen}/${files.length} viewed`;
         return `+${added} −${deleted}${count}`;
       },
-      tooltip: 'A file you have not opened has a dot; one that changes again gets it back. "2/5": viewed so far.',
+      // (Worked out when shown: the dots follow the setting.)
+      get tooltip() {
+        return `${viewed.marksUnviewed() ? 'A file you have not opened has a dot; one that changes again gets it back.' : 'Opening a file marks it viewed; one that changes again is unviewed again.'} "2/5 viewed": viewed so far.`;
+      },
       contextValue: 'compareFiles',
       // The same row when its count changes (its folders keep their open or collapsed state).
       id: `compareFiles\0${scope}`,
