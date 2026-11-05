@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const vscode = require('vscode');
-const { targets, evaluate, press } = require('./cdp');
+const { targets, evaluate, press, webview } = require('./cdp');
 
 const pkg = require('../../package.json');
 
@@ -145,12 +145,20 @@ suite('Tree views', () => {
       for (let i = 0; i < 20 && !(view.selection[0] && view.selection[0].path === 'pkg0/mod0/file1.txt'); i++) await sleep(100);
       assert.strictEqual(view.selection[0] && view.selection[0].path, 'pkg0/mod0/file1.txt');
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
-      // Right-click a folder → Collapse This Level: it and the 19 folders next to it close.
-      const pkg5 = loaded.find((n) => n.fullPath === 'pkg5');
-      await vscode.commands.executeCommand('commitCorner.collapseLevel', pkg5);
-      const collapsed = 1 + 3 + 20;
-      for (let i = 0; i < 50 && (await pullRequestRows()) !== collapsed; i++) await sleep(100);
-      assert.strictEqual(await pullRequestRows(), collapsed);
+      // Right-click a folder → Collapse This Level: it and the 19 folders next to it close, in the
+      // view that shows them even when other views are shown too; the folder is selected.
+      await vscode.commands.executeCommand('commitCorner.sidebar.showAllViews');
+      try {
+        const pkg5 = loaded.filter((n) => n.fullPath === 'pkg5').pop();
+        await vscode.commands.executeCommand('commitCorner.collapseLevel', pkg5);
+        const collapsed = 1 + 3 + 20;
+        for (let i = 0; i < 50 && (await pullRequestRows()) !== collapsed; i++) await sleep(100);
+        assert.strictEqual(await pullRequestRows(), collapsed);
+        for (let i = 0; i < 20 && !(view.selection[0] && view.selection[0].fullPath === 'pkg5'); i++) await sleep(100);
+        assert.strictEqual(view.selection[0] && view.selection[0].fullPath, 'pkg5');
+      } finally {
+        await vscode.commands.executeCommand('commitCorner.sidebar.oneViewAtATime');
+      }
     } finally {
       Object.assign(Repository.prototype, saved);
       PullRequestsView.prototype.getChildren = getChildren;
@@ -214,5 +222,20 @@ suite('Tree views', () => {
       await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
       fs.rmSync(file, { force: true });
     }
+  });
+
+  test('the sidebar Graph says which repository it shows (with several, a click switches)', async function () {
+    this.timeout(60000);
+    await vscode.commands.executeCommand('commitCorner.sidebar.graphView');
+    const page = await webview('graph.js', `!!document.querySelector('.top-bar .repo-switch')`);
+    const name = path.basename(root());
+    let shown;
+    for (let i = 0; i < 50 && shown !== name; i++) {
+      shown = await evaluate(page, `(document.querySelector('.top-bar .repo-switch .label') || {}).textContent`);
+      if (shown !== name) await sleep(100);
+    }
+    assert.strictEqual(shown, name);
+    // One repository: nothing to switch to (no chevron, not clickable).
+    assert.strictEqual(await evaluate(page, `document.querySelector('.top-bar .repo-switch').disabled`), true);
   });
 });

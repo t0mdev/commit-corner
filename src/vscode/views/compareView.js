@@ -65,6 +65,12 @@ class CompareView extends TreeProvider {
     await require('../sidebar').showView('compare');
   }
 
+  /** A full refresh: its data is newer than any reload still running (see reloadFiles). */
+  refresh(node) {
+    if (!node) this.epoch = (this.epoch || 0) + 1;
+    return super.refresh(node);
+  }
+
   clear() {
     this.state = undefined;
     this.setContext();
@@ -79,8 +85,8 @@ class CompareView extends TreeProvider {
    * The left side of file diffs, as a commit id (so a file's menus read the very revision shown,
    * even when the branch moves): the merge base in three-dot mode.
    */
-  async fileBase() {
-    const { repo, left, right, mode } = this.state;
+  async fileBase(state = this.state) {
+    const { repo, left, right, mode } = state;
     if (mode === 'threeDot') {
       const mb = await repo.mergeBase(left, right === WORKTREE ? 'HEAD' : right);
       if (!mb) throw new Error(`${left} and ${right === WORKTREE ? 'HEAD' : right} have no common history`);
@@ -93,9 +99,9 @@ class CompareView extends TreeProvider {
    * The files changed, with the right side as a commit id (or the working tree) and each file's
    * blob ids (one git diff for both).
    */
-  async files() {
-    const { repo, right } = this.state;
-    const base = await this.fileBase();
+  async files(state = this.state) {
+    const { repo, right } = state;
+    const base = await this.fileBase(state);
     const rightRef = right === WORKTREE ? WORKTREE : (await repo.revParse(right)) || right;
     const files = right === WORKTREE ? await repo.diffFiles(base) : await repo.diffFiles(base, rightRef, { blobs: true });
     if (right === WORKTREE) {
@@ -112,9 +118,9 @@ class CompareView extends TreeProvider {
    * (its blob id there; for the working tree, the file as it is now, hashed again only when it
    * changed) and a signature to tell whether anything shown changed.
    */
-  async loadFiles() {
-    const { repo, right } = this.state;
-    const { base, right: rightRef, files } = await this.files();
+  async loadFiles(state = this.state) {
+    const { repo, right } = state;
+    const { base, right: rightRef, files } = await this.files(state);
     const ids = right === WORKTREE
       ? await repo.worktreeFileIds(repo.root, files.filter((f) => f.status !== 'D').map((f) => f.path)).catch(() => new Map())
       : new Map(files.filter((f) => f.status !== 'D' && f.newBlob).map((f) => [f.path, f.newBlob]));
@@ -134,11 +140,13 @@ class CompareView extends TreeProvider {
     }
     this.reloading = true;
     const state = this.state;
+    const group = this.filesGroup;
+    const epoch = this.epoch;
     try {
-      const data = await this.loadFiles();
-      const group = this.filesGroup;
-      if (this.state !== state || !group || !this.filesData || data.signature === this.filesData.signature) return;
-      this.filesData = data;
+      const data = await this.loadFiles(state);
+      // A refresh meanwhile (a ref moved, another comparison) has newer data: this one is dropped.
+      if (this.state !== state || this.epoch !== epoch || this.filesGroup !== group || !group || !group.data || data.signature === group.data.signature) return;
+      group.data = data;
       group.label = `Files changed (${data.files.length})`;
       this.redraw(group);
     } catch (e) {
@@ -162,7 +170,7 @@ class CompareView extends TreeProvider {
     const { repo, left, right, mode, title } = this.state;
     const L = this.label(left);
     const R = this.label(right);
-    this.view.description = `${title ? `${title}: ` : ''}${L} ${mode === 'threeDot' ? '...' : '..'} ${R}`;
+    this.view.description = this.titleFor(repo, `${title ? `${title}: ` : ''}${L} ${mode === 'threeDot' ? '...' : '..'} ${R}`);
     const roots = [];
     const header = new MessageNode(`${L} ↔ ${R}`, 'git-compare');
     header.getTreeItem = () => {
@@ -198,12 +206,16 @@ class CompareView extends TreeProvider {
     }
 
     this.lastSignature = repo.refTips;
-    this.filesData = await this.loadFiles();
+    const state = this.state;
+    const loaded = await this.loadFiles(state);
+    // Another comparison since (Swap, a mode switch): its own drawing shows it, not this one.
+    if (this.state !== state) return [];
     // Viewed marks, as in a pull request: per comparison, by content (the right side's), so a file
     // that changes again (a new commit there, an edit in the working tree) is unviewed again.
     const scope = `compare:${repo.root}:${left}:${right === WORKTREE ? 'working tree' : right}:${mode}`;
-    const data = () => this.filesData;
-    const filesGroup = new GroupNode(`Files changed (${data().files.length})`, () => {
+    // The row's data: replaced by reloadFiles when the working tree changes what it shows.
+    const data = () => filesGroup.data;
+    const filesGroup = new GroupNode(`Files changed (${loaded.files.length})`, () => {
       const { base, rightRef, files, ids } = data();
       return fileNodes(repo, files, { leftRef: base, rightRef, contextValue: right === WORKTREE ? 'file:compareWork' : 'file:compare' }, { viewed: { scope, ids, owner: filesGroup, provider: this, label: `${L} ↔ ${R}` } });
     }, {
@@ -219,8 +231,11 @@ class CompareView extends TreeProvider {
       },
       tooltip: 'A file you have not opened has a dot; one that changes again gets it back. "2/5": viewed so far.',
       contextValue: 'compareFiles',
+      // The same row when its count changes (its folders keep their open or collapsed state).
+      id: `compareFiles\0${scope}`,
       props: { repoRoot: repo.root, viewedScope: scope },
     });
+    filesGroup.data = loaded;
     // What Mark All and the count read: always the files shown now.
     Object.defineProperty(filesGroup, 'viewedFiles', { get: () => data().marks, enumerable: true });
     this.filesGroup = filesGroup;

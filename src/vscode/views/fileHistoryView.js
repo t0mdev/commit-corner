@@ -90,7 +90,7 @@ class FileHistoryView extends TreeProvider {
       return [new MessageNode('Open a file in a git repository to see its history', 'info')];
     }
     const name = path.posix.basename(t.rel) || t.repo.name;
-    this.view.description = t.lines ? `${name}:${t.lines.start}–${t.lines.end}` : t.folder ? `${name}/` : name;
+    this.view.description = this.titleFor(t.repo, t.lines ? `${name}:${t.lines.start}–${t.lines.end}` : t.folder ? `${name}/` : name);
     if (t.folder) {
       // Folder history: every commit touching something inside; each expands into its files.
       const commits = await t.repo.log({ revs: ['HEAD'], paths: t.rel ? [`:(literal)${t.rel}`] : [], maxCount: this.limit });

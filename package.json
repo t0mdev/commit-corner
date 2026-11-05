@@ -3590,7 +3590,7 @@
         },
         {
           "command": "commitCorner.switchRepository",
-          "when": "view =~ /^commitCorner\\.(graphView|branches|pullRequests|compare|fileHistory|worktrees)$/ && commitCorner.multipleRepositories",
+          "when": "view =~ /^commitCorner\\.(branches|pullRequests|compare|fileHistory|worktrees)$/ && commitCorner.multipleRepositories",
           "group": "navigation@0.5"
         },
         {

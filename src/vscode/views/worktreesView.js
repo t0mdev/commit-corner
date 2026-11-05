@@ -134,7 +134,8 @@ class WorktreeFileNode {
     // Mark as Not Viewed, whatever the dots setting says (a file that cannot be fingerprinted neither).
     const state = viewed.scopedState(this.viewed.scope, change.path, this.viewed.fingerprint);
     item.contextValue = `changedFile:worktree${state === 'none' ? '' : `:${state}`}`;
-    item.id = `viewed\0${this.viewed.scope}\0${change.path}`;
+    // (With its status: a file both deleted and new, untracked, is two rows.)
+    item.id = `viewed\0${this.viewed.scope}\0${change.path}\0${change.status}`;
     const left = toGitUri(owner.repoRoot, change.origPath || change.path, owner.mergeBase, { root: owner.worktreePath });
     const title = `${name} (${owner.worktree.branch || path.basename(owner.worktreePath)} vs ${owner.base})`;
     // The keyboard stays in the list: Enter shows the file, ↓ goes to the next.
@@ -394,7 +395,7 @@ class WorktreesView extends TreeProvider {
     if (!repo) return [];
     // "This window" is the worktree open in this window, whichever repository is active.
     const list = (await repo.getWorktreeDetails()).map((w) => ({ ...w, isCurrent: inThisWindow(w.path) }));
-    this.view.description = list.length > 1 ? String(list.length) : undefined;
+    this.view.description = this.titleFor(repo, list.length > 1 ? String(list.length) : '');
     return list.map((w) => new WorktreeNode(repo, w, this));
   }
 

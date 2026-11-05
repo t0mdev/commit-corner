@@ -100,6 +100,12 @@
     }
   });
   function setMultiRepo(multi) {
+    // (Called once the page is built: the sidebar's chip exists by then.)
+    repoChip.classList.toggle('switchable', !!multi);
+    repoChip.disabled = !multi;
+    repoChip.title = multi ? `Repository ${repoName.textContent}: switch to another (Ctrl+Alt+G Shift+O)` : `Repository ${repoName.textContent}`;
+    repoChip.setAttribute('aria-label', repoChip.title);
+    repoChipName.textContent = repoName.textContent;
     repoLabel.classList.toggle('switchable', !!multi);
     repoLabel.tabIndex = multi ? 0 : -1;
     if (multi) {
@@ -182,7 +188,15 @@
   const viewBtn = button('Graph', 'Switch view: Repository, Pull Requests, Compare, File History, Worktrees', () => vscode.postMessage({ type: 'switchView' }), 'menu');
   viewBtn.classList.add('view-switch');
   viewBtn.appendChild(ui.icon('chevron', { size: 10 }));
-  topBar.append(viewBtn, summaryBar);
+  // Which repository this is, next to it; with several, a click switches (as the editor graph's
+  // toolbar name does).
+  const repoChip = button('', 'Repository', () => switchRepo(), 'folder');
+  repoChip.classList.remove('icon-only');
+  repoChip.classList.add('repo-switch');
+  const repoChipName = repoChip.appendChild(el('span', 'label'));
+  const repoChipChevron = repoChip.appendChild(ui.icon('chevron', { size: 10 }));
+  repoChipChevron.classList.add('repo-chevron');
+  topBar.append(viewBtn, repoChip, summaryBar);
   root.append(topBar, toolbar, listWrap, splitter, detailsPane);
   document.body.appendChild(root);
   if (saved.detailsHeight) detailsPane.style.height = saved.detailsHeight + 'px';

@@ -135,6 +135,8 @@ class PullRequestNode {
         return !seen ? undefined : seen === files.length ? (seen === 1 ? 'viewed' : `all ${seen} viewed`) : `${seen}/${files.length} viewed`;
       },
       contextValue: 'viewedGroup:pr',
+      // The same row when a push changes its count (its folders keep their state).
+      id: `prFiles\0${scope}`,
       props: { repoRoot: this.repoRoot, prNumber: this.number, number: this.number, remote: this.remote, viewedScope: scope, viewedFiles: marks, viewedProvider: this.view },
     });
     filesGroup.viewedOwner = filesGroup;
@@ -189,6 +191,7 @@ class PullRequestsView extends TreeProvider {
 
   async getRoots() {
     const repo = this.manager.active;
+    this.view.description = this.titleFor(repo);
     if (!repo) return [];
     const remotes = await this.githubRemotes(repo);
     if (!remotes.length) return [new MessageNode('This repository has no remotes', 'info')];

@@ -423,6 +423,12 @@ body.no-repo .toolbar, body.no-repo .details, body.no-repo .splitter, body.no-re
 .top-bar .view-switch[hidden] { display: none; }
 .top-bar .view-switch { flex: none; display: inline-flex; align-items: center; gap: 3px; margin: 2px 0 2px 4px; font-weight: 600; }
 .top-bar .view-switch .icon:last-child { transform: rotate(90deg); opacity: 0.7; }
+/* The repository, next to the view switch: a switch too when there are several. */
+.top-bar .repo-switch { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 3px; margin: 2px 0; }
+.top-bar .repo-switch .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top-bar .repo-switch:disabled { opacity: 1; cursor: default; background: none; color: var(--vscode-descriptionForeground); }
+.top-bar .repo-switch .repo-chevron { transform: rotate(90deg); opacity: 0.7; }
+.top-bar .repo-switch:not(.switchable) .repo-chevron { display: none; }
 
 /* A narrow editor graph (a diff open beside it): the author is its avatar. */
 .app.tight .cell.author .author-name { display: none; }

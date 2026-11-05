@@ -421,9 +421,11 @@ newest commit.
 ### Repositories
 - Initialize or clone a repository, update submodules, several repositories
   per workspace (nested ones included), workspaces opened through symlinks.
-- With several repositories, **Switch Repository** is in every view's title
-  bar, on the repository name in the editor graph's toolbar and on
-  `Ctrl+Alt+G Shift+O`. The repositories you used last come first, each with
+- The sidebar Graph shows the repository's name at its top, next to **☰ Graph**,
+  and the other views add it to their title when several are open. With
+  several repositories that name in the Graph (and in the editor graph's
+  toolbar) switches: a click is **Switch Repository**, as is the button in the
+  other views' title bars and `Ctrl+Alt+G Shift+O`. The repositories you used last come first, each with
   its branch, uncommitted changes and ↑ahead ↓behind; the one you used before
   is preselected, so `Enter` switches back.
 - A repository found *above* a workspace folder (a dotfiles repo in `$HOME`)

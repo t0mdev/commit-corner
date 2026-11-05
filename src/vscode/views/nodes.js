@@ -30,6 +30,31 @@ function statsText(stats) {
 
 /** A list with more files than this has its count redrawn once marking pauses. */
 const BIG_LIST = 2000;
+/**
+ * Folders collapsed with Collapse Folder / Collapse This Level: collapse key -> generation. A
+ * folder with one is drawn collapsed with an id of that generation (a row VS Code has not seen,
+ * so it takes that state); expanded again by you, it stays so (same id) until collapsed again.
+ */
+const MAX_COLLAPSED = 5000;
+/** Stands for the view's root in per-parent maps. */
+const ROOT_ROW = {};
+const collapsedFolders = new Map();
+function bumpCollapse(key) {
+  const gen = (collapsedFolders.get(key) || 0) + 1;
+  collapsedFolders.delete(key);
+  collapsedFolders.set(key, gen);
+  while (collapsedFolders.size > MAX_COLLAPSED) collapsedFolders.delete(collapsedFolders.keys().next().value);
+}
+
+/** A number per list row object (a commit's): its folders' collapse keys say which list. */
+const listSerials = new WeakMap();
+let nextSerial = 1;
+function listSerial(o) {
+  if (!o || typeof o !== 'object') return 0;
+  if (!listSerials.has(o)) listSerials.set(o, nextSerial++);
+  return listSerials.get(o);
+}
+
 /** How long loading must have been quiet before rows are redrawn (TreeProvider.redraw)… */
 const REDRAW_QUIET_MS = 300;
 /** …and how long a row waits at most for other rows of its view (not for its own children). */
@@ -38,6 +63,9 @@ const REDRAW_MAX_HOLD_MS = 3000;
 const clock = () => performance.now();
 
 class TreeProvider {
+  /** Every tree view's provider (the one showing a folder collapses it). */
+  static all = new Set();
+
   constructor() {
     this._onDidChangeTreeData = new vscode.EventEmitter();
     this.onDidChangeTreeData = this._onDidChangeTreeData.event;
@@ -51,6 +79,12 @@ class TreeProvider {
     /** row -> since when it waits for its redraw (since its own children loaded, if they were loading) */
     this.pendingRedraw = new Map();
     this.redrawTimer = undefined;
+    /** Rows handed to VS Code (see owns); folder collapse key -> its latest row. */
+    this.shown = new WeakSet();
+    this.folderRows = new Map();
+    /** row -> how many times VS Code has loaded its children */
+    this.childrenLoads = new WeakMap();
+    TreeProvider.all.add(this);
     /** viewed scope -> the row that counts its marks ("2/5 viewed"; a list's files register it) */
     this.viewedOwners = new Map();
     // Redrawing that row reloads its files: for a list of thousands, once marking has paused
@@ -108,7 +142,43 @@ class TreeProvider {
     }
     this.fillStats(children || []);
     this.trackCommitFiles(children || []);
+    // Which rows this view shows (a folder's Collapse commands act in the view that has it), and
+    // each folder's latest row (drawn again, a folder is a new row object).
+    for (const c of children || []) {
+      this.shown.add(c);
+      if (c instanceof FolderNode && c.collapseKey) {
+        this.folderRows.delete(c.collapseKey);
+        this.folderRows.set(c.collapseKey, c);
+      }
+    }
+    while (this.folderRows.size > MAX_COLLAPSED) this.folderRows.delete(this.folderRows.keys().next().value);
+    // (Counted per parent: Collapse waits for its parent's rows to be drawn again.)
+    const parentKey = node || ROOT_ROW;
+    this.childrenLoads.set(parentKey, (this.childrenLoads.get(parentKey) || 0) + 1);
     return withTimeSeparators(children || []);
+  }
+
+  /**
+   * Collapse folders (Collapse Folder / Collapse This Level): each gets a new collapse generation,
+   * so it comes back as a new row (a new id) drawn collapsed — VS Code keeps the state of a row it
+   * knows — and their parent is redrawn once. Resolves with the folder's new row.
+   * @param {FolderNode} node the folder right-clicked @param {FolderNode[]} folders those to collapse
+   */
+  async collapseFolders(node, folders) {
+    for (const f of folders) if (f.collapseKey) bumpCollapse(f.collapseKey);
+    const parent = node.treeParent;
+    const parentKey = parent || ROOT_ROW;
+    const loads = this.childrenLoads.get(parentKey) || 0;
+    if (parent) this.redraw(parent);
+    else this.refresh();
+    // Until VS Code has loaded the parent's rows again (2 s at most).
+    for (let i = 0; i < 40 && (this.childrenLoads.get(parentKey) || 0) === loads; i++) await new Promise((r) => setTimeout(r, 50));
+    return this.folderRows.get(node.collapseKey) || node;
+  }
+
+  /** Whether `node` is one of the rows this view has handed to VS Code. */
+  owns(node) {
+    return !!node && this.shown.has(node);
   }
 
   /**
@@ -191,6 +261,16 @@ class TreeProvider {
     run().catch((e) => log().warn(`Tree stats: ${e.message}`));
   }
 
+  /**
+   * The view's title description: with several repositories open, which one it shows first
+   * ("app · main ... feature"); the switch is the title bar's repository button.
+   */
+  titleFor(repo, rest) {
+    const multi = this.manager && this.manager.repositories && this.manager.repositories.length > 1;
+    const parts = [multi && repo ? repo.name : '', rest || ''].filter(Boolean);
+    return parts.length ? parts.join(' · ') : undefined;
+  }
+
   /** The row above (VS Code needs it to reveal a row): a file's folder, a list's row, … */
   getParent(node) {
     return node && (node.treeParent || node.parent);
@@ -249,6 +329,7 @@ class TreeProvider {
     if (this.settingSub) this.settingSub.dispose();
     this.storeSub.dispose();
     for (const t of this.ownerTimers.values()) clearTimeout(t);
+    TreeProvider.all.delete(this);
     this._onDidChangeTreeData.dispose();
   }
 }
@@ -664,7 +745,7 @@ class FileNode {
     item.contextValue = state === 'none' ? this.contextValue : `${this.contextValue}:${state}`;
     // A row of a list with marks keeps its identity when the list is drawn again (revealing it after
     // Next Unviewed File then finds this very file, not another of the same name).
-    if (this.viewed) item.id = `viewed\0${this.viewed.scope}\0${this.path}`;
+    if (this.viewed) item.id = `viewed\0${this.viewed.scope}\0${this.path}\0${this.status}`;
     item.command = {
       command: 'commitCorner.openCommitFile',
       title: 'Open Changes',
@@ -693,14 +774,21 @@ function fileNodes(repo, files, refs, opts = {}) {
   const out = !opts.tree && config().get('fileLayout', 'tree') !== 'tree' ? nodes : buildFolderTree(nodes);
   // Each row knows the row it is under (getParent), so a file can be revealed in the tree.
   // (And the rows next to it: Collapse This Level collapses a folder's siblings too.)
+  // A folder's collapse key: its list (a pull request's or comparison's scope, which stays the
+  // same when drawn again; else the row the files are under) and its path.
+  const top = (opts.viewed && opts.viewed.owner) || refs.parent;
+  const listKey = opts.viewed ? `s\0${opts.viewed.scope}` : `o\0${listSerial(top)}`;
   const link = (list, up) => {
     for (const n of list) {
       n.siblings = list;
       if (up) n.treeParent = up;
-      if (n instanceof FolderNode) link(n.children, n);
+      if (n instanceof FolderNode) {
+        n.collapseKey = `${listKey}\0${n.fullPath}`;
+        link(n.children, n);
+      }
     }
   };
-  link(out, (opts.viewed && opts.viewed.owner) || refs.parent);
+  link(out, top);
   markFolders(out);
   if (opts.viewed) {
     // Folders get Mark as Viewed / Not Viewed for their files; Next Unviewed File in the diffs
@@ -734,7 +822,8 @@ function markFolders(list, depth = 0) {
   let all = [];
   for (const n of list) {
     if (n instanceof FolderNode) {
-      const below = depth >= MAX_FOLDER_DEPTH ? undefined : markFolders(n.children, depth + 1);
+      // Past the depth limit: those files count for no folder (their ancestors keep their dots).
+      const below = depth >= MAX_FOLDER_DEPTH ? [] : markFolders(n.children, depth + 1);
       if (below && below.length) setFolderMarks(n, below);
       if (!below || !all || all.length + below.length > MAX_FOLDER_FILES) all = undefined;
       else all = all.concat(below);
@@ -752,7 +841,9 @@ function setFolderMarks(folder, files) {
   const digest = require('crypto').createHash('sha1');
   for (const f of files) digest.update(`${f.markId()}\0${f.viewed ? f.viewed.fingerprint || '' : ''}\n`);
   folder.markFiles = files;
-  folder.marksId = `${first.viewed ? first.viewed.scope : first.commitViewed}\0${folder.fullPath}\0${digest.digest('hex')}`;
+  // Its list: a scope, or a commit (and, in a merge's views, the side it is compared with).
+  const list = first.viewed ? first.viewed.scope : `${first.commitViewed}\0${first.base || ''}`;
+  folder.marksId = `${list}\0${folder.fullPath}\0${digest.digest('hex')}`;
 }
 
 class FolderNode {
@@ -763,7 +854,10 @@ class FolderNode {
   }
 
   getTreeItem() {
-    const item = new vscode.TreeItem(this.name, vscode.TreeItemCollapsibleState.Expanded);
+    // Collapsed with Collapse Folder / This Level: a row of that generation, drawn collapsed.
+    const gen = this.collapseKey && collapsedFolders.get(this.collapseKey);
+    const item = new vscode.TreeItem(this.name, gen ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded);
+    if (gen) item.id = `folder\0${this.collapseKey}\0${gen}`;
     item.iconPath = vscode.ThemeIcon.Folder;
     // In a list with viewed marks (a pull request's files): Mark as Viewed / Not Viewed for all in it.
     item.contextValue = this.marks ? 'folder:marks' : 'folder';

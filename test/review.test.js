@@ -284,6 +284,29 @@ test('Next Unviewed File in a diff stays in its own list, even when two pull req
   assert.equal(viewed.listOfShown({ uris: ['file:///wt/n.js', 'x'], diff: true }), undefined);
 });
 
+test('a folder keeps one entry for its dot however often its files change (no growth), and lists notice new commits', () => {
+  const viewed = require('../src/vscode/viewed');
+  viewed.init(memento());
+  const { fileNodes } = require('../src/vscode/views/nodes');
+  const repo = { root: '/r', absolute: (p) => `/r/${p}` };
+  const files = Array.from({ length: 50 }, (_, k) => ({ status: 'M', path: `src/d${k % 5}/f${k}.js` }));
+  const draw = (gen) => {
+    const ids = new Map(files.map((f) => [f.path, gen.toString(16).padStart(40, '0')]));
+    const walk = (list) => list.forEach((n) => n.children && (n.getTreeItem(), walk(n.children)));
+    walk(fileNodes(repo, files, { leftRef: 'a'.repeat(40), rightRef: 'b'.repeat(40), contextValue: 'file:compare' }, { tree: true, viewed: { scope: 'leak', ids, label: 'x' } }));
+  };
+  draw(1);
+  const after1 = viewed.folderCount();
+  for (let gen = 2; gen < 200; gen++) draw(gen); // an agent editing: new contents each time
+  assert.equal(viewed.folderCount(), after1, 'one entry per folder, not one per version');
+  // Same files and contents on new commits (a rebase): the list is looked up anew.
+  const row = (head) => ({ path: 'a.js', viewed: { scope: 'rb', fingerprint: 'c'.repeat(40) }, leftRef: 'base', rightRef: head, ownUri: () => `${head}:a.js`, async open() {} });
+  viewed.registerList('rb', 'pull request #9', [row('h1')]);
+  assert.ok(viewed.listOfShown({ uris: ['h1:a.js'], diff: true }));
+  viewed.registerList('rb', 'pull request #9', [row('h2')]);
+  assert.ok(viewed.listOfShown({ uris: ['h2:a.js'], diff: true }), 'found after the rebase');
+});
+
 test('Next Unviewed File from a pull request\'s diff opens the next file with the keyboard in it', async () => {
   const viewed = require('../src/vscode/viewed');
   viewed.init(memento());

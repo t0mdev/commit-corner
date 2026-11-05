@@ -98,7 +98,8 @@ class ViewedStore {
     const scopes = Object.keys(all).sort((a, b) => (all[a].used || 0) - (all[b].used || 0));
     let total = scopes.reduce((n, k) => n + Object.keys(all[k].files || {}).length, 0);
     let count = scopes.length;
-    for (const k of scopes) {
+    // Never the newest (the one marked last): it stays, however large.
+    for (const k of scopes.slice(0, -1)) {
       if (count <= MAX_SCOPES && total <= MAX_FILES) break;
       total -= Object.keys(all[k].files || {}).length;
       count--;
@@ -176,6 +177,8 @@ function scopedUris(scope, paths) {
 const MAX_FOLDERS = 50000;
 const folderRows = new Map();
 const foldersOf = new Map();
+/** A folder's place (its list and path) -> its current key. */
+const folderPlaces = new Map();
 
 /**
  * @param {any[]} files the folder's file rows (and its sub-folders')
@@ -183,9 +186,15 @@ const foldersOf = new Map();
  */
 function folderKey(files, id) {
   const key = crypto.createHash('sha1').update(`d\0${id}`).digest('hex');
+  // One entry per folder of a list: its contents changed (a new key), the old entry goes, and
+  // with it the old rows it held.
+  const place = id.slice(0, id.lastIndexOf('\0'));
+  const previous = folderPlaces.get(place);
+  if (previous && previous !== key) dropFolder(previous);
+  folderPlaces.set(place, key);
   const before = folderRows.get(key);
   folderRows.delete(key);
-  folderRows.set(key, { files, uri: before && before.uri });
+  folderRows.set(key, { files, place, uri: before && before.uri });
   // The same key: the same files (by content), already indexed.
   if (!before) {
     for (const f of files) {
@@ -194,19 +203,23 @@ function folderKey(files, id) {
       foldersOf.get(m).add(key);
     }
   }
-  while (folderRows.size > MAX_FOLDERS) {
-    const old = folderRows.keys().next().value;
-    for (const f of folderRows.get(old).files) {
-      const m = f.markId();
-      const set = foldersOf.get(m);
-      if (set) {
-        set.delete(old);
-        if (!set.size) foldersOf.delete(m);
-      }
-    }
-    folderRows.delete(old);
-  }
+  while (folderRows.size > MAX_FOLDERS) dropFolder(folderRows.keys().next().value);
   return key;
+}
+
+function dropFolder(key) {
+  const entry = folderRows.get(key);
+  if (!entry) return;
+  for (const f of entry.files) {
+    const m = f.markId();
+    const set = foldersOf.get(m);
+    if (set) {
+      set.delete(key);
+      if (!set.size) foldersOf.delete(m);
+    }
+  }
+  folderRows.delete(key);
+  if (folderPlaces.get(entry.place) === key) folderPlaces.delete(entry.place);
 }
 
 /** The URIs of the folders shown with any of these files (by markId), to redraw their dots. */
@@ -303,7 +316,8 @@ let lastScope;
 function registerList(scope, label, rows) {
   // index: ownUri -> row number, built when first looked up; kept while the list is drawn again
   // with the same files and contents (each open redraws it).
-  const signature = rows.map((r) => `${r.path}\0${r.viewed ? r.viewed.fingerprint : ''}`).join('\n');
+  // (Its sides too: a rebase that leaves the files as they were still moves every diff.)
+  const signature = rows.map((r) => `${r.path}\0${r.viewed ? r.viewed.fingerprint : ''}\0${r.leftRef || ''}\0${r.rightRef || r.sha || ''}\0${(r.owner && r.owner.mergeBase) || ''}`).join('\n');
   const before = lists.get(scope);
   lists.delete(scope);
   lists.set(scope, { label, rows, signature, index: before && before.signature === signature ? before.index : undefined });
@@ -573,4 +587,4 @@ function commitCount(sha, files) {
   return { viewed: files.filter((f) => m.has(ChangeMarks.key(sha, f))).length, total: files.length };
 }
 
-module.exports = { flushAll, registerDecorations, ViewedStore, ChangeMarks, scopedKey, folderKey, scopedUnviewed, scopedState, scopedTooltip, markScoped, markScopedMany, registerList, onDidChangeLists, listOfShown, activeShown, nextUnviewedRow, FINGERPRINT, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };
+module.exports = { flushAll, folderCount: () => folderRows.size, registerDecorations, ViewedStore, ChangeMarks, scopedKey, folderKey, scopedUnviewed, scopedState, scopedTooltip, markScoped, markScopedMany, registerList, onDidChangeLists, listOfShown, activeShown, nextUnviewedRow, FINGERPRINT, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };
