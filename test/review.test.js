@@ -179,7 +179,9 @@ test('a viewed mark holds for the content it was given, and goes when the file c
   assert.equal(reloaded.isViewed('pr:9', '__proto__', 'p'), true);
   assert.equal(reloaded.isViewed('__proto__', 'x', 'p'), false);
   for (let k = 0; k < 105; k++) await store.set(`s${k}`, [{ path: 'x', fingerprint: 'f' }], true);
-  assert.equal(Object.keys(store.all()).length, 100, 'the least recently used scopes go');
+  await store.flush();
+  assert.equal(Object.keys(store.all()).length, 100, 'the least recently used scopes go (when written)');
+  assert.ok(!store.isViewed('s0', 'x', 'f') && store.isViewed('s104', 'x', 'f'));
 });
 
 test('Changes vs Base in the Worktrees view: a file has a dot until opened, and again when the agent edits it', async (t) => {
@@ -231,10 +233,12 @@ test('Changes vs Base in the Worktrees view: a file has a dot until opened, and 
   assert.equal(again.getChildren()[0].getTreeItem().contextValue, 'changedFile:worktree:viewed', 'its menu offers Mark as Not Viewed');
   // The setting off: no dots (the marks stay).
   mock.configValues.set('markUnviewedFiles', false);
+  mock.events.onDidChangeConfiguration.fire({ affectsConfiguration: (k) => k === 'commitCorner.markUnviewedFiles' });
   try {
     assert.equal(deco.provideFileDecoration(again.getChildren()[1].getTreeItem().resourceUri), undefined);
   } finally {
     mock.configValues.delete('markUnviewedFiles');
+    mock.events.onDidChangeConfiguration.fire({ affectsConfiguration: (k) => k === 'commitCorner.markUnviewedFiles' });
   }
   // The agent edits a.txt again: unviewed.
   fs.writeFileSync(path.join(wtPath, 'a.txt'), 'agent 2\n');
@@ -938,10 +942,12 @@ test('the setting off: no file is bold', (t) => {
   viewed.init(memento());
   t.after(() => viewed.commitMarks().dispose());
   mock.configValues.set('markUnviewedFiles', false);
+  mock.events.onDidChangeConfiguration.fire({ affectsConfiguration: (k) => k === 'commitCorner.markUnviewedFiles' });
   try {
     assert.equal(viewed.commitFileUnviewed('a'.repeat(40), { path: 'x' }), false);
   } finally {
     mock.configValues.delete('markUnviewedFiles');
+    mock.events.onDidChangeConfiguration.fire({ affectsConfiguration: (k) => k === 'commitCorner.markUnviewedFiles' });
   }
   assert.equal(viewed.commitFileUnviewed('a'.repeat(40), { path: 'x' }), true);
 });
@@ -1181,10 +1187,12 @@ test('uncommitted files: marks follow their content (staged: the index, else the
   assert.deepEqual(after.filter((f) => f.unviewed).map((f) => f.path), ['a.txt']);
   // Off: no marks at all.
   mock.configValues.set('markUnviewedFiles', false);
+  mock.events.onDidChangeConfiguration.fire({ affectsConfiguration: (k) => k === 'commitCorner.markUnviewedFiles' });
   try {
     assert.ok((await marks(list())).every((f) => !f.vk));
   } finally {
     mock.configValues.delete('markUnviewedFiles');
+    mock.events.onDidChangeConfiguration.fire({ affectsConfiguration: (k) => k === 'commitCorner.markUnviewedFiles' });
   }
 });
 
@@ -1226,10 +1234,12 @@ test('tree views: a commit\'s file not viewed yet has a dot, and the setting off
   viewed.commitMarks().set(['abc'], true);
   assert.equal(provider.provideFileDecoration(uri('vk=abc')), undefined, 'viewed: no dot');
   mock.configValues.set('markUnviewedFiles', false);
+  mock.events.onDidChangeConfiguration.fire({ affectsConfiguration: (k) => k === 'commitCorner.markUnviewedFiles' });
   try {
     assert.equal(provider.provideFileDecoration(uri('vk=new')), undefined);
   } finally {
     mock.configValues.delete('markUnviewedFiles');
+    mock.events.onDidChangeConfiguration.fire({ affectsConfiguration: (k) => k === 'commitCorner.markUnviewedFiles' });
   }
 });
 

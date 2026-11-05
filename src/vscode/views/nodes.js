@@ -7,6 +7,9 @@ const { shortSha, formatDate, tinyAge, absoluteDate, statusIcon, STATUS_LABELS, 
 const { avatarUri } = require('../avatars');
 const viewed = require('../viewed');
 const merges = require('../merges');
+/** ../diffs, loaded on first use (it loads this module's neighbours). */
+let diffsModule;
+const diffs = () => diffsModule || (diffsModule = require('../diffs'));
 
 /** Commands a commit tooltip may link to. */
 const TOOLTIP_COMMANDS = ['commitCorner.showCommit', 'commitCorner.showMergeResolution', 'commitCorner.showGraph', 'commitCorner.copySha', 'commitCorner.openCommitOnGitHub', 'commitCorner.openPullRequestOnGitHub'];
@@ -25,6 +28,8 @@ function statsText(stats) {
  * VS Code passes the node itself as the command argument.
  */
 
+/** A list with more files than this has its count redrawn once marking pauses. */
+const BIG_LIST = 2000;
 /** How long loading must have been quiet before rows are redrawn (TreeProvider.redraw)… */
 const REDRAW_QUIET_MS = 300;
 /** …and how long a row waits at most for other rows of its view (not for its own children). */
@@ -48,9 +53,22 @@ class TreeProvider {
     this.redrawTimer = undefined;
     /** viewed scope -> the row that counts its marks ("2/5 viewed"; a list's files register it) */
     this.viewedOwners = new Map();
+    // Redrawing that row reloads its files: for a list of thousands, once marking has paused
+    // (stepping through files must not rebuild them all each time).
+    this.ownerTimers = new Map();
     this.storeSub = viewed.get().onDidChange((scope) => {
       const owner = this.viewedOwners.get(scope);
-      if (owner) this.redraw(owner);
+      if (!owner) return;
+      const size = Array.isArray(owner.viewedFiles) ? owner.viewedFiles.length : 0;
+      if (size <= BIG_LIST) {
+        this.redraw(owner);
+        return;
+      }
+      clearTimeout(this.ownerTimers.get(scope));
+      this.ownerTimers.set(scope, setTimeout(() => {
+        this.ownerTimers.delete(scope);
+        if (this.viewedOwners.get(scope) === owner) this.redraw(owner);
+      }, 1500));
     });
     // The viewed dots switched on or off: rows with marks say so in their tooltips and menus too
     // (only they are redrawn: a full refresh would list pull requests again).
@@ -230,6 +248,7 @@ class TreeProvider {
     if (this.viewedSub) this.viewedSub.dispose();
     if (this.settingSub) this.settingSub.dispose();
     this.storeSub.dispose();
+    for (const t of this.ownerTimers.values()) clearTimeout(t);
     this._onDidChangeTreeData.dispose();
   }
 }
@@ -597,7 +616,7 @@ class FileNode {
 
   /** The URIs its diff shows (to tell whether that diff is the editor you are looking at). */
   openUris() {
-    const { uriAt } = require('../diffs');
+    const { uriAt } = diffs();
     const leftRef = this.status === 'A' ? null : this.leftRef || EMPTY_TREE; // (this.parent is the tree node above, not a commit)
     // A commit's file opens tagged with its commit (Next Unviewed File knows where it is).
     const extra = this.commitViewed ? { commit: this.commitViewed, ...(this.base ? { base: this.base } : {}) } : undefined;
@@ -612,6 +631,11 @@ class FileNode {
   ownUri() {
     const [left, right] = this.openUris();
     return this.status === 'D' ? left : right;
+  }
+
+  /** The other side of its diff, when it shows both (Next Unviewed File checks it too). */
+  leftUri() {
+    return this.status === 'A' || this.status === 'D' ? undefined : this.openUris()[0];
   }
 
   getTreeItem() {
@@ -638,6 +662,9 @@ class FileNode {
     // symlink, a submodule) neither.
     const state = this.viewed ? viewed.scopedState(this.viewed.scope, this.path, this.viewed.fingerprint) : unviewed ? 'new' : 'none';
     item.contextValue = state === 'none' ? this.contextValue : `${this.contextValue}:${state}`;
+    // A row of a list with marks keeps its identity when the list is drawn again (revealing it after
+    // Next Unviewed File then finds this very file, not another of the same name).
+    if (this.viewed) item.id = `viewed\0${this.viewed.scope}\0${this.path}`;
     item.command = {
       command: 'commitCorner.openCommitFile',
       title: 'Open Changes',
@@ -665,13 +692,16 @@ function fileNodes(repo, files, refs, opts = {}) {
   // A tree even for a single file: its folder is part of what you need to see.
   const out = !opts.tree && config().get('fileLayout', 'tree') !== 'tree' ? nodes : buildFolderTree(nodes);
   // Each row knows the row it is under (getParent), so a file can be revealed in the tree.
+  // (And the rows next to it: Collapse This Level collapses a folder's siblings too.)
   const link = (list, up) => {
     for (const n of list) {
+      n.siblings = list;
       if (up) n.treeParent = up;
       if (n instanceof FolderNode) link(n.children, n);
     }
   };
   link(out, (opts.viewed && opts.viewed.owner) || refs.parent);
+  markFolders(out);
   if (opts.viewed) {
     // Folders get Mark as Viewed / Not Viewed for their files; Next Unviewed File in the diffs
     // goes through the files in the order shown.
@@ -690,6 +720,41 @@ function fileNodes(repo, files, refs, opts = {}) {
   return out;
 }
 
+/** Folders with more files than this below them (or deeper than this) get no dot. */
+const MAX_FOLDER_FILES = 5000;
+const MAX_FOLDER_DEPTH = 64;
+
+/**
+ * The files with viewed marks in each folder and below (`markFiles`) and the folder's key for its
+ * dot (`marksId`: its list, path and a digest of those files' marks and contents, so a file that
+ * changes gives the folder a new key), worked out once, bottom-up, when the tree is built.
+ * Returns the files of `list` and below, or undefined past the limits.
+ */
+function markFolders(list, depth = 0) {
+  let all = [];
+  for (const n of list) {
+    if (n instanceof FolderNode) {
+      const below = depth >= MAX_FOLDER_DEPTH ? undefined : markFolders(n.children, depth + 1);
+      if (below && below.length) setFolderMarks(n, below);
+      if (!below || !all || all.length + below.length > MAX_FOLDER_FILES) all = undefined;
+      else all = all.concat(below);
+    } else if (all && n.markId && n.markId()) {
+      all.push(n);
+      if (all.length > MAX_FOLDER_FILES) all = undefined;
+    }
+  }
+  return all;
+}
+
+function setFolderMarks(folder, files) {
+  const first = files[0];
+  if (!first.repo) return;
+  const digest = require('crypto').createHash('sha1');
+  for (const f of files) digest.update(`${f.markId()}\0${f.viewed ? f.viewed.fingerprint || '' : ''}\n`);
+  folder.markFiles = files;
+  folder.marksId = `${first.viewed ? first.viewed.scope : first.commitViewed}\0${folder.fullPath}\0${digest.digest('hex')}`;
+}
+
 class FolderNode {
   constructor(name, fullPath) {
     this.name = name;
@@ -702,13 +767,11 @@ class FolderNode {
     item.iconPath = vscode.ThemeIcon.Folder;
     // In a list with viewed marks (a pull request's files): Mark as Viewed / Not Viewed for all in it.
     item.contextValue = this.marks ? 'folder:marks' : 'folder';
-    // A dot while a file in it (or below) has not been opened, so a collapsed folder says so too.
-    const files = this.files().filter((f) => f.markId && f.markId());
-    if (files.length && files[0].repo) {
-      const key = viewed.folderKey(files, `${files[0].viewed ? files[0].viewed.scope : files[0].commitViewed}\0${this.fullPath}`);
-      item.resourceUri = vscode.Uri.file(files[0].repo.absolute(this.fullPath)).with({ fragment: 'commit-corner-history', query: `vf=${key}` });
-      const left = files.filter((f) => f.unviewed()).length;
-      if (left) item.tooltip = `${left} file${left === 1 ? '' : 's'} in it not viewed yet`;
+    // A dot while a file in it (or below) has not been opened, so a collapsed folder says so too
+    // (its files and their key are worked out once, when the tree is built: see markFolders).
+    if (this.markFiles && this.marksId) {
+      const key = viewed.folderKey(this.markFiles, this.marksId);
+      item.resourceUri = vscode.Uri.file(this.markFiles[0].repo.absolute(this.fullPath)).with({ fragment: 'commit-corner-history', query: `vf=${key}` });
     }
     return item;
   }

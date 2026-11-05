@@ -5,14 +5,22 @@ const crypto = require('crypto');
 
 const KEY = 'viewedFiles';
 const MAX_SCOPES = 100;
+const MAX_FILES = 200000;
+const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+/** Whether an object has any key (without listing them all). */
+function hasKeys(o) {
+  for (const k in o) if (own(o, k)) return true;
+  return false;
+}
 
 /**
  * "Viewed" marks of a pull request's files and of a worktree's changes (a dot until you open a
  * file, like a commit's files): per scope (a pull request, a worktree compared with its base)
  * and file, the fingerprint of the content you looked at (its blob id). A file that changes
  * again (the agent edits it, the PR gets a new push) has another fingerprint, so it is unviewed
- * again by itself. Kept in memory and written to workspace state a second after a change
- * (opening file after file is one write); the least recently used scopes are forgotten past 100.
+ * again by itself. Kept in memory and written to workspace state a second after the first
+ * change since the last write (opening file after file is one write); the least recently used
+ * scopes are forgotten past 100 scopes or 200000 files in all.
  */
 class ViewedStore {
   /** @param {vscode.Memento|undefined} memento */
@@ -54,22 +62,23 @@ class ViewedStore {
    * @param {{path: string, fingerprint?: string}[]} files
    */
   async set(scope, files, viewed) {
-    // Objects without a prototype: any file name (even "__proto__") is a plain key.
-    const all = Object.assign(Object.create(null), this.all());
-    const before = Object.prototype.hasOwnProperty.call(all, scope) && all[scope] && all[scope].files;
-    const s = { files: Object.assign(Object.create(null), before || {}), used: Date.now() };
+    // Changed in place (only this store holds it): a mark does not copy the other marks. Objects
+    // without a prototype: any file name (even "__proto__") is a plain key.
+    if (!this.owned) {
+      this.data = Object.assign(Object.create(null), this.all());
+      this.owned = true;
+    }
+    const all = this.data;
+    let s = own(all, scope) && all[scope] && all[scope].files ? all[scope] : undefined;
+    if (!s) s = { files: Object.create(null), used: 0 };
+    else if (Object.getPrototypeOf(s.files) !== null) s = { files: Object.assign(Object.create(null), s.files), used: s.used };
+    s.used = Date.now();
     for (const f of files) {
       if (viewed && f.fingerprint) s.files[f.path] = f.fingerprint;
       else delete s.files[f.path];
     }
-    if (Object.keys(s.files).length) all[scope] = s;
+    if (hasKeys(s.files)) all[scope] = s;
     else delete all[scope];
-    const scopes = Object.keys(all);
-    if (scopes.length > MAX_SCOPES) {
-      scopes.sort((a, b) => (all[a].used || 0) - (all[b].used || 0));
-      for (const old of scopes.slice(0, scopes.length - MAX_SCOPES)) delete all[old];
-    }
-    this.data = all;
     this.save();
     this.emitter.fire(scope);
     this.filesEmitter.fire({ scope, paths: files.map((f) => f.path) });
@@ -82,9 +91,25 @@ class ViewedStore {
     if (this.timer.unref) this.timer.unref();
   }
 
+  /** The least recently used scopes go past 100 scopes or 200000 files (done when written). */
+  prune() {
+    const all = this.data;
+    if (!all) return;
+    const scopes = Object.keys(all).sort((a, b) => (all[a].used || 0) - (all[b].used || 0));
+    let total = scopes.reduce((n, k) => n + Object.keys(all[k].files || {}).length, 0);
+    let count = scopes.length;
+    for (const k of scopes) {
+      if (count <= MAX_SCOPES && total <= MAX_FILES) break;
+      total -= Object.keys(all[k].files || {}).length;
+      count--;
+      delete all[k];
+    }
+  }
+
   flush() {
     clearTimeout(this.timer);
     this.timer = undefined;
+    this.prune();
     if (this.memento && this.data) return Promise.resolve(this.memento.update(KEY, this.data)).then(undefined, () => {});
     return Promise.resolve();
   }
@@ -103,8 +128,10 @@ class ViewedStore {
  * again finds its entry; the oldest are forgotten past MAX_SCOPED (a row that old is redrawn
  * with a fresh key long before).
  */
-const MAX_SCOPED = 50000;
+const MAX_SCOPED = 200000;
 const scopedRows = new Map();
+/** scope -> its keys in scopedRows (a mark redraws the dots of its list only) */
+const scopedByScope = new Map();
 
 /** The key of a file of a list with viewed marks (registered for the decorations). */
 function scopedKey(scope, file, fingerprint) {
@@ -113,32 +140,85 @@ function scopedKey(scope, file, fingerprint) {
   const before = scopedRows.get(key);
   scopedRows.delete(key);
   scopedRows.set(key, { scope, file, fingerprint, uri: before && before.uri });
-  while (scopedRows.size > MAX_SCOPED) scopedRows.delete(scopedRows.keys().next().value);
+  if (!scopedByScope.has(scope)) scopedByScope.set(scope, new Set());
+  scopedByScope.get(scope).add(key);
+  while (scopedRows.size > MAX_SCOPED) {
+    const old = scopedRows.keys().next().value;
+    const entry = scopedRows.get(old);
+    scopedRows.delete(old);
+    const keys = scopedByScope.get(entry.scope);
+    if (keys) {
+      keys.delete(old);
+      if (!keys.size) scopedByScope.delete(entry.scope);
+    }
+  }
   return key;
+}
+
+/** The dots shown for these files of a list (their URIs), to redraw just those. */
+function scopedUris(scope, paths) {
+  const want = new Set(paths);
+  const out = [];
+  for (const k of scopedByScope.get(scope) || []) {
+    const r = scopedRows.get(k);
+    if (r && r.uri && want.has(r.file)) out.push(r.uri);
+  }
+  return out;
 }
 
 /**
  * Folders of file trees with marks (a pull request's, a comparison's, a commit's): a dot while a
- * file in them is not viewed. key -> {files (rows with unviewed() and markId()), ids (their
- * markIds), uri}; as many as the files' entries.
+ * file in them is not viewed. key -> {files (rows with unviewed() and markId()), uri}. The key
+ * covers the folder's list, path and its files' contents, so a file that changes gives the folder
+ * a new key (VS Code asks for its dot again) and two lists never share a folder's entry. Each
+ * file's markId points back to the folders it is in (a mark redraws just those).
  */
+const MAX_FOLDERS = 50000;
 const folderRows = new Map();
+const foldersOf = new Map();
 
-/** @param {any[]} files the folder's file rows (and its sub-folders') @param {string} id its list and path */
+/**
+ * @param {any[]} files the folder's file rows (and its sub-folders')
+ * @param {string} id its list, path and a digest of its files' contents (see fileNodes)
+ */
 function folderKey(files, id) {
-  const key = crypto.createHash('sha1').update(['d', id].join('\0')).digest('hex');
+  const key = crypto.createHash('sha1').update(`d\0${id}`).digest('hex');
   const before = folderRows.get(key);
   folderRows.delete(key);
-  folderRows.set(key, { files, ids: new Set(files.map((f) => f.markId())), uri: before && before.uri });
-  while (folderRows.size > MAX_SCOPED) folderRows.delete(folderRows.keys().next().value);
+  folderRows.set(key, { files, uri: before && before.uri });
+  // The same key: the same files (by content), already indexed.
+  if (!before) {
+    for (const f of files) {
+      const m = f.markId();
+      if (!foldersOf.has(m)) foldersOf.set(m, new Set());
+      foldersOf.get(m).add(key);
+    }
+  }
+  while (folderRows.size > MAX_FOLDERS) {
+    const old = folderRows.keys().next().value;
+    for (const f of folderRows.get(old).files) {
+      const m = f.markId();
+      const set = foldersOf.get(m);
+      if (set) {
+        set.delete(old);
+        if (!set.size) foldersOf.delete(m);
+      }
+    }
+    folderRows.delete(old);
+  }
   return key;
 }
 
 /** The URIs of the folders shown with any of these files (by markId), to redraw their dots. */
 function foldersWith(ids) {
-  const out = [];
-  for (const f of folderRows.values()) if (f.uri && ids.some((id) => f.ids.has(id))) out.push(f.uri);
-  return out;
+  const out = new Set();
+  for (const id of ids) {
+    for (const key of foldersOf.get(id) || []) {
+      const f = folderRows.get(key);
+      if (f && f.uri) out.add(f.uri);
+    }
+  }
+  return [...out];
 }
 
 /** What a file can be fingerprinted as (its blob id, or "deleted"): only those can be marked. */
@@ -221,11 +301,14 @@ let lastScope;
  * @param {any[]} rows in the order shown; `single`: opens as a plain editor (else as a diff)
  */
 function registerList(scope, label, rows) {
+  // index: ownUri -> row number, built when first looked up; kept while the list is drawn again
+  // with the same files and contents (each open redraws it).
+  const signature = rows.map((r) => `${r.path}\0${r.viewed ? r.viewed.fingerprint : ''}`).join('\n');
+  const before = lists.get(scope);
   lists.delete(scope);
-  // index: ownUri -> row number, built when first looked up (once per drawing of the list).
-  lists.set(scope, { label, rows, index: undefined });
+  lists.set(scope, { label, rows, signature, index: before && before.signature === signature ? before.index : undefined });
   while (lists.size > MAX_LISTS) lists.delete(lists.keys().next().value);
-  listsEmitter.fire(scope);
+  if (!before || before.signature !== signature) listsEmitter.fire(scope);
 }
 
 function indexOf(list) {
@@ -250,7 +333,11 @@ function listOfShown(shown) {
     const index = indexOf(list);
     for (const u of shown.uris) {
       const at = index.get(u);
-      if (at !== undefined && !list.rows[at].single === shown.diff) {
+      // And its other side, where that is this list's own too (not another diff of the same file,
+      // such as Source Control's of a working file).
+      const row = at === undefined ? undefined : list.rows[at];
+      const left = row && row.leftUri && row.leftUri();
+      if (row && !row.single === shown.diff && (!left || shown.uris.includes(left))) {
         found.push({ scope, list, at });
         break;
       }
@@ -363,7 +450,8 @@ class ChangeMarks {
   flush() {
     clearTimeout(this.timer);
     this.timer = undefined;
-    if (this.memento) this.memento.update(CHANGES_KEY, { keys: [...this.keys], commits: [...this.commits] }).then(undefined, () => {});
+    if (!this.memento) return Promise.resolve();
+    return Promise.resolve(this.memento.update(CHANGES_KEY, { keys: [...this.keys], commits: [...this.commits] })).then(undefined, () => {});
   }
 
   dispose() {
@@ -384,6 +472,12 @@ function init(memento) {
   return { dispose: () => both.forEach((s) => s.dispose()) };
 }
 
+/** Marks not written yet, written now (the window is closing): what deactivate waits for. */
+function flushAll() {
+  const pending = [store, changes].filter((s) => s && s.timer);
+  return Promise.all(pending.map((s) => s.flush()));
+}
+
 function get() {
   if (!store) store = new ViewedStore(undefined);
   return store;
@@ -395,8 +489,17 @@ function commitMarks() {
   return changes;
 }
 
+/**
+ * The dots setting, read once until it changes (it is asked for every row and every dot). The
+ * listener is added when this module loads, before any other listener reads the setting.
+ */
+let dotsOn;
+vscode.workspace.onDidChangeConfiguration((e) => {
+  if (e.affectsConfiguration('commitCorner.markUnviewedFiles')) dotsOn = undefined;
+});
 function marksUnviewed() {
-  return require('./util').config().get('markUnviewedFiles', true);
+  if (dotsOn === undefined) dotsOn = !!require('./util').config().get('markUnviewedFiles', true);
+  return dotsOn;
 }
 
 /** Whether you opened file `f` ({path, oldBlob?, newBlob?}) of commit `sha`, or marked it viewed. */
@@ -431,7 +534,7 @@ function registerDecorations() {
     commitMarks().onDidChange((e) => redraw([...[...e.keys].map((k) => commitUris.get(k)).filter(Boolean), ...foldersWith([...e.keys].map((k) => `k\0${k}`))])),
     get().onDidChangeFiles((e) => {
       const paths = new Set(e.paths);
-      redraw([...[...scopedRows.values()].filter((r) => r.uri && r.scope === e.scope && paths.has(r.file)).map((r) => r.uri), ...foldersWith(e.paths.map((p) => `s\0${e.scope}\0${p}`))]);
+      redraw([...scopedUris(e.scope, paths), ...foldersWith(e.paths.map((p) => `s\0${e.scope}\0${p}`))]);
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('commitCorner.markUnviewedFiles')) changed.fire(undefined);
@@ -470,4 +573,4 @@ function commitCount(sha, files) {
   return { viewed: files.filter((f) => m.has(ChangeMarks.key(sha, f))).length, total: files.length };
 }
 
-module.exports = { registerDecorations, ViewedStore, ChangeMarks, scopedKey, folderKey, scopedUnviewed, scopedState, scopedTooltip, markScoped, markScopedMany, registerList, onDidChangeLists, listOfShown, activeShown, nextUnviewedRow, FINGERPRINT, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };
+module.exports = { flushAll, registerDecorations, ViewedStore, ChangeMarks, scopedKey, folderKey, scopedUnviewed, scopedState, scopedTooltip, markScoped, markScopedMany, registerList, onDidChangeLists, listOfShown, activeShown, nextUnviewedRow, FINGERPRINT, init, get, commitMarks, commitFileViewed, commitFileUnviewed, markCommitFiles, commitCount, marksUnviewed };

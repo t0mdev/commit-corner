@@ -20,9 +20,10 @@ const { mapRangesToFrom, eolOf, withEol, DiffTooLargeError } = require('../../gi
 const isFullSha = (s) => typeof s === 'string' && /^[0-9a-f]{40,64}$/.test(s);
 /**
  * The revision a row's deleted file is read from: its left side when the row has one (a pull
- * request's merge base, a merge view's other side, a commit's parent), else the parent of `sha`.
+ * request's merge base, a comparison's left side, a merge view's other side, a commit's parent),
+ * else the parent of `sha`. (git refuses anything that is not a revision.)
  */
-const beforeRev = (node) => (isFullSha(node.leftRef) ? node.leftRef : `${node.sha}^`);
+const beforeRev = (node) => (typeof node.leftRef === 'string' && node.leftRef && !node.leftRef.startsWith('-') ? node.leftRef : `${node.sha}^`);
 
 /** Resolve (repo, relative path) from a URI argument or the active editor. */
 function fileTarget(manager, uri) {
@@ -217,7 +218,7 @@ function register(ctx) {
     const rev = deleted ? beforeRev(node) : node.sha;
     const file = deleted ? node.origPath || node.path : node.path;
     // Named as it is restored: from the row's left side (a pull request's merge base) or the parent.
-    const from = deleted ? (isFullSha(rev) ? `${shortSha(rev)} (before it was deleted)` : `before ${shortSha(node.sha)} (deleted there)`) : shortSha(node.sha);
+    const from = deleted ? (isFullSha(rev) ? `${shortSha(rev)} (before it was deleted)` : rev.endsWith('^') ? `before ${shortSha(node.sha)} (deleted there)` : `${rev} (before it was deleted)`) : shortSha(node.sha);
     const ok = await notify.warn(`Replace "${file}" in the working tree with its version from ${from}?`, { modal: true }, 'Restore');
     if (ok) await repo.restoreFile(file, rev);
   });

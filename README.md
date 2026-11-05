@@ -253,6 +253,9 @@ new tags (open them in the graph).
   Compare with Branch, Tag or Commit…, Copy Relative Path and Reveal in Explorer
   View in their menu. A commit's files you have not viewed have a dot (●), and
   Mark as Viewed / Mark as Not Viewed in their menu; the commit says `3/12 viewed` once it has been expanded.
+- Folder rows of these file trees have **Collapse This Level** (the folder and
+  the folders next to it) and **Collapse Folder** in their menu; a folder with
+  files you have not opened has a dot too.
 
 ### Branches and remotes
 - **Repository** view: local branches with ahead/behind and upstream, remote

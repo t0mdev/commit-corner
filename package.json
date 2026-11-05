@@ -1530,6 +1530,17 @@
         "icon": "$(menu)"
       },
       {
+        "command": "commitCorner.collapseLevel",
+        "title": "Collapse This Level",
+        "category": "Commit Corner",
+        "icon": "$(collapse-all)"
+      },
+      {
+        "command": "commitCorner.collapseFolder",
+        "title": "Collapse Folder",
+        "category": "Commit Corner"
+      },
+      {
         "command": "commitCorner.markCommitFileViewed",
         "title": "Mark as Viewed",
         "category": "Commit Corner"
@@ -2716,6 +2727,14 @@
         },
         {
           "command": "commitCorner.worktreeOpenChangedFile",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.collapseLevel",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.collapseFolder",
           "when": "false"
         }
       ],
@@ -4220,6 +4239,16 @@
           "command": "commitCorner.review.clear",
           "when": "view == commitCorner.worktrees && viewItem == reviewComments",
           "group": "2_clear@1"
+        },
+        {
+          "command": "commitCorner.collapseLevel",
+          "when": "viewItem =~ /^folder(:marks)?$/ && !listMultiSelection",
+          "group": "0_collapse@1"
+        },
+        {
+          "command": "commitCorner.collapseFolder",
+          "when": "viewItem =~ /^folder(:marks)?$/ && !listMultiSelection",
+          "group": "0_collapse@2"
         }
       ],
       "webview/context": [

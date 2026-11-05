@@ -268,6 +268,9 @@ async function startAskpass(extContext) {
   }
 }
 
-function deactivate() {}
+/** Viewed marks set in the last second are written before the window goes. */
+function deactivate() {
+  return require('./vscode/viewed').flushAll();
+}
 
 module.exports = { activate, deactivate, redact };

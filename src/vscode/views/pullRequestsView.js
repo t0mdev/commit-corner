@@ -122,7 +122,8 @@ class PullRequestNode {
     const { headSha, baseRef, baseTip, mergeBase, merged, commits, files } = info;
     const baseLabel = `${baseRef}${baseTip ? ` @ ${shortSha(baseTip)}` : ''}${merged ? ' (already merged)' : ''}`;
     const scope = `pr:${this.repoRoot}:${this.remote}#${this.number}`;
-    const ids = await this.repo.changedBlobIds(mergeBase, headSha).catch(() => new Map());
+    // Each file's fingerprint: its blob id at the head (from the same git diff as the list).
+    const ids = new Map(files.filter((f) => f.status !== 'D' && f.newBlob).map((f) => [f.path, f.newBlob]));
     const marks = files.map((f) => ({ path: f.path, fingerprint: fingerprintOf(ids, f) }));
     // The group redraws itself when a mark changes (its count): not the whole pull request,
     // whose reviews and checks would be fetched again.
@@ -317,7 +318,7 @@ class PullRequestsView extends TreeProvider {
     if (cached && cached.headSha === headSha && cached.preferred === preferred) return cached;
     const { baseRef, baseTip, mergeBase, merged } = await repo.resolvePullRequestBase(remote, number, headSha, preferred, { baseBranch: meta && meta.baseRef });
     const commits = mergeBase ? await repo.log({ revs: [headSha, `^${mergeBase}`], maxCount: 500 }) : [];
-    const files = mergeBase ? await repo.diffFiles(mergeBase, headSha) : [];
+    const files = mergeBase ? await repo.diffFiles(mergeBase, headSha, { blobs: true }) : [];
     const details = { headSha, baseRef, baseTip, mergeBase, merged, commits, files, number, remote, preferred };
     this.details.set(key, details);
     return details;

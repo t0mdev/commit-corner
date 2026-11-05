@@ -924,17 +924,18 @@ test('a pull request\'s files have a dot until opened; Mark as Not Viewed brings
   // The folder has a dot while a file in it is not viewed (a collapsed folder says so too).
   const folderDeco = () => mock.decorationProviders.map((d) => d.provideFileDecoration(folder.getTreeItem().resourceUri)).find(Boolean);
   assert.ok(folderDeco(), 'folder dot');
-  assert.match(folder.getTreeItem().tooltip, /2 files in it not viewed yet/);
   await run('commitCorner.markCommitFileViewed', folder, [folder]);
   assert.equal(group.getTreeItem().description, '2/3 viewed');
   assert.equal(folderDeco(), undefined, 'no folder dot once all in it are viewed');
   // With the dots off, a file still offers its Mark menus (by its state) and the list counts.
   mock.configValues.set('markUnviewedFiles', false);
+  mock.events.onDidChangeConfiguration.fire({ affectsConfiguration: (k) => k === 'commitCorner.markUnviewedFiles' });
   try {
     assert.equal(deleted.getTreeItem().contextValue, 'file:pr:new');
     assert.match(deleted.getTreeItem().tooltip, /Not viewed yet/);
   } finally {
     mock.configValues.delete('markUnviewedFiles');
+    mock.events.onDidChangeConfiguration.fire({ affectsConfiguration: (k) => k === 'commitCorner.markUnviewedFiles' });
   }
   // A file the pull request deleted (in its first commit): read from the merge base, not from
   // the parent of its last commit (where it is gone too).
@@ -1064,6 +1065,36 @@ test('Compare with the working tree: a file has a dot until opened, and again wh
   ({ group, file } = await row());
   assert.equal(file.getTreeItem().contextValue, 'file:compareWork:new');
   assert.doesNotMatch(group.getTreeItem().description, /viewed/);
+  // A folder's dot follows its files: gone once all are viewed, back when one changes again.
+  fs.mkdirSync(path.join(r.dir, 'cmpdir'), { recursive: true });
+  t.after(() => fs.rmSync(path.join(r.dir, 'cmpdir'), { recursive: true, force: true }));
+  r.write('cmpdir/x.txt', 'x\n');
+  await api.manager.refresh(repo());
+  await view.setComparison(repo(), 'HEAD', WORKTREE, 'twoDot');
+  const folderOf = async () => (await view.getChildren((await view.getChildren()).find((n) => /Files changed/.test(n.label || '')))).find((n) => n.name === 'cmpdir');
+  const dot = (uri) => mock.decorationProviders.map((d) => d.provideFileDecoration(uri)).find(Boolean);
+  let dir = await folderOf();
+  assert.ok(dot(dir.getTreeItem().resourceUri), 'folder dot');
+  const [x] = await view.getChildren(dir);
+  await run('commitCorner.markCommitFileViewed', x);
+  assert.equal(dot(dir.getTreeItem().resourceUri), undefined, 'all viewed: no folder dot');
+  const before = String(dir.getTreeItem().resourceUri);
+  r.write('cmpdir/x.txt', 'x changed\n');
+  dir = await folderOf();
+  assert.notEqual(String(dir.getTreeItem().resourceUri), before, 'a new key: VS Code asks for its dot again');
+  assert.ok(dot(dir.getTreeItem().resourceUri), 'its dot is back');
+  // The working tree changed but nothing shown did: no redraw; a file edited: Files changed alone.
+  await new Promise((res) => setTimeout(res, 400)); // the mark's own redraw first
+  const firedCmp = [];
+  const subCmp = view.onDidChangeTreeData((e) => firedCmp.push(e));
+  t.after(() => subCmp.dispose());
+  await view.reloadFiles();
+  await new Promise((res) => setTimeout(res, 400));
+  assert.deepEqual(firedCmp, [], 'nothing changed: nothing redrawn');
+  r.write('cmpdir/x.txt', 'x changed again\n');
+  await view.reloadFiles();
+  await new Promise((res) => setTimeout(res, 400));
+  assert.deepEqual(firedCmp, [[view.filesGroup]], 'only Files changed');
   // Compare between two refs keeps the marks of an unchanged file.
   await view.setComparison(repo(), 'feature~1', 'feature');
   const roots = await view.getChildren();
@@ -1073,6 +1104,31 @@ test('Compare with the working tree: a file has a dot until opened, and again wh
   await run('commitCorner.markCommitFileViewed', b);
   const [again] = await view.getChildren((await view.getChildren()).find((n) => /Files changed/.test(n.label || '')));
   assert.equal(again.getTreeItem().contextValue, 'file:compare:viewed', 'still viewed when drawn again');
+  // Its sides are commit ids, whatever was compared by name (its menus read what the diff shows).
+  assert.match(again.sha, /^[0-9a-f]{40}$/);
+  assert.match(again.leftRef, /^[0-9a-f]{40}$/);
+});
+
+test('folder dots stay cheap on a very deep tree (none past the depth limit)', () => {
+  const { fileNodes } = require('../src/vscode/views/nodes');
+  const deep = Array.from({ length: 300 }, (_, k) => Array.from({ length: k + 1 }, (_, i) => `d${i}`).join('/') + '/f.txt');
+  const files = deep.map((p) => ({ status: 'A', path: p, newBlob: 'a'.repeat(40) }));
+  const ids = new Map(files.map((f) => [f.path, f.newBlob]));
+  const t0 = Date.now();
+  const tree = fileNodes(repo(), files, { leftRef: 'a'.repeat(40), rightRef: 'b'.repeat(40), contextValue: 'file:pr' }, { tree: true, viewed: { scope: 'deep', ids } });
+  let folder = tree[0];
+  let depth = 0;
+  const walk = (n) => {
+    n.getTreeItem();
+    for (const c of n.children || []) walk(c);
+  };
+  walk(folder);
+  while (folder && folder.children) {
+    depth++;
+    if (depth > 70) assert.equal(folder.marksId, undefined, `no dot at depth ${depth}`);
+    folder = folder.children.find((c) => c.children);
+  }
+  assert.ok(Date.now() - t0 < 3000, `drawn in ${Date.now() - t0} ms`);
 });
 
 test('no command reported an unexpected error', () => {

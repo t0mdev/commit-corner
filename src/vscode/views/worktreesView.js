@@ -103,6 +103,11 @@ class WorktreeFileNode {
     return this.change.status === 'D' ? left : file;
   }
 
+  /** The base side of its diff (a changed file): another diff of the same working file is not this one. */
+  leftUri() {
+    return this.single ? undefined : this.openUris()[1];
+  }
+
   constructor(owner, change) {
     this.owner = owner;
     this.change = change;
@@ -129,6 +134,7 @@ class WorktreeFileNode {
     // Mark as Not Viewed, whatever the dots setting says (a file that cannot be fingerprinted neither).
     const state = viewed.scopedState(this.viewed.scope, change.path, this.viewed.fingerprint);
     item.contextValue = `changedFile:worktree${state === 'none' ? '' : `:${state}`}`;
+    item.id = `viewed\0${this.viewed.scope}\0${change.path}`;
     const left = toGitUri(owner.repoRoot, change.origPath || change.path, owner.mergeBase, { root: owner.worktreePath });
     const title = `${name} (${owner.worktree.branch || path.basename(owner.worktreePath)} vs ${owner.base})`;
     // The keyboard stays in the list: Enter shows the file, ↓ goes to the next.

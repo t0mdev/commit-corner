@@ -22,9 +22,10 @@ const { mapRangesToFrom, withEol, eolOf } = require('../../git/lineDiff');
 const isFullSha = (s) => typeof s === 'string' && /^[0-9a-f]{40,64}$/.test(s);
 /**
  * The revision a row's deleted file is read from: its left side when the row has one (a pull
- * request's merge base, a merge view's other side, a commit's parent), else the parent of `sha`.
+ * request's merge base, a comparison's left side, a merge view's other side, a commit's parent),
+ * else the parent of `sha`. (git refuses anything that is not a revision.)
  */
-const beforeRev = (node) => (isFullSha(node.leftRef) ? node.leftRef : `${node.sha}^`);
+const beforeRev = (node) => (typeof node.leftRef === 'string' && node.leftRef && !node.leftRef.startsWith('-') ? node.leftRef : `${node.sha}^`);
 /** Repository text (a path) in the status bar: no $(icon) syntax, no control characters. */
 const plain = (t) => escapeIcons(String(t).replace(/[\u0000-\u001f\u007f]/g, ' '));
 /** Above this, a file is opened at the same line number instead of a mapped one. */
@@ -453,6 +454,36 @@ function register(ctx) {
       if (files.length) viewed.markCommitFiles(sha, files, on);
     }
   };
+  /**
+   * Collapse a folder of a file tree (Collapse Folder), or it and the folders next to it
+   * (Collapse This Level). VS Code lets an extension collapse a row only through the list's own
+   * command on the focused row: each folder is focused (revealed) and collapsed, strictly from the
+   * last one up (collapsing a folder moves the rows below it, and a row revealed while rows move
+   * is not always focused). The keyboard ends on the top one. (Revealing a row once more would
+   * expand it again: VS Code takes its item's state.)
+   */
+  const collapse = (level) => async (node) => {
+    if (!node || !Array.isArray(node.children) || typeof node.fullPath !== 'string') return;
+    const isFolder = (n) => Array.isArray(n && n.children) && typeof n.fullPath === 'string';
+    const folders = level && Array.isArray(node.siblings) && node.siblings.includes(node) ? node.siblings.filter(isFolder).reverse() : [node];
+    for (const tree of [...require('../util').treeViews.values()].filter((v) => v.visible)) {
+      try {
+        await tree.reveal(node, { select: false, focus: false, expand: false });
+      } catch {
+        continue; // not in this view
+      }
+      for (const f of folders) {
+        try {
+          await tree.reveal(f, { select: false, focus: true, expand: false });
+          await vscode.commands.executeCommand('list.collapse');
+        } catch { /* gone meanwhile */ }
+      }
+      return;
+    }
+  };
+  cmd('commitCorner.collapseFolder', collapse(false));
+  cmd('commitCorner.collapseLevel', collapse(true));
+
   cmd('commitCorner.markCommitFileViewed', markFile(true));
   cmd('commitCorner.markCommitFileUnviewed', markFile(false));
 

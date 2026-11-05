@@ -39,14 +39,20 @@ async function openViewMenu() {
   throw new Error('the ··· menu did not open');
 }
 
-/** Show a Commit Corner view in the sidebar, once its title says so (its ··· menu is then its own). */
+/**
+ * Show a Commit Corner view in the sidebar, once its title says so (its ··· menu is then its own;
+ * while another view is still going, the sidebar is titled just "Commit Corner": asked again).
+ */
 async function showView(id, name) {
-  await vscode.commands.executeCommand(`commitCorner.sidebar.${id}`);
-  for (let i = 0; i < 50; i++) {
-    if (await inWorkbench(`/${name}/i.test((document.querySelector('.part.sidebar .title-label') || {}).textContent || '')`)) return;
-    await sleep(100);
+  const title = () => inWorkbench(`(document.querySelector('.part.sidebar .title-label') || {}).textContent || ''`);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await vscode.commands.executeCommand(`commitCorner.sidebar.${id}`);
+    for (let i = 0; i < 30; i++) {
+      if (new RegExp(name, 'i').test(await title())) return;
+      await sleep(100);
+    }
   }
-  throw new Error(`the ${name} view is not shown`);
+  throw new Error(`the ${name} view is not shown (title: ${await title()})`);
 }
 
 /** Close the context menus that are open (a failed assertion must not leave one behind). */
@@ -139,6 +145,12 @@ suite('Tree views', () => {
       for (let i = 0; i < 20 && !(view.selection[0] && view.selection[0].path === 'pkg0/mod0/file1.txt'); i++) await sleep(100);
       assert.strictEqual(view.selection[0] && view.selection[0].path, 'pkg0/mod0/file1.txt');
       await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+      // Right-click a folder → Collapse This Level: it and the 19 folders next to it close.
+      const pkg5 = loaded.find((n) => n.fullPath === 'pkg5');
+      await vscode.commands.executeCommand('commitCorner.collapseLevel', pkg5);
+      const collapsed = 1 + 3 + 20;
+      for (let i = 0; i < 50 && (await pullRequestRows()) !== collapsed; i++) await sleep(100);
+      assert.strictEqual(await pullRequestRows(), collapsed);
     } finally {
       Object.assign(Repository.prototype, saved);
       PullRequestsView.prototype.getChildren = getChildren;
@@ -172,21 +184,27 @@ suite('Tree views', () => {
       await vscode.commands.executeCommand('commitCorner.review.add', { thread, text: 'Rename this.' });
       for (const [id, name] of [...views].reverse()) {
         await showView(id, name);
-        assert.ok((await openViewMenu()).includes('Review Comments []'), `Review in the ··· menu (${id})`);
-        // The submenu opens on → from its focused item (tried again if the menu was still settling).
+        // Open the ··· menu, then the submenu (→ on its focused item). A view that redraws its
+        // title meanwhile (Worktrees looks again every 10 s) closes the menu: then once more.
+        let menu;
         let sub;
         for (let attempt = 0; attempt < 3 && !sub; attempt++) {
-          await inWorkbench(`(() => {
+          await closeMenus();
+          menu = await openViewMenu();
+          const focused = await inWorkbench(`(() => {
             const roots = [document, ...[...document.querySelectorAll('*')].filter((h) => h.shadowRoot).map((h) => h.shadowRoot)];
             const item = roots.flatMap((r) => [...r.querySelectorAll('.action-menu-item')]).find((i) => (i.querySelector('.action-label') || {}).textContent === 'Review Comments');
-            item.focus();
+            if (item) item.focus();
+            return !!item;
           })()`);
+          if (!focused) continue;
           await press(await workbench(), 'ArrowRight');
           for (let i = 0; i < 10 && !sub; i++) {
             await sleep(100);
             sub = (await openMenus())[1];
           }
         }
+        assert.ok(menu.includes('Review Comments []'), `Review Comments in the ··· menu (${id})`);
         assert.deepStrictEqual(sub, ['Copy Review for the Agent [Ctrl+Alt+G C]', 'Save Review to the Worktree []', 'Delete All Review Comments… []']);
         await closeMenus();
       }

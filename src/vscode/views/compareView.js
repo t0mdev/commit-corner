@@ -5,7 +5,7 @@ const notify = require('../notify');
 const { TreeProvider, MessageNode, GroupNode, CommitNode, fileNodes, fingerprintOf } = require('./nodes');
 const viewed = require('../viewed');
 const { WORKTREE } = require('../../git/repository');
-const { shortSha, showError, debounce } = require('../util');
+const { shortSha, showError, debounce, log } = require('../util');
 const { openMultiDiff, refLabel } = require('../diffs');
 const { pickRef } = require('../pickers');
 
@@ -38,11 +38,15 @@ class CompareView extends TreeProvider {
     this.onCompareRepoChanged = debounce(async () => {
       if (!this.state) return;
       const repo = this.state.repo;
-      const sig = this.state.right === WORKTREE ? `${Date.now()}` : (repo.refTips !== undefined ? repo.refTips : await repo.getRefTips().catch(() => ''));
-      if (sig !== this.lastSignature) {
-        this.lastSignature = sig;
+      const tips = repo.refTips !== undefined ? repo.refTips : await repo.getRefTips().catch(() => '');
+      // A ref moved (a commit, a checkout): everything again.
+      if (tips !== this.lastSignature) {
+        this.lastSignature = tips;
         this.refresh();
+        return;
       }
+      // Only files changed (the working tree): their list again, redrawn only if it differs.
+      if (this.state.right === WORKTREE) await this.reloadFiles();
     }, 500);
     this.setContext();
   }
@@ -71,7 +75,10 @@ class CompareView extends TreeProvider {
     return ref === WORKTREE ? 'Working Tree' : /^[0-9a-f]{40,64}$/.test(ref) ? shortSha(ref) : ref;
   }
 
-  /** The left side of file diffs: the merge base in three-dot mode. */
+  /**
+   * The left side of file diffs, as a commit id (so a file's menus read the very revision shown,
+   * even when the branch moves): the merge base in three-dot mode.
+   */
   async fileBase() {
     const { repo, left, right, mode } = this.state;
     if (mode === 'threeDot') {
@@ -79,30 +86,70 @@ class CompareView extends TreeProvider {
       if (!mb) throw new Error(`${left} and ${right === WORKTREE ? 'HEAD' : right} have no common history`);
       return mb;
     }
-    return left;
+    return (await repo.revParse(left)) || left;
   }
 
   /**
-   * Each file's fingerprint on the right side: its blob id there, or for the working tree the
-   * blob id of the file as it is now (hashed again only when it changed).
+   * The files changed, with the right side as a commit id (or the working tree) and each file's
+   * blob ids (one git diff for both).
    */
-  async fingerprints(base, files) {
-    const { repo, right } = this.state;
-    if (right !== WORKTREE) return repo.changedBlobIds(base, right);
-    return repo.worktreeFileIds(repo.root, files.filter((f) => f.status !== 'D').map((f) => f.path));
-  }
-
   async files() {
     const { repo, right } = this.state;
     const base = await this.fileBase();
-    const files = right === WORKTREE ? await repo.diffFiles(base) : await repo.diffFiles(base, right);
+    const rightRef = right === WORKTREE ? WORKTREE : (await repo.revParse(right)) || right;
+    const files = right === WORKTREE ? await repo.diffFiles(base) : await repo.diffFiles(base, rightRef, { blobs: true });
     if (right === WORKTREE) {
       // `git diff <ref>` ignores untracked files; they are part of the working tree too.
       const state = repo.state || (await repo.refreshState());
       const listed = new Set(files.map((f) => f.path));
       for (const e of state.untracked) if (!listed.has(e.path)) files.push({ status: 'A', path: e.path, added: null, deleted: null, untracked: true });
     }
-    return { base, files };
+    return { base, right: rightRef, files };
+  }
+
+  /**
+   * The files with what the Files changed row needs: each file's fingerprint on the right side
+   * (its blob id there; for the working tree, the file as it is now, hashed again only when it
+   * changed) and a signature to tell whether anything shown changed.
+   */
+  async loadFiles() {
+    const { repo, right } = this.state;
+    const { base, right: rightRef, files } = await this.files();
+    const ids = right === WORKTREE
+      ? await repo.worktreeFileIds(repo.root, files.filter((f) => f.status !== 'D').map((f) => f.path)).catch(() => new Map())
+      : new Map(files.filter((f) => f.status !== 'D' && f.newBlob).map((f) => [f.path, f.newBlob]));
+    const marks = files.map((f) => ({ path: f.path, fingerprint: fingerprintOf(ids, f) }));
+    const signature = files.map((f, i) => `${f.status}\0${f.path}\0${f.origPath || ''}\0${f.added}\0${f.deleted}\0${marks[i].fingerprint || ''}`).join('\n');
+    return { base, rightRef, files, ids, marks, signature };
+  }
+
+  /**
+   * The working tree changed but no ref moved: the Files changed row alone, when its files or
+   * their contents differ (an edit then brings a viewed file's dot back). One at a time.
+   */
+  async reloadFiles() {
+    if (this.reloading) {
+      this.reloadAgain = true;
+      return;
+    }
+    this.reloading = true;
+    const state = this.state;
+    try {
+      const data = await this.loadFiles();
+      const group = this.filesGroup;
+      if (this.state !== state || !group || !this.filesData || data.signature === this.filesData.signature) return;
+      this.filesData = data;
+      group.label = `Files changed (${data.files.length})`;
+      this.redraw(group);
+    } catch (e) {
+      log().info(`Compare: ${e.message}`);
+    } finally {
+      this.reloading = false;
+      if (this.reloadAgain) {
+        this.reloadAgain = false;
+        if (this.state === state) this.reloadFiles();
+      }
+    }
   }
 
   async getRoots() {
@@ -150,24 +197,33 @@ class CompareView extends TreeProvider {
       }, { icon: 'arrow-down', collapsed: true }));
     }
 
-    const { base, files } = await this.files();
-    const added = files.reduce((n, f) => n + (f.added || 0), 0);
-    const deleted = files.reduce((n, f) => n + (f.deleted || 0), 0);
-    // Viewed marks, as in a pull request: per comparison, by content, so a file that changes again
-    // (a new commit on a side, an edit in the working tree) is unviewed again.
+    this.lastSignature = repo.refTips;
+    this.filesData = await this.loadFiles();
+    // Viewed marks, as in a pull request: per comparison, by content (the right side's), so a file
+    // that changes again (a new commit there, an edit in the working tree) is unviewed again.
     const scope = `compare:${repo.root}:${left}:${right === WORKTREE ? 'working tree' : right}:${mode}`;
-    const ids = await this.fingerprints(base, files).catch(() => new Map());
-    const marks = files.map((f) => ({ path: f.path, fingerprint: fingerprintOf(ids, f) }));
-    const filesGroup = new GroupNode(`Files changed (${files.length})`, () => fileNodes(repo, files, { leftRef: base, rightRef: right, contextValue: right === WORKTREE ? 'file:compareWork' : 'file:compare' }, { viewed: { scope, ids, owner: filesGroup, provider: this, label: `${L} ↔ ${R}` } }), {
+    const data = () => this.filesData;
+    const filesGroup = new GroupNode(`Files changed (${data().files.length})`, () => {
+      const { base, rightRef, files, ids } = data();
+      return fileNodes(repo, files, { leftRef: base, rightRef, contextValue: right === WORKTREE ? 'file:compareWork' : 'file:compare' }, { viewed: { scope, ids, owner: filesGroup, provider: this, label: `${L} ↔ ${R}` } });
+    }, {
       icon: 'files',
+      // Short (a narrow sidebar cuts the end): "+12 −3 · 2/5".
       description: () => {
+        const { files, marks } = data();
+        const added = files.reduce((n, f) => n + (f.added || 0), 0);
+        const deleted = files.reduce((n, f) => n + (f.deleted || 0), 0);
         const seen = viewed.get().count(scope, marks);
-        const count = !seen ? '' : seen === files.length ? (seen === 1 ? ' · viewed' : ` · all ${seen} viewed`) : ` · ${seen}/${files.length} viewed`;
+        const count = !seen ? '' : seen === files.length ? ' · all viewed' : ` · ${seen}/${files.length}`;
         return `+${added} −${deleted}${count}`;
       },
+      tooltip: 'A file you have not opened has a dot; one that changes again gets it back. "2/5": viewed so far.',
       contextValue: 'compareFiles',
-      props: { repoRoot: repo.root, viewedScope: scope, viewedFiles: marks },
+      props: { repoRoot: repo.root, viewedScope: scope },
     });
+    // What Mark All and the count read: always the files shown now.
+    Object.defineProperty(filesGroup, 'viewedFiles', { get: () => data().marks, enumerable: true });
+    this.filesGroup = filesGroup;
     this.viewedOwners.set(scope, filesGroup);
     roots.push(filesGroup);
 
