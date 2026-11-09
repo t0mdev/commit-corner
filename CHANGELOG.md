@@ -8,6 +8,7 @@
 - Refreshes no longer pile up while agents keep writing: Source Control stays current even when `git status` is slow, and a `git status` that hangs holds later refreshes for a minute at most. A refresh that finds the same status leaves Source Control's lists and the Explorer decorations as they are, and past the status limit an untracked file that only changes its content causes no refresh at all.
 - **Staging thousands of new files at once** (the *Untracked* group's `+`, or a folder in `untrackedFiles: normal` mode) stages folder by folder instead of file by file: 100,000 files take seconds instead of minutes. Exactly the files listed are staged (not ones made since), and repositories inside those folders stay out.
 - Staging, committing and other writes wait up to 5 seconds while another git process holds `index.lock`, for example an agent's commit running its hooks (before, about 1 second). The status bar's *git …* item says it is waiting for index.lock and can cancel it. A lock over 10 minutes old fails right away and names the file to delete (probably left behind by a git process that crashed).
+- **Compare with…** on a commit or a branch/tag badge in the graph (right-click, or the row's `…` menu) and on branches, tags and commits in the tree views: pick any branch, tag, commit or the working tree to compare it with. A branch/tag badge in the graph also has *Compare with Working Tree* now.
 - Fixed: closing the Repository Activity or Worktrees page while it was loading could log "Webview is disposed" errors.
 
 ## 1.6.0

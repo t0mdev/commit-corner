@@ -772,6 +772,37 @@ test('comparing a branch with the working tree shows only what HEAD did since it
   await api.manager.refresh(repo());
 });
 
+test('Compare with… compares a commit or branch with any ref picked, or with the working tree', async () => {
+  const view = mock.treeViews.get('commitCorner.compare').provider;
+  r.git('branch', '-f', 'cw-other', 'HEAD');
+  const head = r.commit('compare with', { 'cw.txt': 'cw\n' });
+  await api.manager.refresh(repo());
+  try {
+    mock.ui.answers.push('cw-other');
+    await run('commitCorner.compareWith', { repoRoot: r.dir, sha: head });
+    assert.equal(view.state.left, head);
+    assert.equal(view.state.right, 'cw-other');
+    // The graph's menu (a branch badge or a commit row) runs the same.
+    mock.ui.answers.push('Working Tree');
+    await run('commitCorner.compareWith', { repoRoot: r.dir, ref: 'cw-other' });
+    const { WORKTREE } = require('../src/git/repository');
+    assert.equal(view.state.left, 'cw-other');
+    assert.equal(view.state.right, WORKTREE);
+    assert.equal(view.state.mode, 'threeDot', 'the work since that ref, as Compare with Working Tree');
+    // Dismissed: the comparison shown stays.
+    mock.ui.answers.push(undefined);
+    await run('commitCorner.compareWith', { repoRoot: r.dir, sha: head });
+    assert.equal(view.state.left, 'cw-other');
+    const pkg = require('../package.json');
+    const graphMenu = pkg.contributes.menus['webview/context'].filter((m) => m.command === 'commitCorner.graph.compareWith').map((m) => /webviewSection == '(\w+)'/.exec(m.when)[1]);
+    assert.deepEqual(graphMenu.sort(), ['commit', 'ref'], 'on commit rows and branch/tag badges in the graph');
+    assert.ok(pkg.contributes.menus['webview/context'].some((m) => m.command === 'commitCorner.graph.compareWithWorkingTree' && /webviewSection == 'ref'/.test(m.when)), 'badges: Compare with Working Tree too');
+  } finally {
+    view.clear();
+    r.git('branch', '-D', 'cw-other');
+  }
+});
+
 test('a dismissed confirmation leaves everything as it was (discard, discard all, delete untracked)', async () => {
   r.write('keep-untracked.txt', 'keep\n');
   const tracked = r.git('ls-files').split('\n')[0];

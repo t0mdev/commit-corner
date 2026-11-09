@@ -693,6 +693,12 @@
         "category": "Commit Corner"
       },
       {
+        "command": "commitCorner.compareWith",
+        "title": "Compare with…",
+        "category": "Commit Corner",
+        "icon": "$(git-compare)"
+      },
+      {
         "command": "commitCorner.compareSelectForCompare",
         "title": "Select for Compare",
         "category": "Commit Corner"
@@ -872,6 +878,11 @@
       {
         "command": "commitCorner.graph.compareWithCurrent",
         "title": "Compare with Current Branch",
+        "category": "Commit Corner"
+      },
+      {
+        "command": "commitCorner.graph.compareWith",
+        "title": "Compare with…",
         "category": "Commit Corner"
       },
       {
@@ -2099,6 +2110,10 @@
           "when": "commitCorner.hasRepository"
         },
         {
+          "command": "commitCorner.compareWith",
+          "when": "false"
+        },
+        {
           "command": "commitCorner.compareSelectForCompare",
           "when": "false"
         },
@@ -2224,6 +2239,10 @@
         },
         {
           "command": "commitCorner.graph.compareWithCurrent",
+          "when": "false"
+        },
+        {
+          "command": "commitCorner.graph.compareWith",
           "when": "false"
         },
         {
@@ -3670,6 +3689,11 @@
           "group": "3_compare@2"
         },
         {
+          "command": "commitCorner.compareWith",
+          "when": "viewItem =~ /^(branch.*|remoteBranch|tag|commit.*)$/ && !listMultiSelection",
+          "group": "3_compare@2"
+        },
+        {
           "command": "commitCorner.compareSelectForCompare",
           "when": "viewItem =~ /^(branch.*|remoteBranch|tag|commit.*)$/ && !listMultiSelection",
           "group": "3_compare@3"
@@ -4337,6 +4361,11 @@
           "group": "5_compare@2"
         },
         {
+          "command": "commitCorner.graph.compareWith",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
+          "group": "5_compare@2"
+        },
+        {
           "command": "commitCorner.graph.selectForCompare",
           "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'commit' && !multi",
           "group": "5_compare@3"
@@ -4427,8 +4456,18 @@
           "group": "1_ref@3"
         },
         {
+          "command": "commitCorner.graph.compareWithWorkingTree",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'ref'",
+          "group": "2_ref@0"
+        },
+        {
           "command": "commitCorner.graph.compareWithCurrent",
           "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'ref' && !isCurrent",
+          "group": "2_ref@1"
+        },
+        {
+          "command": "commitCorner.graph.compareWith",
+          "when": "webviewId =~ /^commitCorner\\.graph(View)?$/ && webviewSection == 'ref'",
           "group": "2_ref@1"
         },
         {

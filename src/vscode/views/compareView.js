@@ -319,6 +319,26 @@ function register(ctx, view) {
     if (ref) await view.setComparison(repo, ref, WORKTREE, 'threeDot');
   });
 
+  // A branch, tag or commit with any other, picked from a list (the working tree included).
+  cmd('commitCorner.compareWith', async (node) => {
+    const repo = await manager.pick(node);
+    if (!repo) return;
+    const ref = node && (node.ref || node.sha);
+    if (!ref) {
+      await vscode.commands.executeCommand('commitCorner.compareRefs', { repoRoot: repo.root });
+      return;
+    }
+    const other = await pickRef(repo, {
+      placeHolder: `Compare ${refLabel(ref)} with…`,
+      head: true,
+      extra: [{ label: '$(file-directory) Working Tree', description: 'uncommitted files on disk', ref: WORKTREE }],
+    });
+    if (!other) return;
+    // The working tree as with Compare with Working Tree (three-dot: the work since `ref`).
+    if (other === WORKTREE) await view.setComparison(repo, ref, WORKTREE, 'threeDot');
+    else await view.setComparison(repo, ref, other);
+  });
+
   cmd('commitCorner.compareSelectForCompare', async (node) => {
     if (!node) return;
     ctx.pendingCompare = { repoRoot: node.repoRoot, ref: node.ref || node.sha };

@@ -1006,6 +1006,7 @@ class GraphPanel {
         { label: '$(trash) Drop…', id: 'commitCorner.dropCommit' },
         { label: '$(compare-changes) Compare with Working Tree', id: 'commitCorner.compareWithWorkingTree' },
         { label: '$(git-compare) Compare with Current Branch', id: 'commitCorner.compareWithCurrent' },
+        { label: '$(git-compare) Compare with…', id: 'commitCorner.compareWith' },
         { label: '$(search) Bisect: This Is Good, HEAD Is Bad', id: 'commitCorner.bisectStart' },
         { label: '$(copy) Copy Message', id: 'commitCorner.copyMessage' },
         { label: '$(github) Open on GitHub', id: 'commitCorner.openCommitOnGitHub' },
@@ -1452,6 +1453,7 @@ function register(ctx) {
   delegate('commitCorner.graph.openOnGitHub', 'commitCorner.openCommitOnGitHub');
   delegate('commitCorner.graph.compareWithWorkingTree', 'commitCorner.compareWithWorkingTree');
   delegate('commitCorner.graph.compareWithCurrent', 'commitCorner.compareWithCurrent');
+  delegate('commitCorner.graph.compareWith', 'commitCorner.compareWith');
   delegate('commitCorner.graph.selectForCompare', 'commitCorner.compareSelectForCompare');
   delegate('commitCorner.graph.compareWithSelected', 'commitCorner.compareWithSelected');
   delegate('commitCorner.graph.refCheckout', 'commitCorner.checkout');
