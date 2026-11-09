@@ -755,4 +755,4 @@ function dirOf(p) {
   return i > 0 ? p.slice(0, i) : '';
 }
 
-module.exports = { register, resolveResources, openMergeEditor, hasConflictMarkers };
+module.exports = { register, resolveResources, openMergeEditor, hasConflictMarkers, openNestedRepository };

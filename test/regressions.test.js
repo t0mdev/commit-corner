@@ -2419,3 +2419,32 @@ test('staging thousands of listed untracked files by folder stages exactly those
   assert.equal(again.paths, listed);
   assert.deepEqual(again.excludes, []);
 });
+
+test('Open Repository works when git and node name the repository root differently (subst drive, macOS casing)', async (t) => {
+  const { r, repo } = await based(t);
+  r.git('init', '-q', path.join(r.dir, 'c1'));
+  const { RepositoryManager } = requireWithVscode('../src/vscode/model');
+  const { openNestedRepository } = require('../src/vscode/commands/scmCommands');
+  const manager = new RepositoryManager();
+  t.after(() => {
+    for (const x of manager.repositories) manager.closeRepository(x);
+    manager.dispose();
+  });
+  // git's root (Windows: "D:\real\repo" behind subst S:) is a path node cannot resolve to the
+  // folder you opened; the opened one (displayRoot) is the folder itself.
+  repo.displayRoot = r.dir;
+  repo.root = path.join(path.dirname(r.dir), 'as-git-names-it', path.basename(r.dir));
+  manager.repos.set(repo.root, repo);
+  await openNestedRepository(manager, repo, 'c1/');
+  const opened = manager.repositories.find((x) => x.root === path.join(r.dir, 'c1'));
+  assert.ok(opened, 'the nested repository opened');
+  assert.equal(manager.active, opened);
+  manager.repos.delete(repo.root);
+  // And one outside both roots is refused, before git runs there.
+  const outside = makeTempDir('cc-outside-');
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  execFileSync('git', ['init', '-q', outside]);
+  fs.symlinkSync(outside, path.join(r.dir, 'link'), 'dir');
+  await openNestedRepository(manager, repo, 'link/');
+  assert.ok(!manager.repositories.some((x) => x.root === fs.realpathSync(outside)), 'a link to a repository elsewhere is not opened');
+});
