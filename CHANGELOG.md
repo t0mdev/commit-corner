@@ -10,6 +10,9 @@
 - Staging, committing and other writes wait up to 5 seconds while another git process holds `index.lock`, for example an agent's commit running its hooks (before, about 1 second). The status bar's *git …* item says it is waiting for index.lock and can cancel it. A lock over 10 minutes old fails right away and names the file to delete (probably left behind by a git process that crashed).
 - **Compare with…** on a commit or a branch/tag badge in the graph (right-click, or the row's `…` menu) and on branches, tags and commits in the tree views: pick any branch, tag, commit or the working tree to compare it with. A branch/tag badge in the graph also has *Compare with Working Tree* now.
 - Fixed: closing the Repository Activity or Worktrees page while it was loading could log "Webview is disposed" errors.
+- Fixed on Windows: *Save Review to the Worktree* failed ("info/exclude changed while it was written"), so git saw the review file.
+- Fixed on Windows: the worktree open in this window was not recognised as such in the Worktrees view and its details (git writes its path `C:/…`, VS Code `c:\…`).
+- Fixed: a closed repository could keep a file watcher open, which on Windows kept its folder from being deleted.
 
 ## 1.6.0
 
