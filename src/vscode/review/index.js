@@ -932,9 +932,12 @@ async function excludeFile(repo, name) {
   const { O_WRONLY, O_APPEND, O_CREAT, O_NOFOLLOW } = fs.constants;
   const fh = await fs.promises.open(file, O_WRONLY | O_APPEND | O_CREAT | (O_NOFOLLOW || 0), 0o644);
   try {
-    // The file opened is the one checked (not a link put in its place since).
-    const [a, b] = [await fh.stat(), await fs.promises.lstat(file)];
-    if (!a.isFile() || a.ino !== b.ino || a.dev !== b.dev || (await fs.promises.realpath(info)) !== info) throw new Error('info/exclude changed while it was written');
+    // The file opened is the one checked (not a link put in its place since). File ids compared
+    // exactly (bigint: NTFS ids exceed a double); the device only where both stats know it (on
+    // Windows a stat by path says 0, one of an open file the volume's serial).
+    const [a, b] = [await fh.stat({ bigint: true }), await fs.promises.lstat(file, { bigint: true })];
+    const sameDevice = a.dev === b.dev || a.dev === 0n || b.dev === 0n;
+    if (!a.isFile() || a.ino !== b.ino || !sameDevice || (await fs.promises.realpath(info)) !== info) throw new Error('info/exclude changed while it was written');
     await fh.write(`${existing && !existing.endsWith('\n') ? '\n' : ''}${wanted.join('\n')}\n`);
   } finally {
     await fh.close();

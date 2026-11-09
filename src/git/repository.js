@@ -9,7 +9,7 @@ const { git, getVersion, versionAtLeast, GitError, ErrorCodes, getGitPath } = re
 const P = require('./parse');
 const { combineCommitChanges } = require('./multiCommit');
 const { BlobReader } = require('./blobReader');
-const { normalizePath } = require('./pathUtil');
+const { normalizePath, samePath } = require('./pathUtil');
 
 /** Special "refs" understood by show(): */
 const INDEX = ':'; // the index (stage 0)
@@ -954,7 +954,9 @@ class Repository extends EventEmitter {
    * @returns {Promise<Map<string, string>>}
    */
   async worktreeFileIds(worktreePath, paths) {
-    if (worktreePath !== this.root && !(await this.ownsWorktree(worktreePath))) throw new Error(`${worktreePath} is not a worktree of ${this.name}.`);
+    // (git lists "C:/…", the root is "c:\…" on Windows: compared as paths, not strings.)
+    const own = samePath(worktreePath, this.root);
+    if (!own && !(await this.ownsWorktree(worktreePath))) throw new Error(`${worktreePath} is not a worktree of ${this.name}.`);
     // Fingerprints by path, size, mtime and inode: an unchanged file is not hashed again (the
     // Worktrees view asks every 10 seconds).
     const cache = this.fileIdCache || (this.fileIdCache = new Map());
@@ -962,7 +964,6 @@ class Repository extends EventEmitter {
     if (cache.size > 60000) for (const k of [...cache.keys()].slice(0, cache.size - 50000)) cache.delete(k);
     const out = new Map();
     const todo = [];
-    const own = worktreePath === this.root;
     // At most 500 MB read per call (new files only: the rest come from the cache); beyond that
     // the files simply have no fingerprint this time (no mark), rather than a timeout for all.
     let budget = 500 * 1024 * 1024;
@@ -3110,7 +3111,8 @@ class Repository extends EventEmitter {
       const { stdout } = await this.exec(['log', '--no-walk=unsorted', `--format=${P.LOG_FORMAT}`, '--decorate=full', ...new Set(heads), '--'], { allowFailure: true });
       for (const c of P.parseLog(stdout)) commits.set(c.sha, c);
     }
-    const same = (a, b) => path.resolve(a) === path.resolve(b);
+    // git lists "C:/…", the root is "c:\…" (Windows), and casing may differ (Windows, macOS).
+    const same = (a, b) => samePath(a, b);
     // Branches without an upstream (an agent's, typically) are measured against where they started
     // (the branch they were created from), else your local default branch — as Changes vs Base.
     // Looked up once a minute (a poll every 10 seconds must not ask five times again).

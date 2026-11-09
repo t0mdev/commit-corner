@@ -77,8 +77,14 @@ test('askpass helper round-trips a prompt through the private socket', async (t)
     server.dispose();
     fs.rmSync(dir, { recursive: true, force: true });
   });
+  // Windows cannot start a shell script itself (git for Windows reads its "#!" line): the test
+  // runs the wrapper through git's own sh there.
+  const sh = process.platform === 'win32'
+    ? path.join(require('child_process').execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(), '..', '..', '..', 'usr', 'bin', 'sh.exe')
+    : undefined;
   const run = (prompt, env, script = server.script) => new Promise((resolve) => {
-    execFile(script, [prompt], { env: { ...process.env, ...env } }, (err, stdout) => resolve({ code: err ? err.code : 0, stdout }));
+    const [file, args] = sh ? [sh, [script, prompt]] : [script, [prompt]];
+    execFile(file, args, { env: { ...process.env, ...env } }, (err, stdout) => resolve({ code: err ? err.code : 0, stdout }));
   });
   const lease = server.lease({ helpersOff: true });
   assert.deepEqual(await run("Username for 'https://github.com': ", lease.env), { code: 0, stdout: 'octocat\n' });
@@ -96,7 +102,17 @@ test('askpass helper round-trips a prompt through the private socket', async (t)
   lease.release();
   assert.equal((await run("Username for 'https://github.com': ", lease.env)).code, 1);
   assert.equal(seen.length, 4);
-  assert.equal((fs.statSync(server.socketDir).mode & 0o777).toString(8), '700');
+  // (Windows: the socket is a named pipe, not in this folder, and modes do not apply.)
+  if (process.platform !== 'win32') assert.equal((fs.statSync(server.socketDir).mode & 0o777).toString(8), '700');
+  // And git itself asks through the wrapper (on Windows it reads the wrapper's "#!" line).
+  const asked = server.lease({});
+  t.after(() => asked.release());
+  const filled = await new Promise((resolve) => {
+    const child = execFile('git', ['-c', 'credential.helper=', 'credential', 'fill'], { env: { ...process.env, ...asked.env, GIT_TERMINAL_PROMPT: '0' } }, (err, stdout) => resolve({ err, stdout }));
+    child.stdin.end('protocol=https\nhost=example.com\n\n');
+  });
+  void filled; // (the password prompt is cancelled here, so git itself gives up after the username)
+  assert.ok(seen.includes("Username for 'https://example.com': "), `git's prompt reached the server: ${JSON.stringify(seen)}`);
 });
 
 test('GitHub web links for commits and pull requests', () => {

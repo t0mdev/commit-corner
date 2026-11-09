@@ -206,7 +206,9 @@ test('Changes vs Base in the Worktrees view: a file has a dot until opened, and 
   const provider = { refresh() {}, viewedOwners: new Map() };
   const sub = viewed.get().onDidChange((scope) => redrawn.push(provider.viewedOwners.get(scope)));
   t.after(() => sub.dispose());
-  const details = (await repo.getWorktreeDetails()).find((w) => w.path === fs.realpathSync(wtPath) || w.path === wtPath);
+  // (Compared as paths: git lists "C:/…" on Windows.)
+  const { samePath } = require('../src/git/pathUtil');
+  const details = (await repo.getWorktreeDetails()).find((w) => samePath(w.path, fs.realpathSync(wtPath)) || samePath(w.path, wtPath));
   const node = new WorktreeNode(repo, { ...details, isMain: false }, provider);
   const changes = (await node.getChildren()).find((c) => c.viewedScope);
   assert.ok(changes, 'a "Changes vs base" row');

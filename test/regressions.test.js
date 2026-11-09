@@ -355,13 +355,15 @@ test('commit --only commits just the selected files and keeps other staged chang
 test('a ref named like an option is never passed to git as an option', async (t) => {
   const { r, repo } = await setup(t);
   const sha = r.commit('init', { 'a.txt': '1\n' });
-  const victim = path.join(makeTempDir('cc-victim-'), 'important.txt');
-  t.after(() => fs.rmSync(path.dirname(victim), { recursive: true, force: true }));
-  fs.writeFileSync(victim, 'IMPORTANT DATA');
+  // A file git would overwrite if the tag reached it as "--output=<file>" (a path relative to
+  // the repository: an absolute one is no valid ref name on Windows, "c:\…").
+  const victimName = 'keep/important.txt';
+  const victim = path.join(r.dir, 'keep', 'important.txt');
+  r.write(victimName, 'IMPORTANT DATA');
   // Such a tag arrives with an ordinary fetch; create it directly here.
-  r.git('update-ref', `refs/tags/--output=${victim}`, sha);
+  r.git('update-ref', `refs/tags/--output=${victimName}`, sha);
   const tag = (await repo.getRefs()).find((x) => x.type === 'tag');
-  assert.equal(tag.rev, `refs/tags/--output=${victim}`, 'the full name is used for git');
+  assert.equal(tag.rev, `refs/tags/--output=${victimName}`, 'the full name is used for git');
   await repo.diffFiles(tag.rev);
   await assert.rejects(repo.diffFiles(tag.name), /looks like an option/);
   await assert.rejects(repo.log({ revs: [tag.name] }), /looks like an option/);
@@ -1348,7 +1350,10 @@ test('fetched pull requests of remote "up" are not mixed with those of "up/strea
   r.commit('base', { 'a.txt': '1\n' });
   const sha = r.git('rev-parse', 'HEAD');
   r.git('remote', 'add', 'up', r.dir);
-  r.git('remote', 'add', 'up/stream', r.dir);
+  // (git >= 2.4x refuses "remote add" for a name under an existing one; such remotes still come
+  // from older clones or the config itself.)
+  r.git('config', 'remote.up/stream.url', r.dir);
+  r.git('config', 'remote.up/stream.fetch', '+refs/heads/*:refs/remotes/up/stream/*');
   r.git('update-ref', 'refs/commit-corner/pr/up/1/head', sha);
   r.git('update-ref', 'refs/commit-corner/pr/up/stream/5/head', sha);
   assert.deepEqual([...(await repo.getFetchedPullRequests('up')).keys()], [1]);

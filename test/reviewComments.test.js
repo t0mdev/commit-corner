@@ -469,7 +469,8 @@ test('comments come back in editors that were open before the repositories were 
   manager.getRepository = () => repo;
   manager.getRepositoryForUri = () => repo;
   opened.fire(repo);
-  await new Promise((res) => setTimeout(res, 50));
+  // (Restored asynchronously: waited for, not a fixed pause — a loaded machine takes longer.)
+  for (const end = Date.now() + 10000; controller.threads.length < 1 && Date.now() < end;) await new Promise((res) => setTimeout(res, 20));
   assert.equal(controller.threads.length, 1);
   assert.equal(controller.threads[0].range.start.line, 1);
 });

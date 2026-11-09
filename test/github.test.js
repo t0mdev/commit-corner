@@ -186,7 +186,10 @@ test('signed in, git keeps the token from its credential helpers (github.com onl
     fs.rmSync(dir, { recursive: true, force: true });
   });
   // Without the user's and the system's git config, whose helpers would be listed too.
-  exec.configure({ env: () => ({ env: { GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' }, release() {}, config: [['credential.https://github.com.helper', '']] }) });
+  // (An empty file, not os.devNull: git for Windows cannot read "\\\\.\\nul" as a config file.)
+  const noConfig = path.join(dir, 'empty.gitconfig');
+  fs.writeFileSync(noConfig, '');
+  exec.configure({ env: () => ({ env: { GIT_CONFIG_GLOBAL: noConfig, GIT_CONFIG_NOSYSTEM: '1' }, release() {}, config: [['credential.https://github.com.helper', '']] }) });
   const { stdout } = await exec.git(['config', '--get-all', 'credential.https://github.com.helper'], { cwd: dir, network: true, allowFailure: true });
   assert.equal(stdout, '\n', 'an empty helper (which resets the list) for github.com');
 });

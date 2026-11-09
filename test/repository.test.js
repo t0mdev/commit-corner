@@ -80,7 +80,8 @@ test('writeIndexContent stages arbitrary content, keeping the worktree', async (
   await repo.writeIndexContent('f.txt', '1\nTWO\n3\n');
   assert.equal(await repo.showText(INDEX, 'f.txt'), '1\nTWO\n3\n');
   assert.equal(r.read('f.txt'), '1\nTWO\n3\nFOUR\n');
-  // new file, executable bit preserved
+  // new file, executable bit preserved (Windows has none: git records 100644 there, as for git add)
+  if (process.platform === 'win32') return;
   r.write('run.sh', '#!/bin/sh\n');
   fs.chmodSync(path.join(r.dir, 'run.sh'), 0o755);
   await repo.writeIndexContent('run.sh', '#!/bin/sh\n');

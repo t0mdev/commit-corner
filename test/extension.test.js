@@ -630,17 +630,23 @@ test('tree views show commits at once and fill in their stats afterwards', async
   const local = roots.find((n) => n.getTreeItem().label === 'Local');
   const branch = (await local.getChildren()).find((b) => b.ref === 'main');
   repo().statsCache = new Map();
-  const changed = new Promise((resolve) => {
-    const sub = tree.provider.onDidChangeTreeData((nodes) => {
+  let sub;
+  const changed = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('no stats within 30 s')), 30000);
+    sub = tree.provider.onDidChangeTreeData((nodes) => {
       if (Array.isArray(nodes) && nodes.some((n) => n.commit && n.commit.stats)) {
-        sub.dispose();
+        clearTimeout(timer);
         resolve(nodes);
+      } else if (!Array.isArray(nodes)) {
+        // The whole view refreshed (a state change on a slow machine): its stats were abandoned,
+        // and VS Code asks for the rows again, which fills them in anew.
+        tree.provider.getChildren(branch).catch(reject);
       }
     });
   });
   const commits = await tree.provider.getChildren(branch);
   assert.ok(commits.length > 0);
-  const updated = await changed;
+  const updated = await changed.finally(() => sub.dispose());
   assert.ok(updated.every((n) => n.commit.stats));
   assert.match(updated[0].getTreeItem().description, /\+\d+ −\d+|no changes/);
 });
