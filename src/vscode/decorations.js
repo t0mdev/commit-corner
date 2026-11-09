@@ -26,6 +26,8 @@ class FileDecorations {
     this.onDidChangeFileDecorations = this._onDidChange.event;
     /** repo root -> Map(absolute path -> {letter, tooltip}) */
     this.byRepo = new Map();
+    /** repo root -> the status output the decorations were made from */
+    this.lastOutput = new Map();
     /** repo root -> {files:Set<string>, dirs:string[]} of ignored paths (absolute) */
     this.ignoredByRepo = new Map();
     this.disposables = [
@@ -63,8 +65,13 @@ class FileDecorations {
   }
 
   update(repo, force) {
-    const next = new Map();
     const s = repo.state;
+    // Nothing git lists changed (files rewritten, refs moved): the decorations stand as they are.
+    // Rebuilding them costs a map of every changed path (100,000 agents' files: a quarter second).
+    const key = s && s.statusOutput !== undefined && this.enabled() ? s.statusOutput : undefined;
+    if (!force && key !== undefined && this.lastOutput.get(repo.root) === key) return;
+    this.lastOutput.set(repo.root, key);
+    const next = new Map();
     if (s && this.enabled()) {
       const set = (rel, letter, tooltip) => next.set(repo.absolute(rel), { letter, tooltip });
       for (const e of s.untracked) set(e.path, 'U', 'Untracked');

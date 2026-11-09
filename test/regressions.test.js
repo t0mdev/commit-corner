@@ -2340,3 +2340,27 @@ test('tracksFilesIn() matches any casing (a case-insensitive disk lists the fold
   r.commit('gen', { 'Gen/kept.txt': 'k\n' });
   assert.equal(await repo.tracksFilesIn('gen/'), true);
 });
+
+test('the check after git add sees what the add left, not a stage or unstage of ours queued right behind it', async (t) => {
+  const { r, repo } = await based(t);
+  r.write('n.txt', 'n\n');
+  await repo.refreshState();
+  // Not awaited in between: the unstage is queued while the add runs.
+  const staging = repo.stage(['n.txt']);
+  const unstaging = repo.unstage(['n.txt']);
+  await staging; // no "was not staged" for a file that was staged (and then unstaged on purpose)
+  await unstaging;
+  assert.equal(r.git('status', '--porcelain', '--', 'n.txt'), '?? n.txt');
+});
+
+test('past the status limit, only content edits of listed untracked files skip the refresh', () => {
+  const { untrackedEditOverLimit } = requireWithVscode('../src/vscode/model');
+  const many = Array.from({ length: 10001 }, (_, k) => ({ path: `.local-work/c/f${k}` }));
+  const repo = (untracked) => ({
+    state: { conflicts: [], staged: [], unstaged: [], untracked },
+    relative: (p) => path.relative('/repo', p).split(path.sep).join('/'),
+  });
+  assert.equal(untrackedEditOverLimit(repo(many), '/repo/.local-work/c/f5'), true);
+  assert.equal(untrackedEditOverLimit(repo(many), '/repo/src/tracked.js'), false, 'a tracked file still refreshes');
+  assert.equal(untrackedEditOverLimit(repo(many.slice(0, 10)), '/repo/.local-work/c/f5'), false, 'under the limit: dots and counts follow content');
+});

@@ -112,12 +112,18 @@ class ScmProvider {
       budget -= n;
       return n < list.length ? list.slice(0, n) : list;
     };
-    this.merge.resourceStates = take(state.conflicts).map((e) => res(e, 'merge'));
-    this.staged.resourceStates = take(state.staged).map((e) => res(e, 'staged'));
-    this.unstaged.resourceStates = take(state.unstaged).map((e) => res(e, 'unstaged'));
-    this.untracked.resourceStates = take(state.untracked).map((e) => res(e, 'untracked'));
-    this.untrackedSet = new Set(state.untracked.map((e) => e.path));
-    if (budget < 0 || (limit > 0 && total > limit)) {
+    // The same status as last time (files rewritten, refs moved): the lists stand as they are.
+    const same = state.statusOutput !== undefined && state.statusOutput === this.lastOutput && limit === this.lastLimit;
+    if (!same) {
+      this.merge.resourceStates = take(state.conflicts).map((e) => res(e, 'merge'));
+      this.staged.resourceStates = take(state.staged).map((e) => res(e, 'staged'));
+      this.unstaged.resourceStates = take(state.unstaged).map((e) => res(e, 'unstaged'));
+      this.untracked.resourceStates = take(state.untracked).map((e) => res(e, 'untracked'));
+      this.untrackedSet = new Set(state.untracked.map((e) => e.path));
+      this.lastOutput = state.statusOutput;
+      this.lastLimit = limit;
+    }
+    if (limit > 0 && total > limit) {
       if (!this.warnedLimit) {
         this.warnedLimit = true;
         this.warnLimit(state, total, limit).catch((e) => log().warn(`Status limit warning: ${e.message}`));

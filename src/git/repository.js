@@ -158,14 +158,19 @@ class Repository extends EventEmitter {
 
   /** Run a git command that modifies the repository. Serialized; retries briefly on index.lock. */
   run(args, opts = {}) {
+    // opts.after(result): reads that must see exactly what this write left (still in the queue:
+    // no write of ours lands in between).
+    const { after, ...rest } = opts;
     const task = this.queue.then(async () => {
       // Expose what runs (and a way to stop it) so a hook or pinentry waiting forever is visible.
       const controller = new AbortController();
-      if (opts.signal) opts.signal.addEventListener('abort', () => controller.abort(), { once: true });
+      if (rest.signal) rest.signal.addEventListener('abort', () => controller.abort(), { once: true });
       this.running = { args, started: Date.now(), cancel: () => controller.abort() };
       this.emit('busy', this.running);
       try {
-        return await this.runAttempts(args, { ...opts, signal: controller.signal });
+        const result = await this.runAttempts(args, { ...rest, signal: controller.signal });
+        if (after) await after(result);
+        return result;
       } finally {
         this.running = undefined;
         this.emit('busy', undefined);
@@ -280,6 +285,11 @@ class Repository extends EventEmitter {
       nested: [],
       operation,
       stashCount,
+      /**
+       * git's own output, when it alone makes the lists ("all" untracked mode): views compare it to
+       * skip rebuilding what did not change (an agent rewriting files git already lists).
+       */
+      statusOutput: (opts.untracked || this.untrackedMode || 'all') === 'all' ? stdout : undefined,
     };
     const ignored = [];
     for (const e of status.entries) {
@@ -1543,11 +1553,18 @@ class Repository extends EventEmitter {
       }
     }
     if (folders.length) gitlinksBefore = await this.gitlinksIn(folders); // submodules already there
+    // What git left out, and gitlinks it made, read right after the add in the same queue slot
+    // (a stage or unstage of ours queued meanwhile must not change the answer).
+    const found = { missing: [], links: [] };
+    const after = async () => {
+      found.missing = await this.missingFromIndex(out);
+      if (folders.length) found.links = [...(await this.gitlinksIn(folders))].filter((x) => !gitlinksBefore.has(x));
+    };
     // An empty list must never become "git add -A" (everything).
     let result;
     if (out.length) {
       try {
-        result = await this.runWithPaths(['add', '-A'], out, { excludes });
+        result = await this.runWithPaths(['add', '-A'], out, { excludes, after });
       } catch (e) {
         // A repository without a commit made in a folder added whole since it was looked at:
         // git refuses everything ("does not have a commit checked out"). Without it, once more.
@@ -1555,13 +1572,17 @@ class Repository extends EventEmitter {
         if (!m) throw e;
         const dir = m[1].endsWith('/') ? m[1] : `${m[1]}/`;
         skipped.push({ path: dir, nested: dir });
-        result = await this.runWithPaths(['add', '-A'], out, { excludes: [...excludes, `:(exclude,literal)${dir.slice(0, -1)}`] });
+        result = await this.runWithPaths(['add', '-A'], out, { excludes: [...excludes, `:(exclude,literal)${dir.slice(0, -1)}`], after });
       }
     }
     // A repository created in a folder added whole since it was looked at went in as a gitlink
     // (git add takes one with a commit as a submodule): out again, and said.
-    if (folders.length) skipped.push(...(await this.unstageNewGitlinks(folders, gitlinksBefore)));
-    await this.checkStaged(out, skipped);
+    // -f: a gitlink just added differs from HEAD and the folder; --cached keeps the folder as is.
+    if (found.links.length) {
+      await this.runWithPaths(['rm', '--cached', '-q', '-f'], found.links);
+      skipped.push(...found.links.map((x) => ({ path: `${x}/`, nested: `${x}/` })));
+    }
+    this.reportNotStaged(found.missing, skipped);
     return result;
   }
 
@@ -1583,16 +1604,6 @@ class Repository extends EventEmitter {
     return new Set(many ? links.filter((x) => folders.some((f) => x.startsWith(f))) : links);
   }
 
-  /** Remove gitlinks `git add` just made under `folders` (not in `before`); returns them as skipped. */
-  async unstageNewGitlinks(folders, before) {
-    const now = await this.gitlinksIn(folders);
-    const added = [...now].filter((x) => !(before && before.has(x)));
-    if (!added.length) return [];
-    // -f: a gitlink just added differs from HEAD and the folder; --cached keeps the folder as is.
-    await this.runWithPaths(['rm', '--cached', '-q', '-f'], added);
-    return added.map((x) => ({ path: `${x}/`, nested: `${x}/` }));
-  }
-
   /**
    * After `git add`: fail, naming the files, when some of them are still not in the index (or a
    * picked folder was a repository of its own). git leaves a file inside a repository nested in
@@ -1601,32 +1612,40 @@ class Repository extends EventEmitter {
    * @param {string[]} paths what was added @param {{path:string, nested:string, all?:string[]}[]} [skipped]
    */
   async checkStaged(paths, skipped = []) {
+    this.reportNotStaged(await this.missingFromIndex(paths), skipped);
+  }
+
+  /** Of `paths` just added, the files still not in the index (see checkStaged). */
+  async missingFromIndex(paths) {
     const files = paths.filter((p) => !p.endsWith('/'));
-    let missing = [];
-    if (files.length) {
-      // ls-files has no --pathspec-from-file: with very many paths, list the whole index.
-      const many = tooLongForCommandLine(files);
-      const { stdout } = await this.exec(['ls-files', '-z', ...(many ? [] : ['--', ...files.map(lit)])]);
-      const listed = stdout.split('\0');
-      const inIndex = new Set(listed);
-      // Only those not in the index are looked at on disk: deleted (staged as a deletion) or a
-      // folder (a symlink to one is a file to git) is not missing.
-      missing = files.filter((p) => {
-        if (inIndex.has(p)) return false;
-        try {
-          return !fs.lstatSync(this.absolute(p)).isDirectory();
-        } catch {
-          return false;
-        }
-      });
-      if (missing.length && isTrue((await this.exec(['config', '--type=bool', '--get', 'core.ignorecase'], { allowFailure: true })).stdout)) {
-        // Case-insensitive: git files a new "src/new.js" under the folder's casing in the index
-        // ("Src/new.js") — staged all the same. (Listed in full: the pathspec is case-exact.)
-        const all = many ? listed : (await this.exec(['ls-files', '-z'])).stdout.split('\0');
-        const lower = new Set(all.map((x) => x.toLowerCase()));
-        missing = missing.filter((p) => !lower.has(p.toLowerCase()));
+    if (!files.length) return [];
+    // ls-files has no --pathspec-from-file: with very many paths, list the whole index.
+    const many = tooLongForCommandLine(files);
+    const { stdout } = await this.exec(['ls-files', '-z', ...(many ? [] : ['--', ...files.map(lit)])]);
+    const listed = stdout.split('\0');
+    const inIndex = new Set(listed);
+    // Only those not in the index are looked at on disk: deleted (staged as a deletion) or a
+    // folder (a symlink to one is a file to git) is not missing.
+    let missing = files.filter((p) => {
+      if (inIndex.has(p)) return false;
+      try {
+        return !fs.lstatSync(this.absolute(p)).isDirectory();
+      } catch {
+        return false;
       }
+    });
+    if (missing.length && isTrue((await this.exec(['config', '--type=bool', '--get', 'core.ignorecase'], { allowFailure: true })).stdout)) {
+      // Case-insensitive: git files a new "src/new.js" under the folder's casing in the index
+      // ("Src/new.js") — staged all the same. (Listed in full: the pathspec is case-exact.)
+      const all = many ? listed : (await this.exec(['ls-files', '-z'])).stdout.split('\0');
+      const lower = new Set(all.map((x) => x.toLowerCase()));
+      missing = missing.filter((p) => !lower.has(p.toLowerCase()));
     }
+    return missing;
+  }
+
+  /** Throw the NotStaged error for files git left out and folders that were repositories. */
+  reportNotStaged(missing, skipped = []) {
     if (!missing.length && !skipped.length) return;
     const memo = new Map();
     const nestedOf = new Map(missing.map((p) => {
@@ -1634,8 +1653,7 @@ class Repository extends EventEmitter {
       return [p, n ? [n] : []];
     }));
     for (const x of skipped) nestedOf.set(x.path, x.all || [x.nested]);
-    const all = [...skipped.map((x) => x.path), ...missing];
-    throw notStagedError(all, nestedOf);
+    throw notStagedError([...skipped.map((x) => x.path), ...missing], nestedOf);
   }
 
   /**

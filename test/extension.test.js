@@ -1421,6 +1421,29 @@ test('staging an Untracked group of thousands of files goes folder by folder, ne
   }
 });
 
+test('a refresh that finds the same status keeps Source Control\'s lists and the decorations as they are', async () => {
+  const main = repo();
+  const provider = api.scm.get(main);
+  r.write('same-status.txt', '1\n');
+  try {
+    await api.manager.refresh(main);
+    await provider.update();
+    const before = provider.untracked.resourceStates;
+    r.write('same-status.txt', '2\n'); // content only: git's status is the same
+    await api.manager.refresh(main);
+    await provider.update();
+    assert.equal(provider.untracked.resourceStates, before, 'not rebuilt');
+    r.write('other-new.txt', 'o\n');
+    await api.manager.refresh(main);
+    await provider.update();
+    assert.notEqual(provider.untracked.resourceStates, before, 'rebuilt when the status changes');
+  } finally {
+    fs.rmSync(path.join(r.dir, 'same-status.txt'), { force: true });
+    fs.rmSync(path.join(r.dir, 'other-new.txt'), { force: true });
+    await api.manager.refresh(main);
+  }
+});
+
 test('no command reported an unexpected error', () => {
   const errors = mock.ui.messages.filter((m) => m.level === 'error');
   assert.deepEqual(errors, []);

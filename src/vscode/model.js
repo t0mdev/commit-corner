@@ -407,6 +407,10 @@ class RepositoryManager {
         return;
       }
       if (outsideStatus(repo, uri.fsPath)) return;
+      // Past the status limit (agents' copies flooding the list): an untracked file git already
+      // lists that only changes its content changes nothing shown (no line counts or viewed dots
+      // are kept for that many files), so it costs no git status.
+      if (changed && untrackedEditOverLimit(repo, uri.fsPath)) return;
       refresh();
     };
     watcher.onDidChange((uri) => onFile(uri, true));
@@ -666,6 +670,24 @@ function isInside(inner, outer) {
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
+/** state -> Set of its untracked paths (built once per state, only when needed). */
+const untrackedSets = new WeakMap();
+
+/**
+ * Whether `fsPath` is an untracked file the state already lists while the repository is over
+ * `commitCorner.statusLimit`: then its content changing cannot change anything shown.
+ */
+function untrackedEditOverLimit(repo, fsPath) {
+  const s = repo.state;
+  if (!s) return false;
+  const limit = config().get('statusLimit', 10000);
+  const total = s.conflicts.length + s.staged.length + s.unstaged.length + s.untracked.length;
+  if (!(limit > 0 && total > limit)) return false;
+  let set = untrackedSets.get(s);
+  if (!set) untrackedSets.set(s, (set = new Set(s.untracked.map((e) => e.path))));
+  return set.has(repo.relative(fsPath));
+}
+
 /**
  * A file whose changes cannot change the repository's status: inside a repository nested in it
  * (an agent's worktree under .claude/worktrees) or inside an ignored folder (a build output).
@@ -677,4 +699,4 @@ function outsideStatus(repo, fsPath) {
   return repo.ignored.some((e) => e.path.endsWith('/') && rel.startsWith(e.path));
 }
 
-module.exports = { outsideStatus, RepositoryManager, isStrictAncestor, refreshDelay };
+module.exports = { outsideStatus, untrackedEditOverLimit, RepositoryManager, isStrictAncestor, refreshDelay };
