@@ -25,8 +25,13 @@ function requireWithVscode(mod) {
 
 async function setup(t) {
   const r = createRepo();
-  t.after(() => r.cleanup());
-  return { r, repo: await Repository.open(r.dir) };
+  const repo = await Repository.open(r.dir);
+  // Its git processes stop before its folder goes (Windows cannot remove a folder in use).
+  t.after(() => {
+    repo.dispose();
+    return r.cleanup();
+  });
+  return { r, repo };
 }
 
 /** A bare "origin" plus a second clone that can push to it (the "other developer"). */
@@ -160,7 +165,7 @@ test('paths containing [ ] are taken literally, not as globs', async (t) => {
   assert.deepEqual(s.staged.map((e) => e.path), ['pages/[id].tsx']);
 });
 
-test('a workspace opened through a symlink maps paths onto the repository', async (t) => {
+test('a workspace opened through a symlink maps paths onto the repository', { skip: process.platform === 'win32' && 'symbolic links need privileges on Windows' }, async (t) => {
   const { r } = await setup(t);
   r.commit('init', { 'src/a.txt': '1\n' });
   const linkParent = makeTempDir('cc-link-');
@@ -556,7 +561,7 @@ test('option-like names are deleted as names', async (t) => {
   assert.equal(r.git('for-each-ref', 'refs/tags/--x', 'refs/heads/--y'), '');
 });
 
-test('index reads of a path that looks like a stage spec ("1:foo")', async (t) => {
+test('index reads of a path that looks like a stage spec ("1:foo")', { skip: process.platform === 'win32' && 'Windows does not allow ":" in file names' }, async (t) => {
   const { r, repo } = await setup(t);
   r.commit('init', { '1:foo': 'colon\n', foo: 'plain\n' });
   assert.equal(await repo.showText(INDEX, '1:foo'), 'colon\n');
@@ -1662,7 +1667,6 @@ test('worktree polls share one status per worktree for a few seconds', async (t)
 
 test('a SHA-256 repository: the first commit\'s files, a combined diff over it, untracked stash files', async (t) => {
   const dir = makeTempDir('cc-sha256-');
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const g = (...a) => execFileSync('git', a, { cwd: dir, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'T', GIT_AUTHOR_EMAIL: 't@x', GIT_COMMITTER_NAME: 'T', GIT_COMMITTER_EMAIL: 't@x' } }).trim();
   g('init', '-q', '--object-format=sha256', '-b', 'main');
   fs.writeFileSync(path.join(dir, 'a.txt'), '1\n');
@@ -1671,7 +1675,11 @@ test('a SHA-256 repository: the first commit\'s files, a combined diff over it, 
   fs.writeFileSync(path.join(dir, 'a.txt'), '2\n');
   g('commit', '-q', '-am', 'second');
   const repo = await Repository.open(dir);
-  t.after(() => repo.dispose());
+  // The repository's git processes stop before its folder goes (Windows: a folder in use stays).
+  t.after(() => {
+    repo.dispose();
+    return fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+  });
   assert.equal(repo.objectFormat, 'sha256');
   const root = g('rev-list', '--max-parents=0', 'HEAD');
   assert.equal(root.length, 64);

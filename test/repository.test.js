@@ -11,8 +11,12 @@ const { parseTodo } = require('../src/git/rebaseTodo');
 
 async function setup(t) {
   const r = createRepo();
-  t.after(() => r.cleanup());
   const repo = await Repository.open(r.dir);
+  // Its git processes stop before its folder goes (Windows cannot remove a folder in use).
+  t.after(() => {
+    repo.dispose();
+    return r.cleanup();
+  });
   return { r, repo };
 }
 

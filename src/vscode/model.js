@@ -355,6 +355,10 @@ class RepositoryManager {
 
   watch(repo) {
     const disposables = [];
+    // Closed: no watcher starts any more (a ref folder's callback can still arrive; one started
+    // then would never be closed and, on Windows, keep the repository's folder in use).
+    let closed = false;
+    disposables.push({ dispose: () => (closed = true) });
     // Debounce grows with how long status takes, so a huge working tree under a busy build
     // is not re-scanned back to back.
     let timer;
@@ -429,6 +433,7 @@ class RepositoryManager {
     // HEAD, index, refs, in-progress operations. These live in the git dir,
     // which can be outside the workspace for linked worktrees.
     const watchDir = (dir, recursive) => {
+      if (closed) return;
       try {
         const w = fs.watch(dir, { recursive, persistent: false }, (_event, file) => {
           if (file && IGNORED_GIT_FILES.test(String(file))) return;
@@ -449,7 +454,7 @@ class RepositoryManager {
     // appear. (Not refs/commit-corner/pr/*, which can hold thousands of folders.)
     const watchedDirs = new Set();
     const watchTree = (dir) => {
-      if (watchedDirs.has(dir) || watchedDirs.size > 2000) return;
+      if (closed || watchedDirs.has(dir) || watchedDirs.size > 2000) return;
       let entries;
       try {
         entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -459,7 +464,7 @@ class RepositoryManager {
       watchedDirs.add(dir);
       try {
         const w = fs.watch(dir, { persistent: false }, (_event, file) => {
-          if (file && IGNORED_GIT_FILES.test(String(file))) return;
+          if (closed || (file && IGNORED_GIT_FILES.test(String(file)))) return;
           if (file) {
             const sub = path.join(dir, String(file));
             fs.stat(sub, (err, st) => {

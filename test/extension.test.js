@@ -1223,7 +1223,9 @@ const shownSince = (from) => mock.ui.messages.slice(from);
 async function cleanAgentCopies(main) {
   for (const x of api.manager.repositories) if (x !== main) api.manager.closeRepository(x);
   api.manager.setActive(main);
-  fs.rmSync(path.join(r.dir, '.local-work'), { recursive: true, force: true });
+  // On Windows a git process just started there (the closed repository's last look) keeps the
+  // folder in use until it exits: retry without blocking, so it can.
+  await fs.promises.rm(path.join(r.dir, '.local-work'), { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   await api.manager.refresh(main);
 }
 
@@ -1242,8 +1244,9 @@ test('a file git leaves out when staging (in a repository nested since it was li
     assert.ok(said.some((m) => m.level === 'warning' && /^"\.local-work\/c1\/new\.txt" was not staged: it is in "\.local-work\/c1\/", a separate Git repository/.test(m.msg)), JSON.stringify(said));
     assert.ok(!said.some((m) => m.level === 'error'), 'a warning, not a failure');
     assert.equal(r.git('diff', '--cached', '--name-only'), '');
+    // (Its first refresh comes before it is shown: slow on Windows.)
     const nested = await until(() => api.manager.repositories.find((x) => x.root === nestedRoot), 'the nested repository opened');
-    assert.equal(api.manager.active, nested, 'and shown');
+    await until(() => api.manager.active === nested, 'it shown');
     await until(() => mock.executed.some((c) => c.id === 'workbench.view.scm'), 'Source Control shown');
   } finally {
     await cleanAgentCopies(main);

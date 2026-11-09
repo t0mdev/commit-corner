@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { normalizePath } = require('../../src/git/pathUtil');
 
 /** Isolated git environment: no user/system config leaks into tests. */
 const ENV = {
@@ -15,8 +16,9 @@ const ENV = {
   GIT_COMMITTER_EMAIL: 'test@example.com',
 };
 
+/** A new temporary folder, its path written as the extension writes paths (Windows: "c:\\…"). */
 function makeTempDir(prefix = 'cc-test-') {
-  return fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  return normalizePath(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix))));
 }
 
 /**
@@ -57,9 +59,14 @@ function createRepo() {
       });
       return run('rev-parse', 'HEAD');
     },
+    /**
+     * Remove the repository and its home. Not blocking, with retries: on Windows a git process
+     * still running there (a repository's batch reader stopping) keeps the folder in use until it
+     * exits, and a blocking retry would keep it from ever being told to.
+     */
     cleanup() {
-      fs.rmSync(dir, { recursive: true, force: true });
-      fs.rmSync(home, { recursive: true, force: true });
+      const rm = (p) => fs.promises.rm(p, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+      return Promise.all([rm(dir), rm(home)]);
     },
   };
   return api;
