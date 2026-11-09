@@ -176,14 +176,21 @@ class Repository extends EventEmitter {
     return task.finally(() => this.emit('didRun', args));
   }
 
-  /** Run a write, retrying briefly while another git process holds index.lock. */
+  /**
+   * Run a write, retrying while another git process holds index.lock: up to about 5 seconds (an
+   * agent's `git commit` keeps it while its hooks run), but not for a lock left behind by a git
+   * process that crashed long ago.
+   */
   async runAttempts(args, opts) {
+    let waited = 0;
     for (let attempt = 0; ; attempt++) {
       try {
         return await this.exec(args, { ...opts, writes: true });
       } catch (e) {
-        if (e instanceof GitError && e.code === ErrorCodes.IndexLocked && attempt < 4) {
-          await delay(100 * (attempt + 1));
+        if (e instanceof GitError && e.code === ErrorCodes.IndexLocked && waited < LOCK_WAIT_MS && !(opts.signal && opts.signal.aborted) && !staleLock(e.stderr, attempt)) {
+          const ms = Math.min(1000, 100 * 2 ** attempt);
+          waited += ms;
+          await delay(ms);
           continue;
         }
         throw e;
@@ -1493,7 +1500,54 @@ class Repository extends EventEmitter {
     }
     // An empty list must never become "git add -A" (everything).
     if (!out.length) return undefined;
-    return this.runWithPaths(['add', '-A'], out);
+    const result = await this.runWithPaths(['add', '-A'], out);
+    await this.checkStaged(out);
+    return result;
+  }
+
+  /**
+   * After `git add`: fail, naming the files, when some of them are still not in the index. git
+   * leaves a file inside a repository nested in this one out without a word (exit 0): an agent's
+   * clone or worktree that got its .git after the status listed its files one by one.
+   */
+  async checkStaged(paths) {
+    const files = paths.filter((p) => {
+      if (p.endsWith('/')) return false;
+      try {
+        return !fs.lstatSync(this.absolute(p)).isDirectory();
+      } catch {
+        return false; // deleted: staged as a deletion, not looked for in the index
+      }
+    });
+    if (!files.length) return;
+    // ls-files has no --pathspec-from-file: with very many paths, list the whole index.
+    const many = tooLongForCommandLine(files);
+    const { stdout } = await this.exec(['ls-files', '-z', ...(many ? [] : ['--', ...files.map(lit)])]);
+    const inIndex = new Set(stdout.split('\0'));
+    const missing = files.filter((p) => !inIndex.has(p));
+    if (!missing.length) return;
+    const nested = [...new Set(missing.map((p) => this.nestedRepositoryOf(p)).filter(Boolean))];
+    const what = missing.length === 1 ? `"${missing[0]}" was` : `${missing.length} files were`;
+    const err = new Error(nested.length
+      ? `${what} not staged: inside ${nested.map((n) => `"${n}"`).join(', ')}, a repository of its own (an agent's clone or worktree?). git leaves files of a repository nested in this one out without saying so. Stage them in that repository, or exclude the folder from this one.`
+      : `${what} not staged: git left ${missing.length === 1 ? 'it' : 'them'} out without saying why.`);
+    err.code = 'NotStaged';
+    err.paths = missing;
+    err.nested = nested;
+    throw err;
+  }
+
+  /**
+   * The repository nested in this one that holds `relPath` ("dir/"), looked up on disk now:
+   * the nearest folder above it, below the root, with a .git of its own.
+   */
+  nestedRepositoryOf(relPath) {
+    const parts = relPath.split('/');
+    for (let i = parts.length - 1; i > 0; i--) {
+      const dir = parts.slice(0, i).join('/');
+      if (fs.existsSync(path.join(this.absolute(dir), '.git'))) return `${dir}/`;
+    }
+    return undefined;
   }
 
   /** Stage every change to tracked files (the whole "Changes" group). */
@@ -3035,27 +3089,18 @@ class Repository extends EventEmitter {
    * regular file) is refused, like git ≥ 2.32 does: a cloned repository could otherwise point it
    * at a file outside the repository (~/.bashrc). Patterns are one line.
    */
-  async ignore(pattern) {
-    if (typeof pattern !== 'string' || !pattern || /[\u0000-\u001f\u007f]/.test(pattern)) throw new Error('A .gitignore pattern must be a single line.');
-    const file = path.join(this.root, '.gitignore');
-    let existing = '';
-    try {
-      const st = await fs.promises.lstat(file);
-      if (!st.isFile()) throw new Error('.gitignore is a symbolic link or not a regular file; edit it by hand.');
-      existing = await fs.promises.readFile(file, 'utf8');
-    } catch (e) {
-      if (e.code !== 'ENOENT') throw e;
-    }
-    if (existing.split(/\r?\n/).includes(pattern)) return;
-    const sep = existing && !existing.endsWith('\n') ? '\n' : '';
-    // O_NOFOLLOW: never write through a symlink created after the check.
-    const { O_WRONLY, O_APPEND, O_CREAT, O_NOFOLLOW } = fs.constants;
-    const handle = await fs.promises.open(file, O_WRONLY | O_APPEND | O_CREAT | (O_NOFOLLOW || 0), 0o644);
-    try {
-      await handle.write(`${sep}${pattern}\n`);
-    } finally {
-      await handle.close();
-    }
+  ignore(pattern) {
+    return appendPattern(path.join(this.root, '.gitignore'), pattern, '.gitignore');
+  }
+
+  /**
+   * Append a pattern to .git/info/exclude: ignored in this clone and its worktrees only, never
+   * committed (a folder of an agent's copies that is nobody else's business).
+   */
+  async excludeLocally(pattern) {
+    const info = path.join(this.commonDir, 'info');
+    await fs.promises.mkdir(info, { recursive: true });
+    return appendPattern(path.join(info, 'exclude'), pattern, '.git/info/exclude');
   }
 
   /** Map a path under the display (symlinked) root onto the canonical root. */
@@ -3300,6 +3345,33 @@ async function mapLimit(items, limit, fn) {
 }
 
 /**
+ * Append a one-line pattern to an ignore file (.gitignore, info/exclude), once. A file that is a
+ * symlink (or not a regular file) is refused, like git >= 2.32 does: a cloned repository could
+ * otherwise point it at a file outside the repository (~/.bashrc).
+ */
+async function appendPattern(file, pattern, label) {
+  if (typeof pattern !== 'string' || !pattern || /[\u0000-\u001f\u007f]/.test(pattern)) throw new Error(`A ${label} pattern must be a single line.`);
+  let existing = '';
+  try {
+    const st = await fs.promises.lstat(file);
+    if (!st.isFile()) throw new Error(`${label} is a symbolic link or not a regular file; edit it by hand.`);
+    existing = await fs.promises.readFile(file, 'utf8');
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  if (existing.split(/\r?\n/).includes(pattern)) return;
+  const sep = existing && !existing.endsWith('\n') ? '\n' : '';
+  // O_NOFOLLOW: never write through a symlink created after the check.
+  const { O_WRONLY, O_APPEND, O_CREAT, O_NOFOLLOW } = fs.constants;
+  const handle = await fs.promises.open(file, O_WRONLY | O_APPEND | O_CREAT | (O_NOFOLLOW || 0), 0o644);
+  try {
+    await handle.write(`${sep}${pattern}\n`);
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * Whether a folder holds a repository (a .git file or folder) anywhere below it: true, false, or
  * null when it is too big to look through quickly (then git is asked). Symlinks are not followed.
  */
@@ -3341,6 +3413,24 @@ function tooLongForCommandLine(paths) {
 
 function delay(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** How long a write waits, in all, for another git process to release a lock. */
+const LOCK_WAIT_MS = 5000;
+
+/**
+ * Whether the lock git could not create (named in its error) is one nobody will release: older
+ * than 10 minutes. Only asked after the first quick retry; a lock gone meanwhile is not stale.
+ */
+function staleLock(stderr, attempt) {
+  if (attempt < 1) return false;
+  const m = /'([^'\n]+\.lock)'/.exec(stderr || '');
+  if (!m) return false;
+  try {
+    return Date.now() - fs.statSync(m[1]).mtimeMs > 10 * 60 * 1000;
+  } catch {
+    return false;
+  }
 }
 
 /** Quote one argument for the POSIX shell git uses to run GIT_SEQUENCE_EDITOR. */

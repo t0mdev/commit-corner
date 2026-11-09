@@ -1759,3 +1759,183 @@ test('a combined diff is approximate only for the files that need unselected com
   assert.equal(String(await repo.show(res.tree, 'h.txt')), 'h2\n');
   assert.ok(!byPath.get('g.txt').approximate);
 });
+
+test('a file git leaves out (inside a repository nested after the status listed it) is reported; the others are staged', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'a.txt': '1\n' });
+  // An agent's copy: its files are listed one by one before its .git arrives.
+  r.write('.local-work/c1/a.txt', '1\n');
+  r.write('.local-work/c1/new.txt', 'n\n');
+  r.write('mine.txt', 'm\n');
+  const s = await repo.refreshState();
+  assert.deepEqual(s.untracked.map((e) => e.path).sort(), ['.local-work/c1/a.txt', '.local-work/c1/new.txt', 'mine.txt']);
+  r.git('init', '-q', path.join(r.dir, '.local-work', 'c1'));
+  // git itself exits 0 and stages nothing here: Commit Corner must not pass that on silently.
+  const err = await repo.stage(['.local-work/c1/new.txt', 'mine.txt']).then(() => undefined, (e) => e);
+  assert.ok(err, 'staging reports the file git left out');
+  assert.equal(err.code, 'NotStaged');
+  assert.deepEqual(err.paths, ['.local-work/c1/new.txt']);
+  assert.deepEqual(err.nested, ['.local-work/c1/']);
+  assert.match(err.message, /"\.local-work\/c1\/new\.txt" was not staged: inside "\.local-work\/c1\/", a repository of its own/);
+  assert.equal(r.git('diff', '--cached', '--name-only'), 'mine.txt', 'the other file is staged');
+  assert.doesNotMatch(r.git('ls-files', '-s'), /^160000/m, 'no gitlink either');
+  // Staging a modified tracked file, a deletion or a folder is never reported.
+  r.write('a.txt', '2\n');
+  r.write('gone.txt', 'g\n');
+  r.git('add', 'gone.txt');
+  r.rm('gone.txt');
+  await repo.stage(['a.txt', 'gone.txt']);
+  assert.deepEqual(r.git('diff', '--cached', '--name-only').split('\n').sort(), ['a.txt', 'mine.txt']);
+  repo.dispose();
+});
+
+test('staging very many files checks them against the whole index (no command line limit)', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'a.txt': '1\n' });
+  for (let k = 0; k < 300; k++) r.write(`many/f${k}.txt`, `${k}\n`);
+  await repo.refreshState();
+  await repo.stage(Array.from({ length: 300 }, (_, k) => `many/f${k}.txt`));
+  assert.equal(r.git('diff', '--cached', '--name-only').split('\n').length, 300);
+  repo.dispose();
+});
+
+test('a write waits for a lock another git process releases within seconds, but not for a stale one', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'a.txt': '1\n' });
+  r.write('b.txt', 'b\n');
+  const lock = path.join(r.dir, '.git', 'index.lock');
+  // An agent's commit keeps the lock while its hooks run: released after 1.5 seconds.
+  fs.writeFileSync(lock, '');
+  const released = new Promise((resolve) => setTimeout(() => {
+    fs.rmSync(lock, { force: true });
+    resolve();
+  }, 1500));
+  let started = Date.now();
+  await repo.stage(['b.txt']);
+  await released;
+  assert.ok(Date.now() - started >= 1400, 'waited for the lock');
+  assert.equal(r.git('diff', '--cached', '--name-only'), 'b.txt');
+  // Left by a git process that crashed an hour ago: nobody releases it, so no waiting for it.
+  fs.writeFileSync(lock, '');
+  const hourAgo = new Date(Date.now() - 3600e3);
+  fs.utimesSync(lock, hourAgo, hourAgo);
+  r.write('c.txt', 'c\n');
+  started = Date.now();
+  await assert.rejects(repo.stage(['c.txt']), (e) => e.code === 'IndexLocked');
+  assert.ok(Date.now() - started < 1000, `failed after ${Date.now() - started} ms`);
+  fs.rmSync(lock, { force: true });
+  repo.dispose();
+});
+
+test('excludeLocally() ignores a folder in this clone only, once, and never writes through a symlink', async (t) => {
+  const { r, repo } = await setup(t);
+  r.commit('base', { 'a.txt': '1\n' });
+  r.write('.local-work/c1/x.txt', 'x\n');
+  await repo.excludeLocally('/.local-work/');
+  await repo.excludeLocally('/.local-work/');
+  const exclude = path.join(r.dir, '.git', 'info', 'exclude');
+  assert.equal(fs.readFileSync(exclude, 'utf8').split('\n').filter((l) => l === '/.local-work/').length, 1);
+  assert.equal(r.git('status', '--porcelain'), '', 'the folder is ignored');
+  assert.equal(fs.existsSync(path.join(r.dir, '.gitignore')), false, 'nothing to commit');
+  const target = path.join(r.dir, 'target.txt');
+  fs.writeFileSync(target, '');
+  fs.rmSync(exclude);
+  fs.symlinkSync(target, exclude);
+  await assert.rejects(repo.excludeLocally('/x/'), /symbolic link/);
+  assert.equal(fs.readFileSync(target, 'utf8'), '');
+  await assert.rejects(repo.excludeLocally('a\nb'), /single line/);
+  repo.dispose();
+});
+
+test('refreshes asked for while one runs make one more after it, never several at once', async () => {
+  const { RepositoryManager } = requireWithVscode('../src/vscode/model');
+  const manager = new RepositoryManager();
+  const gitDir = makeTempDir('cc-gitdir-');
+  let running = 0;
+  let most = 0;
+  let calls = 0;
+  const repo = {
+    root: '/fake/repo',
+    gitDir,
+    async refreshState() {
+      calls++;
+      running++;
+      most = Math.max(most, running);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      running--;
+    },
+    async getRefTips() {
+      return '';
+    },
+  };
+  manager.repos.set(repo.root, repo);
+  try {
+    const first = manager.refresh(repo);
+    const asked = [];
+    for (let k = 0; k < 5; k++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      asked.push(manager.refresh(repo));
+    }
+    await Promise.all([first, ...asked]);
+    assert.equal(most, 1, 'never two statuses at once');
+    assert.equal(calls, 2, 'the five asked meanwhile share one refresh after the first');
+    await manager.refresh(repo);
+    assert.equal(calls, 3, 'asked when none runs: one right away');
+  } finally {
+    manager.repos.delete(repo.root);
+    manager.dispose();
+    fs.rmSync(gitDir, { recursive: true, force: true });
+  }
+});
+
+test('Activity and Worktrees pages closed while they load post nothing (no "Webview is disposed")', async () => {
+  const { createVscode } = require('./helpers/vscodeMock');
+  requireWithVscode('../src/vscode/model');
+  const { ActivityPanel } = require('../src/vscode/webviews/activityPanel');
+  const { WorktreesPanel } = require('../src/vscode/webviews/worktreesPanel');
+  const { vscode } = createVscode();
+  const fakePanel = () => {
+    const dispose = new vscode.EventEmitter();
+    const panel = {
+      visible: true,
+      disposed: false,
+      posted: [],
+      onDidDispose: dispose.event,
+      onDidChangeViewState: () => ({ dispose() {} }),
+      dispose() {
+        panel.disposed = true;
+        dispose.fire();
+      },
+      webview: {
+        cspSource: 'test',
+        asWebviewUri: (u) => u,
+        onDidReceiveMessage: () => ({ dispose() {} }),
+        postMessage(m) {
+          if (panel.disposed) throw new Error('Webview is disposed');
+          panel.posted.push(m);
+        },
+      },
+    };
+    return panel;
+  };
+  let release;
+  const slow = new Promise((resolve) => (release = resolve));
+  const repo = {
+    root: '/fake', name: 'fake', state: undefined,
+    activity: () => slow.then(() => ({ commits: [] })),
+    getWorktreeDetails: () => slow.then(() => []),
+    getRemotes: async () => [],
+    getConfig: async () => '',
+  };
+  const ctx = { extensionUri: vscode.Uri.file('/ext'), manager: { onDidChangeState: () => ({ dispose() {} }), onDidClose: () => ({ dispose() {} }) } };
+  for (const Page of [ActivityPanel, WorktreesPanel]) {
+    const panel = fakePanel();
+    const page = new Page(ctx, panel, repo);
+    const loading = page.send();
+    panel.dispose(); // closed while git still works
+    release();
+    await loading; // must not throw
+    await page.send(); // a debounced send after closing: nothing
+    assert.ok(panel.posted.every((m) => m.type !== 'data'), `${Page.name}: nothing posted after closing`);
+  }
+});

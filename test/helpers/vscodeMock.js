@@ -273,6 +273,8 @@ function createVscode() {
   const treeViews = new Map();
   const webviewViews = new Map();
   const sourceControls = [];
+  /** File system watchers created, newest last (see workspace.createFileSystemWatcher). */
+  const fileWatchers = [];
   const statusItems = [];
   const workspaceFolders = [];
 
@@ -490,8 +492,19 @@ function createVscode() {
           inspect: (key) => ({ key, globalValue: configValues.get(key), workspaceValue: workspaceConfigValues.get(key) }),
         };
       },
-      createFileSystemWatcher() {
-        return { onDidChange: () => new Disposable(), onDidCreate: () => new Disposable(), onDidDelete: () => new Disposable(), dispose() {} };
+      // Tests fire file events through `fileWatchers` (change / create / delete emitters).
+      createFileSystemWatcher(pattern) {
+        const w = { pattern, change: new EventEmitter(), create: new EventEmitter(), delete: new EventEmitter() };
+        fileWatchers.push(w);
+        return {
+          onDidChange: w.change.event,
+          onDidCreate: w.create.event,
+          onDidDelete: w.delete.event,
+          dispose() {
+            const k = fileWatchers.indexOf(w);
+            if (k >= 0) fileWatchers.splice(k, 1);
+          },
+        };
       },
       registerFileSystemProvider: () => new Disposable(),
       registerTextDocumentContentProvider: () => new Disposable(),
@@ -554,6 +567,7 @@ function createVscode() {
     treeViews,
     webviewViews,
     sourceControls,
+    fileWatchers,
     statusItems,
     configValues,
     decorationProviders,

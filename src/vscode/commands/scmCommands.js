@@ -76,6 +76,27 @@ function statusOf(repo, relPath) {
   };
 }
 
+/**
+ * Stage, and when git silently left files out (inside a repository nested in this one) say so,
+ * with a way to that repository; the view then shows them as that repository's.
+ */
+async function stageReporting(manager, repo, paths) {
+  try {
+    return await repo.stage(paths);
+  } catch (e) {
+    if (!e || e.code !== 'NotStaged') throw e;
+    const shown = e.paths.slice(0, 20).join(', ');
+    log().warn(`${e.message} Not staged: ${shown}${e.paths.length > 20 ? `, … (${e.paths.length} in all)` : ''}`);
+    const open = e.nested.length === 1 ? 'Open That Repository' : undefined;
+    notify.warn(e.message, ...(open ? [open] : [])).then(async (choice) => {
+      if (choice !== open) return;
+      const nested = await manager.openRepository(repo.absolute(e.nested[0].replace(/\/$/, '')));
+      if (nested) manager.setActive(nested);
+    }, () => {});
+    return undefined;
+  }
+}
+
 /** @param {import('../context').Context} ctx */
 function register(ctx) {
   const { manager, scm } = ctx;
@@ -166,7 +187,7 @@ function register(ctx) {
           if (!ok) skip.add(r.path); // the other files are still staged
         }
       }
-      await repo.stage(list.filter((r) => !skip.has(r.path)).map((r) => r.path));
+      await stageReporting(manager, repo, list.filter((r) => !skip.has(r.path)).map((r) => r.path));
     }
   });
 
@@ -185,7 +206,7 @@ function register(ctx) {
     const repo = await manager.pick(groupRepo(manager, arg));
     if (!repo) return;
     // Whole groups: git's own selectors, not one pathspec per file (fast, and never "everything" by accident).
-    if (arg && arg.id === 'untracked') await repo.stage(((repo.state && repo.state.untracked) || []).map((e) => e.path));
+    if (arg && arg.id === 'untracked') await stageReporting(manager, repo, ((repo.state && repo.state.untracked) || []).map((e) => e.path));
     else if (arg && arg.id === 'unstaged') await repo.stageTracked();
     else if (arg && arg.id === 'merge') await vscode.commands.executeCommand('commitCorner.stage', arg);
     else await repo.stageAll();

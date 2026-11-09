@@ -53,6 +53,8 @@ class RepositoryManager {
     this.reportedOwnership = new Set();
     /** repo root -> duration of the last status refresh (ms) */
     this.lastRefreshMs = new Map();
+    /** repo root -> the refresh running and the one queued after it (see refresh()) */
+    this.refreshQueues = new Map();
     this.disposables = [
       this._onDidOpen, this._onDidClose, this._onDidChangeState, this._onDidChangeActive,
       vscode.workspace.onDidChangeWorkspaceFolders((e) => this.onFoldersChanged(e)),
@@ -328,6 +330,7 @@ class RepositoryManager {
     if (!this.repos.delete(repo.root)) return;
     (this.repoDisposables.get(repo.root) || []).forEach((d) => d.dispose());
     this.repoDisposables.delete(repo.root);
+    this.refreshQueues.delete(repo.root);
     repo.dispose();
     this._onDidClose.fire(repo);
     if (this.active === repo) this.setActive(this.repositories[0]);
@@ -388,13 +391,21 @@ class RepositoryManager {
 
     // Working tree changes.
     const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(repo.root), '**/*'));
-    const onFile = (uri) => {
-      // Edits inside .git are handled by the fs.watch watchers below.
-      if (/[\\/]\.git([\\/]|$)/.test(uri.fsPath)) return;
+    const onFile = (uri, changed) => {
+      // Edits inside .git are handled by the fs.watch watchers below; those inside a nested
+      // repository's .git (an agent's clone at work) change nothing here.
+      if (/[\\/]\.git[\\/]/.test(uri.fsPath)) return;
+      if (/[\\/]\.git$/.test(uri.fsPath)) {
+        // A .git coming or going below the root: a repository nested here appeared (an agent's
+        // copy got its .git after its files) or went. Its files are then one row, or files again.
+        // (Created or deleted only: a nested .git folder "changes" whenever its repository works.)
+        if (!changed && repo.relative(path.dirname(uri.fsPath))) refresh();
+        return;
+      }
       if (outsideStatus(repo, uri.fsPath)) return;
       refresh();
     };
-    watcher.onDidChange(onFile);
+    watcher.onDidChange((uri) => onFile(uri, true));
     watcher.onDidCreate(onFile);
     watcher.onDidDelete(onFile);
     disposables.push(watcher);
@@ -474,8 +485,33 @@ class RepositoryManager {
     if (r) r();
   }
 
-  async refresh(repo) {
-    if (!repo || !this.repos.has(repo.root)) return;
+  /**
+   * Refresh a repository's state. One at a time per repository: asked while one runs, a single
+   * further refresh follows it (however many asked meanwhile), and it sees every change up to
+   * then. Overlapping ones (a slow status while agents keep writing) would each be superseded by
+   * the next, so none would ever be shown, and they would pile up git processes.
+   */
+  refresh(repo) {
+    if (!repo || !this.repos.has(repo.root)) return Promise.resolve();
+    let q = this.refreshQueues.get(repo.root);
+    if (!q) this.refreshQueues.set(repo.root, (q = { running: undefined, next: undefined }));
+    if (q.next) return q.next;
+    if (q.running) {
+      q.next = q.running.catch(() => {}).then(() => {
+        q.next = undefined;
+        return this.refresh(repo);
+      });
+      return q.next;
+    }
+    const running = this.refreshOnce(repo).finally(() => {
+      if (q.running === running) q.running = undefined;
+    });
+    q.running = running;
+    return running;
+  }
+
+  async refreshOnce(repo) {
+    if (!this.repos.has(repo.root)) return;
     if (!fs.existsSync(repo.gitDir)) {
       this.closeRepository(repo);
       return;

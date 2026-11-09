@@ -299,4 +299,54 @@ suite('Commit Corner in VS Code', () => {
     assert.strictEqual(git('show', ':b.txt'), 'b\nedited in the index');
     assert.strictEqual(fs.readFileSync(path.join(root(), 'b.txt'), 'utf8'), 'b\nworking tree\n');
   });
+  test('agents\' copies inside the repository: a copy that gets its .git is seen without a refresh; staging keeps up under 12,000 new files that keep changing', async function () {
+    this.timeout(120000);
+    const repo = api.manager.repositories[0];
+    const work = path.join(root(), '.local-work');
+    const copy = path.join(work, 'c1');
+    let writer;
+    try {
+      // A copy whose files arrive before its .git (cp -r in directory order).
+      fs.mkdirSync(path.join(copy, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(copy, 'src', 'a.txt'), 'a\n');
+      await until(() => repo.state.untracked.some((e) => e.path === '.local-work/c1/src/a.txt'), 'the copy\'s file listed');
+      execFileSync('git', ['init', '-q', copy]);
+      await until(() => repo.state.nested.includes('.local-work/c1/'), 'the copy seen as a repository of its own (file watcher only)');
+      assert.ok(!repo.state.untracked.some((e) => e.path.startsWith('.local-work/c1/')));
+      // Staging one of its files anyway (a view that had not caught up): a warning, nothing staged.
+      await vscode.commands.executeCommand('commitCorner.stage', { repoRoot: repo.root, path: '.local-work/c1/src/a.txt', group: 'untracked' });
+      assert.strictEqual(git('ls-files', '--', '.local-work'), '');
+
+      // Copies without a .git: thousands of new files, still being written while you stage.
+      for (let d = 0; d < 12; d++) {
+        const dir = path.join(work, `copy${d}`);
+        fs.mkdirSync(dir, { recursive: true });
+        for (let i = 0; i < 1000; i++) fs.writeFileSync(path.join(dir, `f${i}.txt`), `${i}\n`);
+      }
+      let started = Date.now();
+      await until(() => repo.state.untracked.length >= 12000, 'the 12,000 new files listed', 60000);
+      const listed = Date.now() - started;
+      let tick = 0;
+      writer = setInterval(() => {
+        tick++;
+        fs.writeFileSync(path.join(work, 'copy0', `f${tick % 1000}.txt`), `changed ${tick}\n`);
+      }, 25);
+      fs.writeFileSync(path.join(root(), 'mine-to-stage.txt'), 'mine\n');
+      await until(() => repo.state.untracked.some((e) => e.path === 'mine-to-stage.txt'), 'my new file listed', 30000);
+      started = Date.now();
+      await vscode.commands.executeCommand('commitCorner.stage', { repoRoot: repo.root, path: 'mine-to-stage.txt', group: 'untracked' });
+      await until(() => repo.state.staged.some((e) => e.path === 'mine-to-stage.txt'), 'my file shown as staged while files keep changing', 30000);
+      const staged = Date.now() - started;
+      const provider = api.scm.get(repo);
+      const shown = provider.untracked.resourceStates.length;
+      assert.ok(shown <= 10000, `Source Control lists at most the status limit (${shown})`);
+      console.log(`      12,000 new files: listed in ${listed} ms; a stage shown in ${staged} ms while files kept changing`);
+    } finally {
+      clearInterval(writer);
+      git('reset', '-q', '--', 'mine-to-stage.txt');
+      fs.rmSync(path.join(root(), 'mine-to-stage.txt'), { force: true });
+      fs.rmSync(work, { recursive: true, force: true });
+      await api.manager.refresh(repo);
+    }
+  });
 });

@@ -120,10 +120,28 @@ class ScmProvider {
     if (budget < 0 || (limit > 0 && total > limit)) {
       if (!this.warnedLimit) {
         this.warnedLimit = true;
+        // Usually one folder floods the list (agents' copies of the repository, a build output):
+        // name it, and offer to exclude it in this clone only (.git/info/exclude, never committed).
+        const folder = floodingFolder(state.untracked, total);
+        const exclude = folder && `Exclude "${folder.dir}" Locally`;
         notify.warn(
-          `${this.repo.name} has ${total} changed files; Source Control shows the first ${limit}. Add generated folders to .gitignore, or raise "commitCorner.statusLimit".`,
+          folder
+            ? `${this.repo.name} has ${total} changed files, ${folder.count} of them new files in "${folder.dir}"; Source Control shows the first ${limit}. Exclude that folder (here only, in .git/info/exclude), add it to .gitignore, or raise "commitCorner.statusLimit".`
+            : `${this.repo.name} has ${total} changed files; Source Control shows the first ${limit}. Add generated folders to .gitignore, or raise "commitCorner.statusLimit".`,
+          ...(exclude ? [exclude] : []),
           'Open Settings',
-        ).then((c) => c && vscode.commands.executeCommand('workbench.action.openSettings', 'commitCorner.statusLimit'));
+        ).then(async (c) => {
+          if (c === 'Open Settings') vscode.commands.executeCommand('workbench.action.openSettings', 'commitCorner.statusLimit');
+          else if (c && c === exclude) {
+            try {
+              await repo.excludeLocally(`${require('../git/repository').Repository.ignorePattern(folder.dir.slice(0, -1))}/`);
+              notify.info(`"${folder.dir}" is now ignored in this clone (.git/info/exclude; not committed). Remove its line there to see it again.`);
+              repo.emit('didRun', ['exclude']);
+            } catch (e) {
+              notify.error(`Could not exclude "${folder.dir}": ${e.message}`);
+            }
+          }
+        }, () => {});
       }
     } else this.warnedLimit = false;
     this.sc.count = autoSetting('countBadge') ? total : 0;
@@ -219,6 +237,26 @@ class ScmProvider {
   }
 }
 
+/**
+ * The top-level folder holding most of the new files ({dir: "dir/", count}), when it holds at
+ * least half of all changes; undefined when no single folder floods the list.
+ * @param {{path:string}[]} untracked @param {number} total
+ */
+function floodingFolder(untracked, total) {
+  const counts = new Map();
+  for (const e of untracked) {
+    const slash = e.path.indexOf('/');
+    if (slash > 0) {
+      const top = e.path.slice(0, slash + 1);
+      counts.set(top, (counts.get(top) || 0) + 1);
+    }
+  }
+  let best;
+  for (const [dir, count] of counts) if (!best || count > best.count) best = { dir, count };
+  if (!best || best.count * 2 < total) return undefined;
+  return best;
+}
+
 /** Creates one ScmProvider per open repository and keeps them updated. */
 class ScmManager {
   /** @param {import('./model').RepositoryManager} manager */
@@ -265,4 +303,4 @@ class ScmManager {
   }
 }
 
-module.exports = { ScmManager, ScmProvider, builtInGitEnabled, CONFLICT_LABELS };
+module.exports = { ScmManager, ScmProvider, builtInGitEnabled, CONFLICT_LABELS, floodingFolder };

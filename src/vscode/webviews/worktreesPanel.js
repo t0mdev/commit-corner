@@ -43,6 +43,7 @@ class WorktreesPanel {
     panel.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(ctx.extensionUri, 'media')] };
     panel.webview.html = webviewHtml(panel.webview, ctx.extensionUri, { title: 'Worktrees', script: 'worktrees.js', style: 'worktrees.css' });
     const refresh = debounce(() => this.send(), 1500);
+    this.refreshSoon = refresh;
     this.disposables = [
       panel.onDidDispose(() => this.dispose()),
       panel.webview.onDidReceiveMessage((m) => this.onMessage(m).catch((e) => showError(e, 'Worktrees'))),
@@ -64,7 +65,13 @@ class WorktreesPanel {
     this.disposables.push({ dispose: () => clearInterval(timer) });
   }
 
+  /** Post to the page, unless it was closed meanwhile (a look at many worktrees outliving it). */
+  post(message) {
+    if (!this.disposed) this.panel.webview.postMessage(message);
+  }
+
   async send() {
+    if (this.disposed) return;
     // One look at a time (git status in every worktree can take a while); a request meanwhile
     // runs once more afterwards, so the newest state always wins.
     if (this.sending) {
@@ -87,11 +94,12 @@ class WorktreesPanel {
     try {
       // "This window" is the worktree open in this window, whichever repository is active.
       const worktrees = (await this.repo.getWorktreeDetails()).map((w) => ({ ...w, isCurrent: inThisWindow(w.path) }));
-      this.panel.webview.postMessage({
+      const me = (await this.repo.getConfig('user.email')) || '';
+      this.post({
         type: 'data',
         repoName: this.repo.name,
         repoRoot: this.repo.root,
-        me: (await this.repo.getConfig('user.email')) || '',
+        me,
         worktrees: worktrees.map((w) => ({
           ...w,
           commit: w.commit && { sha: w.commit.sha, subject: w.commit.subject, authorName: w.commit.authorName, authorEmail: w.commit.authorEmail, authorDate: w.commit.authorDate },
@@ -99,7 +107,7 @@ class WorktreesPanel {
       });
     } catch (e) {
       log().error(`Worktrees overview: ${e.stack || e.message}`);
-      this.panel.webview.postMessage({ type: 'error', message: e.message });
+      this.post({ type: 'error', message: e.message });
     }
   }
 
@@ -118,6 +126,8 @@ class WorktreesPanel {
   }
 
   dispose() {
+    this.disposed = true;
+    this.refreshSoon.cancel();
     if (WorktreesPanel.current === this) WorktreesPanel.current = undefined;
     this.disposables.forEach((d) => d.dispose());
   }

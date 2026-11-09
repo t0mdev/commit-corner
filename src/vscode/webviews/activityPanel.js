@@ -42,6 +42,7 @@ class ActivityPanel {
     panel.webview.html = webviewHtml(panel.webview, ctx.extensionUri, { title: 'Repository Activity', script: 'activity.js', style: 'activity.css' });
     // Keeps up with new commits while shown (refs move), not with every file save.
     const refresh = debounce(() => this.send(), 1500);
+    this.refreshSoon = refresh;
     let lastTips;
     this.disposables = [
       ctx.manager.onDidChangeState(async (r) => {
@@ -63,21 +64,28 @@ class ActivityPanel {
     ];
   }
 
+  /** Post to the page, unless it was closed meanwhile (a debounced or slow send outliving it). */
+  post(message) {
+    if (!this.disposed) this.panel.webview.postMessage(message);
+  }
+
   async send() {
+    if (this.disposed) return;
     const token = (this.token = (this.token || 0) + 1);
-    this.panel.webview.postMessage({ type: 'loading' });
+    this.post({ type: 'loading' });
     try {
       const revs = this.scope === 'current' ? ['HEAD'] : this.scope.startsWith('ref:') ? [this.scope.slice(4)] : undefined;
       const data = await this.repo.activity({ days: this.days, revs });
       if (token !== this.token) return;
       const remotes = await this.repo.getRemotes();
       const web = remotes.map((r) => githubWebUrl(r.fetchUrl)).find(Boolean);
-      this.panel.webview.postMessage({
+      const me = ((await this.repo.getConfig('user.email')) || '').toLowerCase();
+      this.post({
         type: 'data',
         repoName: this.repo.name,
         repoRoot: this.repo.root,
         branch: this.repo.state && this.repo.state.head.branch,
-        me: ((await this.repo.getConfig('user.email')) || '').toLowerCase(),
+        me,
         days: this.days,
         scope: this.scope,
         hasGitHub: !!web,
@@ -85,7 +93,7 @@ class ActivityPanel {
       });
     } catch (e) {
       log().error(`Repository activity: ${e.stack || e.message}`);
-      this.panel.webview.postMessage({ type: 'error', message: e.message });
+      this.post({ type: 'error', message: e.message });
     }
   }
 
@@ -145,6 +153,8 @@ class ActivityPanel {
   }
 
   dispose() {
+    this.disposed = true;
+    this.refreshSoon.cancel();
     if (ActivityPanel.current === this) ActivityPanel.current = undefined;
     this.disposables.forEach((d) => d.dispose());
   }

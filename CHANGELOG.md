@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Staging a file inside a repository nested in yours now says so.** git skips such a file without a word (an agent's copy under `.local-work/` that got its own `.git` after its files were listed), so `+` seemed to do nothing. Commit Corner now warns which files were left out and offers *Open That Repository*. The other files you picked are still staged.
+- A repository appearing inside yours (an agent's `git clone` or `git init`) or going away is noticed right away: its files leave the list, or come back as files.
+- **Status limit**: when one folder floods Source Control (agents' copies of the repository, a build output), the warning names it and offers *Exclude "folder/" Locally*. This writes it to `.git/info/exclude`: ignored in your clone only, with nothing to commit.
+- Refreshes no longer overlap. A refresh asked for while one is running waits for it, and any number of such requests share that one follow-up, so a slow `git status` with agents writing all the time no longer starts git after git or leaves the views stale.
+- Staging, committing and other writes wait up to 5 seconds while another git process holds `index.lock`, for example an agent's commit whose hooks are running (before, about 1 second). A lock left over from a crash, over 10 minutes old, fails right away with the usual hint.
+- Fixed: closing the Repository Activity or Worktrees page while it was loading could log "Webview is disposed" errors.
+
 ## 1.6.0
 
 - **Changed: the *Viewed* checkboxes are gone, and so is `Space` to tick a file.** A pull request's *Files changed* and a worktree's *Changes vs main* now show what you have not seen the way a commit's files do: a file you have not opened has a dot, and opening it (click or `Enter`; the keyboard stays in the list, `↓` `Enter` for the next) marks it viewed. *Mark as Not Viewed* in its menu (`Shift+F10`) brings the dot back. Files you had checked stay viewed. If you had turned `commitCorner.markUnviewedFiles` off, these lists now show no dots either (they still count what you opened); turn it on to see them.
