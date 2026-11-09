@@ -2394,3 +2394,28 @@ test('Open Repository: a repository whose root git names outside is never opened
   assert.equal(manager.repositories.length, 0);
   assert.equal(refreshed, false);
 });
+
+test('staging thousands of listed untracked files by folder stages exactly those listed, not files made since', async (t) => {
+  const { r, repo } = await based(t);
+  for (let k = 0; k < 1500; k++) r.write(`.local-work/copy/f${k}.txt`, `${k}\n`);
+  r.write('top-new.txt', 't\n');
+  const s = await repo.refreshState();
+  const listed = s.untracked.map((e) => e.path);
+  // Written after the list was read: in a listed folder, in a new folder, at the top.
+  r.write('.local-work/copy/late.txt', 'late\n');
+  r.write('later/x.txt', 'x\n');
+  r.write('late-top.txt', 'l\n');
+  const { paths, excludes } = await repo.untrackedAsListed(listed);
+  assert.deepEqual(paths.sort(), ['.local-work/', 'top-new.txt']);
+  assert.deepEqual(excludes.sort(), ['.local-work/copy/late.txt', 'late-top.txt', 'later/x.txt']);
+  await repo.stage(paths, { excludes });
+  const staged = r.git('diff', '--cached', '--name-only').split('\n');
+  assert.equal(staged.length, 1501);
+  assert.ok(!staged.includes('.local-work/copy/late.txt') && !staged.includes('later/x.txt') && !staged.includes('late-top.txt'));
+  // Many files made since: the listed ones themselves.
+  r.git('reset', '-q');
+  for (let k = 0; k < 250; k++) r.write(`burst/b${k}.txt`, `${k}\n`);
+  const again = await repo.untrackedAsListed(listed);
+  assert.equal(again.paths, listed);
+  assert.deepEqual(again.excludes, []);
+});

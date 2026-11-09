@@ -81,9 +81,9 @@ function statusOf(repo, relPath) {
  * with a way to that repository; the view then shows them as that repository's.
  * @returns {Promise<boolean>} false when some were not staged
  */
-async function stageReporting(manager, repo, paths) {
+async function stageReporting(manager, repo, paths, opts) {
   try {
-    await repo.stage(paths);
+    await repo.stage(paths, opts);
     return true;
   } catch (e) {
     if (!e || e.code !== 'NotStaged') throw e;
@@ -269,10 +269,10 @@ function register(ctx) {
     if (!repo) return;
     // Whole groups: git's own selectors, not one pathspec per file (fast, and never "everything" by accident).
     if (arg && arg.id === 'untracked') {
-      // Thousands of new files (agents' copies): git's summary by folder, staged folder by folder.
-      const listed = (repo.state && repo.state.untracked) || [];
-      const paths = listed.length > 1000 && repo.untrackedMode !== 'no' ? await repo.untrackedFolders() : listed.map((e) => e.path);
-      await stageReporting(manager, repo, paths);
+      // Thousands of new files (agents' copies): staged folder by folder, exactly those listed.
+      const listed = ((repo.state && repo.state.untracked) || []).map((e) => e.path);
+      const { paths, excludes } = listed.length > 1000 && repo.untrackedMode === 'all' ? await repo.untrackedAsListed(listed) : { paths: listed, excludes: [] };
+      await stageReporting(manager, repo, paths, { excludes });
     }
     else if (arg && arg.id === 'unstaged') await repo.stageTracked();
     else if (arg && arg.id === 'merge') await vscode.commands.executeCommand('commitCorner.stage', arg);

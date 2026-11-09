@@ -1496,7 +1496,12 @@ class Repository extends EventEmitter {
     return this.exec([...args, '--', ...paths.map(lit)], { ...opts, writes: true });
   }
 
-  async stage(paths) {
+  /**
+   * @param {string[]} paths
+   * @param {{excludes?: string[]}} [o] paths (literal) left out, e.g. files the view did not list yet
+   */
+  async stage(paths, o = {}) {
+    const excludedPaths = new Set(o.excludes || []);
     // Nested repositories are not staged (they would become submodules).
     const nested = this.nestedRepositories();
     paths = paths.filter((p) => !nested.includes(p) && !nested.includes(`${p}/`));
@@ -1507,7 +1512,7 @@ class Repository extends EventEmitter {
     const skipped = [];
     /** Folders added as one pathspec, and the repositories in them left out. */
     const folders = [];
-    const excludes = [];
+    const excludes = [...excludedPaths].map((p) => `:(exclude,literal)${p}`);
     let gitlinksBefore;
     for (const p of paths) {
       const abs = path.join(this.root, ...p.replace(/\/$/, '').split('/'));
@@ -1532,7 +1537,7 @@ class Repository extends EventEmitter {
       const inside = [];
       const changes = [];
       for (const e of P.parseStatus(stdout).entries) {
-        if (e.kind === 'ignored') continue;
+        if (e.kind === 'ignored' || excludedPaths.has(e.path)) continue;
         if (e.path.endsWith('/') && isRepositoryMarker(path.join(this.root, e.path, '.git'))) inside.push(e.path);
         else changes.push(e);
       }
@@ -1557,7 +1562,7 @@ class Repository extends EventEmitter {
     // (a stage or unstage of ours queued meanwhile must not change the answer).
     const found = { missing: [], links: [] };
     const after = async () => {
-      found.missing = await this.missingFromIndex(out);
+      found.missing = await this.missingFromIndex(out.filter((p) => !excludedPaths.has(p)));
       if (folders.length) found.links = [...(await this.gitlinksIn(folders))].filter((x) => !gitlinksBefore.has(x));
     };
     // An empty list must never become "git add -A" (everything).
@@ -1593,6 +1598,29 @@ class Repository extends EventEmitter {
   async untrackedFolders() {
     const { stdout } = await this.exec(['ls-files', '-z', '-o', '--exclude-standard', '--directory', '--no-empty-directory']);
     return stdout.split('\0').filter((p) => p && !(p.endsWith('/') && isRepositoryMarker(path.join(this.absolute(p.slice(0, -1)), '.git'))));
+  }
+
+  /**
+   * The untracked files a view lists (`listed`) as few pathspecs, for staging thousands at once:
+   * git's folders (untrackedFolders), with the files in them the list does not have yet (made
+   * since it was read) excluded, and folders holding no listed file left out — so exactly what
+   * you saw is staged. With many such new files, the listed files themselves.
+   * @returns {Promise<{paths: string[], excludes: string[]}>} excludes: literal paths
+   */
+  async untrackedAsListed(listed) {
+    const want = new Set(listed);
+    const [folders, { stdout }] = await Promise.all([
+      this.untrackedFolders(),
+      this.exec(['ls-files', '-z', '-o', '--exclude-standard']),
+    ]);
+    const unlisted = stdout.split('\0').filter((p) => p && !p.endsWith('/') && !want.has(p));
+    if (unlisted.length > 200) return { paths: listed, excludes: [] };
+    const listedFolders = new Set();
+    for (const p of listed) {
+      for (let k = p.indexOf('/'); k > 0; k = p.indexOf('/', k + 1)) listedFolders.add(p.slice(0, k + 1));
+    }
+    const paths = folders.filter((f) => (f.endsWith('/') ? listedFolders.has(f) : want.has(f)));
+    return { paths, excludes: unlisted };
   }
 
   /** Gitlinks (mode 160000) in the index under `folders`, as a Set of paths. */
