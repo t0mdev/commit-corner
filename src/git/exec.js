@@ -33,7 +33,8 @@ function getGitPath() {
  * repository, index or object store (set when VS Code was started from a git hook or alias).
  * Callers that mean them (a temporary index) pass them in opts.env.
  */
-const REPOSITORY_VARIABLES = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR', 'GIT_NAMESPACE'];
+// (Also how pathspecs are read: ":(literal)" and ":(exclude,literal)" must mean what they say.)
+const REPOSITORY_VARIABLES = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_COMMON_DIR', 'GIT_NAMESPACE', 'GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'];
 function inheritedEnv() {
   const env = { ...process.env };
   for (const k of REPOSITORY_VARIABLES) delete env[k];

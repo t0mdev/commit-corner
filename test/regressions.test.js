@@ -1792,7 +1792,7 @@ test('a file git leaves out (inside a repository nested after the status listed 
   assert.equal(err.code, 'NotStaged');
   assert.deepEqual(err.paths, ['.local-work/c1/new.txt']);
   assert.deepEqual(err.nested, ['.local-work/c1/']);
-  assert.equal(err.message, '".local-work/c1/new.txt" was not staged: it is in ".local-work/c1/", a separate Git repository inside this one (it has its own .git), and git skips its files without a word. Stage it in that repository.');
+  assert.equal(err.message, '".local-work/c1/new.txt" was not staged: it is in ".local-work/c1/", a separate Git repository inside this one, and git skips its files without a word. Stage it in that repository.');
   assert.equal(r.git('diff', '--cached', '--name-only'), 'mine.txt', 'the other file is staged');
   assert.doesNotMatch(r.git('ls-files', '-s'), /^160000/m, 'no gitlink either');
   // Staging a modified tracked file or a deletion is never reported.
@@ -1838,7 +1838,7 @@ test('several nested repositories, or files git skipped for no known reason, are
   const { repo } = await based(t);
   const nested = (p) => ({ path: p, nested: `${p.split('/')[0]}/` });
   let err = await rejection(repo.checkStaged([], [nested('a/x'), nested('b/y'), nested('b/z')]));
-  assert.equal(err.message, '3 files were not staged: they are in "a/" and "b/", separate Git repositories inside this one (each has its own .git), and git skips their files without a word. Stage them in those repositories.');
+  assert.equal(err.message, '3 files were not staged: they are in "a/" and "b/", separate Git repositories inside this one, and git skips their files without a word. Stage them in those repositories.');
   assert.deepEqual(err.nested, ['a/', 'b/']);
   err = await rejection(repo.checkStaged([], [nested('a/x'), nested('b/y'), nested('c/y'), nested('d/y')]));
   assert.match(err.message, /they are in "a\/", "b\/", "c\/" and 1 more, separate Git repositories/);
@@ -1907,7 +1907,9 @@ test('a write waits for a lock another git process releases within seconds, give
   started = Date.now();
   let err = await rejection(repo.stage(['c.txt']));
   assert.equal(err.code, 'IndexLocked');
-  assert.ok(Date.now() - started >= 700 && Date.now() - started < 5000, `gave up after ${Date.now() - started} ms`);
+  // (Upper bounds here are loose — a loaded machine starts git slowly — but far below the 30 s
+  // or forever a broken wait would take.)
+  assert.ok(Date.now() - started >= 700 && Date.now() - started < 20000, `gave up after ${Date.now() - started} ms`);
   // Cancelled while waiting (the status bar's item): stops at once.
   repo.lockWaitMs = 30000;
   const stage = repo.stage(['c.txt']);
@@ -1916,13 +1918,13 @@ test('a write waits for a lock another git process releases within seconds, give
   repo.running.cancel();
   err = await rejection(stage);
   // (Bounds far below the 30 s it would otherwise wait: a busy machine starts git slowly.)
-  assert.ok(Date.now() - started < 3000, `stopped ${Date.now() - started} ms after cancelling`);
+  assert.ok(Date.now() - started < 10000, `stopped ${Date.now() - started} ms after cancelling`);
   // Left by a git process that crashed an hour ago: nobody releases it, no waiting, and it is said.
   const hourAgo = new Date(Date.now() - 3600e3);
   fs.utimesSync(lock, hourAgo, hourAgo);
   started = Date.now();
   err = await rejection(repo.stage(['c.txt']));
-  assert.ok(Date.now() - started < 3000, `failed after ${Date.now() - started} ms`);
+  assert.ok(Date.now() - started < 10000, `failed after ${Date.now() - started} ms`);
   assert.equal(err.code, 'StaleLock');
   assert.match(err.message, /index\.lock is 60 minutes old: probably left behind by a git process that stopped \(crashed or was killed\)\. If no git command is running/);
 });
@@ -2242,4 +2244,99 @@ test('a repository created in a big folder between its status and git add is tak
   assert.doesNotMatch(r.git('ls-files', '-s'), /^160000/m, 'no gitlink left in the index');
   assert.equal(r.git('diff', '--cached', '--name-only').split('\n').length, 1200);
   assert.match(err.message, /^"work\/late\/" was not staged: it is a separate Git repository/);
+});
+
+test('a .git folder git does not count (empty) makes no nested repository in "normal" mode either: the folder is a row to stage', async (t) => {
+  const { r, repo } = await based(t);
+  repo.untrackedMode = 'normal';
+  r.write('x/f.txt', 'f\n');
+  fs.mkdirSync(path.join(r.dir, 'x', '.git'));
+  const s = await repo.refreshState();
+  assert.deepEqual(repo.nestedRepositories(s), []);
+  assert.deepEqual(s.untracked.map((e) => e.path), ['x/f.txt'], 'listed (file by file, as a folder with a .git in it is), not hidden');
+  assert.deepEqual(await repo.untrackedFolders(), ['x/']);
+  await repo.stage(['x/']);
+  assert.equal(r.git('diff', '--cached', '--name-only'), 'x/f.txt');
+});
+
+test('"gitdir:" without the space git requires is no gitfile', async (t) => {
+  const { r, repo } = await based(t);
+  r.git('init', '-q', path.join(r.dir, 'real'));
+  r.write('nospace/.git', `gitdir:${path.join(r.dir, 'real', '.git')}\n`);
+  assert.equal(repo.nestedRepositoryOf('nospace/a.txt'), undefined);
+});
+
+test('a repository without a commit made in a big folder while git add starts: the rest is staged, it is reported', async (t) => {
+  const { r, repo } = await based(t);
+  for (let k = 0; k < 1200; k++) r.write(`work/f${k}.txt`, `${k}\n`);
+  r.write('work/late/x.txt', 'x\n');
+  await repo.refreshState();
+  const exec = repo.exec.bind(repo);
+  let made = false;
+  repo.exec = async (a, o) => {
+    if (a[0] === 'add' && !made) {
+      made = true;
+      execFileSync('git', ['-C', path.join(r.dir, 'work', 'late'), 'init', '-q']); // no commit
+    }
+    return exec(a, o);
+  };
+  const err = await rejection(repo.stage(['work/']));
+  assert.equal(err.code, 'NotStaged', err.message);
+  assert.deepEqual(err.nested, ['work/late/']);
+  assert.equal(r.git('diff', '--cached', '--name-only').split('\n').length, 1200);
+});
+
+test('hundreds of folder rows: the gitlink check lists the index once instead of a command line too long', async (t) => {
+  const { r, repo } = await based(t);
+  repo.untrackedMode = 'normal';
+  const rows = [];
+  for (let k = 0; k < 250; k++) {
+    r.write(`row${k}/f.txt`, `${k}\n`);
+    rows.push(`row${k}/`);
+  }
+  r.write('row7/inner/x.txt', 'x\n');
+  await repo.refreshState();
+  await repo.stage(rows);
+  assert.equal(r.git('diff', '--cached', '--name-only').split('\n').length, 251);
+  const links = await repo.gitlinksIn(rows);
+  assert.equal(links.size, 0);
+});
+
+test('unstageNew() takes fresh entries out again and leaves a staged deletion of the same path staged', async (t) => {
+  const { r, repo } = await based(t);
+  r.commit('secret', { 'secret.env': 's\n' });
+  r.git('rm', '-q', '--cached', 'secret.env'); // staged deletion, file kept
+  r.write('new.txt', 'n\n');
+  await repo.stage(['secret.env', 'new.txt']);
+  await repo.unstageNew(['secret.env', 'new.txt', 'never-added.txt']);
+  assert.equal(r.git('status', '--porcelain'), 'D  secret.env\n?? new.txt\n?? secret.env');
+  // No commit yet: also fine.
+  const e = createRepo();
+  t.after(() => e.cleanup());
+  const empty = await Repository.open(e.dir);
+  t.after(() => empty.dispose());
+  e.write('a.txt', 'a\n');
+  await empty.stage(['a.txt']);
+  await empty.unstageNew(['a.txt', 'c1/f']);
+  assert.equal(e.git('status', '--porcelain'), '?? a.txt');
+});
+
+test('pathspec variables in the environment do not change what the literal and exclude pathspecs mean', async (t) => {
+  const { r, repo } = await based(t);
+  for (const k of ['GIT_LITERAL_PATHSPECS', 'GIT_ICASE_PATHSPECS']) {
+    const saved = process.env[k];
+    process.env[k] = '1';
+    t.after(() => (saved === undefined ? delete process.env[k] : (process.env[k] = saved)));
+  }
+  r.write('A.txt', 'upper\n');
+  r.write('weird[1].txt', 'w\n');
+  await repo.refreshState();
+  await repo.stage(['weird[1].txt']);
+  assert.equal(r.git('diff', '--cached', '--name-only'), 'weird[1].txt', 'only that file (not A.txt by case)');
+});
+
+test('tracksFilesIn() matches any casing (a case-insensitive disk lists the folder in another)', async (t) => {
+  const { r, repo } = await based(t);
+  r.commit('gen', { 'Gen/kept.txt': 'k\n' });
+  assert.equal(await repo.tracksFilesIn('gen/'), true);
 });

@@ -1249,12 +1249,32 @@ test('Commit Selected with a file of a nested repository commits nothing and sta
     const from = mock.ui.messages.length;
     await run('commitCorner.commitSelected', { repoRoot: main.root, path: '.local-work/c1/x.txt', group: 'untracked' }, { repoRoot: main.root, path: 'mine-selected.txt', group: 'untracked' });
     const said = shownSince(from);
-    assert.ok(said.some((m) => m.level === 'warning' && /^Nothing committed: "\.local-work\/c1\/x\.txt" is in "\.local-work\/c1\/", a separate Git repository .* Commit it there, or leave it out of the selection\.$/.test(m.msg)), JSON.stringify(said));
+    assert.ok(said.some((m) => m.level === 'warning' && /^Nothing committed: "\.local-work\/c1\/x\.txt" is in "\.local-work\/c1\/", a separate Git repository inside this one, and git skips its files without a word\. Commit it there, or leave it out of the selection\.$/.test(m.msg)), JSON.stringify(said));
     assert.equal(r.git('rev-parse', 'HEAD'), head, 'no commit');
     assert.equal(r.git('diff', '--cached', '--name-only'), '', 'and nothing staged on the way');
   } finally {
     mock.sourceControls[0].inputBox.value = '';
     fs.rmSync(path.join(r.dir, 'mine-selected.txt'), { force: true });
+    await cleanAgentCopies(main);
+  }
+});
+
+test('Commit Selected that stages nothing keeps a deletion you had staged for a picked path', async () => {
+  const main = repo();
+  const head = r.git('rev-parse', 'HEAD');
+  try {
+    r.commit('secret', { 'secret.env': 's\n' });
+    r.git('rm', '-q', '--cached', 'secret.env');
+    r.write('.local-work/c1/x.txt', 'x\n');
+    await api.manager.refresh(main);
+    r.git('init', '-q', path.join(r.dir, '.local-work', 'c1'));
+    mock.sourceControls[0].inputBox.value = 'both';
+    await run('commitCorner.commitSelected', { repoRoot: main.root, path: 'secret.env', group: 'untracked' }, { repoRoot: main.root, path: '.local-work/c1/x.txt', group: 'untracked' });
+    assert.match(r.git('status', '--porcelain', '--', 'secret.env'), /^D {2}secret\.env$/m, 'still a staged deletion');
+  } finally {
+    mock.sourceControls[0].inputBox.value = '';
+    r.git('reset', '-q', head);
+    fs.rmSync(path.join(r.dir, 'secret.env'), { force: true });
     await cleanAgentCopies(main);
   }
 });

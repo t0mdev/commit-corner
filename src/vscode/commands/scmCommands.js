@@ -115,18 +115,28 @@ function reportNotStaged(manager, repo, e) {
  * warning is not opened from here.
  */
 async function openNestedRepository(manager, repo, dir) {
-  const abs = repo.absolute(dir.replace(/\/$/, ''));
+  const path = require('path');
+  // Inside the repository, resolved: under the root git reports or the one you opened (a subst
+  // drive, a folder opened in another casing on macOS resolve differently in node and in git).
+  const roots = [...new Set([repo.root, repo.displayRoot])].map((r) => {
+    try {
+      return fs.realpathSync(r);
+    } catch {
+      return r;
+    }
+  });
+  const inside = (p) => roots.some((root) => {
+    const rel = path.relative(root, p);
+    return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+  });
   let real;
-  let root;
   try {
-    real = fs.realpathSync(abs);
-    root = fs.realpathSync(repo.root);
+    real = fs.realpathSync(repo.absolute(dir.replace(/\/$/, '')));
   } catch {
     notify.warn(`"${dir}" is gone.`);
     return;
   }
-  const rel = require('path').relative(root, real);
-  if (!rel || rel.startsWith('..') || require('path').isAbsolute(rel)) {
+  if (!inside(real)) {
     notify.warn(`"${dir}" no longer lies inside ${repo.name}; not opened.`);
     return;
   }
@@ -138,9 +148,9 @@ async function openNestedRepository(manager, repo, dir) {
   // Swapped for a link elsewhere between the check and the open: not ours to show.
   let opened;
   try {
-    opened = require('path').relative(root, fs.realpathSync(nested.root));
+    opened = fs.realpathSync(nested.root);
   } catch { /* gone */ }
-  if (!opened || opened.startsWith('..') || require('path').isAbsolute(opened)) {
+  if (!opened || !inside(opened)) {
     manager.closeRepository(nested);
     notify.warn(`"${dir}" no longer lies inside ${repo.name}; not opened.`);
     return;
@@ -412,7 +422,7 @@ function register(ctx) {
         if (!e || e.code !== 'NotStaged') throw e;
         // A file of a repository nested in this one cannot be committed here: commit nothing,
         // and leave the index as it was (the others were untracked).
-        await repo.unstage(untracked).catch((err) => log().warn(`Commit Selected: unstaging again failed: ${err.message}`));
+        await repo.unstageNew(untracked).catch((err) => log().warn(`Commit Selected: unstaging again failed: ${err.message}`));
         e.message = notStagedMessage(e.paths, e.nestedOf, { commit: true });
         reportNotStaged(manager, repo, e);
         return;

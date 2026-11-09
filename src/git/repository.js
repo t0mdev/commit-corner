@@ -286,7 +286,7 @@ class Repository extends EventEmitter {
       if (e.kind === 'ignored') ignored.push(e);
       // A repository inside the tree (an agent's worktree, a clone) shows as "dir/": it is not
       // one of your untracked files (not counted, staged, stashed or cleaned) — like the built-in Git.
-      else if (e.kind === 'untracked' && e.path.endsWith('/') && fs.existsSync(path.join(this.root, e.path, '.git'))) state.nested.push(e.path);
+      else if (e.kind === 'untracked' && e.path.endsWith('/') && isRepositoryMarker(path.join(this.root, e.path, '.git'))) state.nested.push(e.path);
       else if (e.kind === 'untracked') state.untracked.push(e);
       else if (e.kind === 'unmerged') state.conflicts.push(e);
       else if (e.kind !== 'ignored') {
@@ -314,7 +314,7 @@ class Repository extends EventEmitter {
   /** Untracked "dir/" entries with a repository somewhere below: replaced by their -uall entries. */
   /** @param {{fresh?: boolean}} [o] fresh: no cached answer (before staging or deleting) */
   async expandFoldersHoldingRepositories(entries, o = {}) {
-    const dirs = entries.filter((e) => e.kind === 'untracked' && e.path.endsWith('/') && !fs.existsSync(path.join(this.root, e.path, '.git')));
+    const dirs = entries.filter((e) => e.kind === 'untracked' && e.path.endsWith('/') && !isRepositoryMarker(path.join(this.root, e.path, '.git')));
     if (!dirs.length) return entries;
     // A quick look below each folder; folders too big to look through are asked of git (it does
     // not descend into a nested repository), so a large untracked folder stays one row unless
@@ -323,7 +323,7 @@ class Repository extends EventEmitter {
     // folder's own time, and a stale "none here" would let staging or Delete Untracked take it.
     const verdicts = dirs.map((e) => ({ e, holds: holdsRepository(path.join(this.root, e.path)) }));
     const ask = verdicts.filter((v) => v.holds === null).map((v) => v.e);
-    const hasNested = (list, dir) => list.some((x) => x.path.startsWith(dir) && x.path.endsWith('/') && fs.existsSync(path.join(this.root, x.path, '.git')));
+    const hasNested = (list, dir) => list.some((x) => x.path.startsWith(dir) && x.path.endsWith('/') && isRepositoryMarker(path.join(this.root, x.path, '.git')));
     const expand = verdicts.filter((v) => v.holds === true).map((v) => v.e);
     let asked = [];
     if (ask.length) {
@@ -1506,7 +1506,7 @@ class Repository extends EventEmitter {
         const st = fs.lstatSync(abs);
         dir = st.isDirectory() && !st.isSymbolicLink();
       } catch { /* deleted: staged as a deletion */ }
-      if (dir && abs !== this.root && fs.existsSync(path.join(abs, '.git'))) {
+      if (dir && abs !== this.root && isRepositoryMarker(path.join(abs, '.git'))) {
         // A repository itself: staged only when it is a submodule (a gitlink in the index).
         const { stdout } = await this.exec(['ls-files', '--stage', '--', lit(p.replace(/\/$/, ''))], { env: { GIT_OPTIONAL_LOCKS: '0' } });
         if (/^160000 /m.test(stdout)) out.push(p);
@@ -1523,7 +1523,7 @@ class Repository extends EventEmitter {
       const changes = [];
       for (const e of P.parseStatus(stdout).entries) {
         if (e.kind === 'ignored') continue;
-        if (e.path.endsWith('/') && fs.existsSync(path.join(this.root, e.path, '.git'))) inside.push(e.path);
+        if (e.path.endsWith('/') && isRepositoryMarker(path.join(this.root, e.path, '.git'))) inside.push(e.path);
         else changes.push(e);
       }
       // Only repositories in it: nothing of this folder can be staged, and that is said.
@@ -1544,7 +1544,20 @@ class Repository extends EventEmitter {
     }
     if (folders.length) gitlinksBefore = await this.gitlinksIn(folders); // submodules already there
     // An empty list must never become "git add -A" (everything).
-    const result = out.length ? await this.runWithPaths(['add', '-A'], out, { excludes }) : undefined;
+    let result;
+    if (out.length) {
+      try {
+        result = await this.runWithPaths(['add', '-A'], out, { excludes });
+      } catch (e) {
+        // A repository without a commit made in a folder added whole since it was looked at:
+        // git refuses everything ("does not have a commit checked out"). Without it, once more.
+        const m = e instanceof GitError && /^error: '([^'\n]+)' does not have a commit checked out/m.exec(e.stderr || '');
+        if (!m) throw e;
+        const dir = m[1].endsWith('/') ? m[1] : `${m[1]}/`;
+        skipped.push({ path: dir, nested: dir });
+        result = await this.runWithPaths(['add', '-A'], out, { excludes: [...excludes, `:(exclude,literal)${dir.slice(0, -1)}`] });
+      }
+    }
     // A repository created in a folder added whole since it was looked at went in as a gitlink
     // (git add takes one with a commit as a submodule): out again, and said.
     if (folders.length) skipped.push(...(await this.unstageNewGitlinks(folders, gitlinksBefore)));
@@ -1563,8 +1576,11 @@ class Repository extends EventEmitter {
 
   /** Gitlinks (mode 160000) in the index under `folders`, as a Set of paths. */
   async gitlinksIn(folders) {
-    const { stdout } = await this.exec(['ls-files', '-s', '-z', '--', ...folders.map(lit)]);
-    return new Set(stdout.split('\0').filter((r) => r.startsWith('160000 ')).map((r) => r.slice(r.indexOf('\t') + 1)));
+    // Many folders (a whole Untracked group): the whole index once, not a command line too long.
+    const many = tooLongForCommandLine(folders);
+    const { stdout } = await this.exec(['ls-files', '-s', '-z', ...(many ? [] : ['--', ...folders.map(lit)])]);
+    const links = stdout.split('\0').filter((r) => r.startsWith('160000 ')).map((r) => r.slice(r.indexOf('\t') + 1));
+    return new Set(many ? links.filter((x) => folders.some((f) => x.startsWith(f))) : links);
   }
 
   /** Remove gitlinks `git add` just made under `folders` (not in `before`); returns them as skipped. */
@@ -1645,6 +1661,16 @@ class Repository extends EventEmitter {
     // ordinary changes only and leave conflicts for an explicit decision.
     if (s.conflicts.length) return this.stage(s.unstaged.map((e) => e.path));
     return this.run(['add', '-u']);
+  }
+
+  /**
+   * Take paths that were untracked out of the index again (after staging them for a commit that
+   * did not happen): `rm --cached`, so a deletion you had staged for such a path stays staged
+   * (`reset` would bring the file back from HEAD); paths git never added are fine.
+   */
+  unstageNew(paths) {
+    if (!paths.length) return Promise.resolve();
+    return this.runWithPaths(['rm', '--cached', '-r', '-q', '--ignore-unmatch'], paths);
   }
 
   async unstage(paths) {
@@ -3198,9 +3224,12 @@ class Repository extends EventEmitter {
     return appendPattern(path.join(info, 'exclude'), pattern, '.git/info/exclude');
   }
 
-  /** Whether git tracks any file in folder `dir` ("dir/"). */
+  /**
+   * Whether git tracks any file in folder `dir` ("dir/"), in any casing ("Gen/" tracked, "gen/"
+   * new on a case-insensitive disk: info/exclude would match both).
+   */
   async tracksFilesIn(dir) {
-    const { stdout } = await this.exec(['ls-files', '-z', '--', lit(dir.replace(/\/$/, ''))]);
+    const { stdout } = await this.exec(['ls-files', '-z', '--', `:(literal,icase)${dir.replace(/\/$/, '')}`]);
     return !!stdout;
   }
 
@@ -3519,20 +3548,30 @@ function tooLongForCommandLine(paths) {
  * Whether `dotGit` makes its folder a repository for git (which then does not look inside): a .git
  * folder that is a git directory, or a small .git file starting "gitdir: <dir>" naming one. An
  * empty or half-copied .git folder, or a link to a removed worktree, does not (git lists and
- * stages those files). Never reads anything but a small regular file: a FIFO, a device or a huge
- * file named .git (anyone can make one in the working tree) must not block the extension host.
+ * stages those files). Reads nothing but a small regular file, opened without blocking: a FIFO,
+ * a device or a huge file named .git (anyone can make one in the working tree) must not stall
+ * the extension host. UNC targets (\\host\share, //host) are not looked at; other network
+ * mounts are, like git itself does.
  */
 function isRepositoryMarker(dotGit) {
+  let fd;
   try {
     const st = fs.statSync(dotGit);
     if (st.isDirectory()) return isGitDirectory(dotGit);
     if (!st.isFile() || st.size > 4096) return false;
-    const m = /^gitdir: *([^\r\n]+?)\s*(\r?\n|$)/.exec(fs.readFileSync(dotGit, 'utf8'));
-    // Not a network path (\\host\share, //host): looking there could hang or hand out credentials.
+    // O_NONBLOCK: swapped for a FIFO since the stat, the open still returns at once.
+    fd = fs.openSync(dotGit, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0));
+    const now = fs.fstatSync(fd);
+    if (!now.isFile() || now.size > 4096) return false;
+    const buf = Buffer.alloc(4096);
+    const text = buf.toString('utf8', 0, fs.readSync(fd, buf, 0, 4096, 0));
+    const m = /^gitdir: ([^\r\n]+?)\s*(\r?\n|$)/.exec(text);
     if (!m || /^(\\\\|\/\/)/.test(m[1])) return false;
     return isGitDirectory(path.resolve(path.dirname(dotGit), m[1]));
   } catch {
     return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
   }
 }
 
@@ -3570,9 +3609,9 @@ function notStagedMessage(missing, nestedOf, o = {}) {
       : repos[0] === p0 ? 'it is'
         : p0.endsWith('/') ? `it holds only ${names(repos)},`
           : `it is in ${quote(repos[0])},`;
-    const what = several ? 'separate Git repositories inside this one (each has its own .git), and git skips their files without a word'
-      : 'a separate Git repository inside this one (it has its own .git), and git skips its files without a word';
-    const todo = o.commit ? `Commit ${!one ? 'them' : p0.endsWith('/') ? 'its files' : 'it'} there, or leave ${one ? 'it' : 'them'} out of the selection.`
+    const what = several ? 'separate Git repositories inside this one, and git skips their files without a word'
+      : 'a separate Git repository inside this one, and git skips its files without a word';
+    const todo = o.commit ? `Commit ${!one ? 'them' : p0.endsWith('/') ? 'its files' : 'it'} ${several ? 'in those repositories' : 'there'}, or leave ${one ? 'it' : 'them'} out of the selection.`
       : one && p0.endsWith('/') ? `Stage its files ${several ? 'in those repositories' : 'there'}.`
         : `Stage ${one ? 'it' : 'them'} in ${several ? 'those repositories' : 'that repository'}.`;
     if (o.commit) {
@@ -3581,7 +3620,13 @@ function notStagedMessage(missing, nestedOf, o = {}) {
       parts.push(`Nothing committed: ${subject} ${relation} ${what}. ${todo}`);
     } else parts.push(`${subject} ${one ? 'was' : 'were'} not staged: ${where} ${what}. ${todo}`);
   }
-  if (other.length) parts.push(`${other.length === 1 ? quote(other[0]) : count(other)} ${other.length === 1 ? 'was' : 'were'} not staged: git left ${other.length === 1 ? 'it' : 'them'} out without saying why.`);
+  if (other.length) {
+    const subject = other.length === 1 ? quote(other[0]) : count(other);
+    const it = other.length === 1 ? 'it' : 'them';
+    // (After "Nothing committed: …" for the others, a sentence of its own.)
+    parts.push(o.commit && !inNested.length ? `Nothing committed: git did not stage ${subject} and did not say why.`
+      : `${subject} ${other.length === 1 ? 'was' : 'were'} not staged: git left ${it} out without saying why.`);
+  }
   return parts.join(' ');
 }
 
