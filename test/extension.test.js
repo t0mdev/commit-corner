@@ -1249,7 +1249,7 @@ test('Commit Selected with a file of a nested repository commits nothing and sta
     const from = mock.ui.messages.length;
     await run('commitCorner.commitSelected', { repoRoot: main.root, path: '.local-work/c1/x.txt', group: 'untracked' }, { repoRoot: main.root, path: 'mine-selected.txt', group: 'untracked' });
     const said = shownSince(from);
-    assert.ok(said.some((m) => m.level === 'warning' && /^Nothing committed\. "\.local-work\/c1\/x\.txt" was not staged: it is in "\.local-work\/c1\/"/.test(m.msg)), JSON.stringify(said));
+    assert.ok(said.some((m) => m.level === 'warning' && /^Nothing committed: "\.local-work\/c1\/x\.txt" is in "\.local-work\/c1\/", a separate Git repository .* Commit it there, or leave it out of the selection\.$/.test(m.msg)), JSON.stringify(said));
     assert.equal(r.git('rev-parse', 'HEAD'), head, 'no commit');
     assert.equal(r.git('diff', '--cached', '--name-only'), '', 'and nothing staged on the way');
   } finally {
@@ -1309,7 +1309,7 @@ test('over the status limit, a flooding folder that also holds tracked files is 
   try {
     await api.manager.refresh(main);
     const warning = await until(() => shownSince(from2).find((m) => m.level === 'warning'), 'the warning');
-    assert.match(warning.msg, /8 of them new files in "gen\/"; Source Control shows the first 5\. Add that folder to \.gitignore, or raise/);
+    assert.match(warning.msg, /8 of them new files in "gen\/", where git also tracks files; Source Control shows the first 5\. Ignore the generated ones in \.gitignore, or raise/);
   } finally {
     mock.configValues.delete('statusLimit');
     for (let i = 0; i < 8; i++) fs.rmSync(path.join(r.dir, 'gen', `f${i}.txt`), { force: true });
@@ -1366,6 +1366,37 @@ test('a .git appearing or going below the root refreshes the repository; the roo
     await until(() => main.state.untracked.some((e) => e.path === '.local-work/c3/a.txt'), 'the copy\'s files listed again');
   } finally {
     main.refreshState = original;
+    await cleanAgentCopies(main);
+  }
+});
+
+test('staging an Untracked group of thousands of files goes folder by folder, nested repositories left out', async () => {
+  const main = repo();
+  try {
+    for (let i = 0; i < 1100; i++) r.write(`.local-work/copy/f${i}.txt`, `${i}\n`);
+    r.write('.local-work/c1/x.txt', 'x\n');
+    r.git('init', '-q', path.join(r.dir, '.local-work', 'c1'));
+    await api.manager.refresh(main);
+    assert.equal(main.state.untracked.length, 1100);
+    const group = mock.sourceControls[0].groups.find((g) => g.id === 'untracked');
+    const from = mock.ui.messages.length;
+    const ran = [];
+    const run0 = main.run.bind(main);
+    main.run = (a, o) => {
+      ran.push(a);
+      return run0(a, o);
+    };
+    try {
+      await run('commitCorner.stageAll', group);
+    } finally {
+      main.run = run0;
+    }
+    const add = ran.find((a) => a[0] === 'add');
+    assert.ok(add && add.length < 20, `one pathspec for the folder (${add && add.length} arguments)`);
+    assert.equal(r.git('diff', '--cached', '--name-only').split('\n').length, 1100);
+    assert.ok(!shownSince(from).some((m) => m.level !== 'info'), JSON.stringify(shownSince(from)));
+  } finally {
+    r.git('reset', '-q');
     await cleanAgentCopies(main);
   }
 });

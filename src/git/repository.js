@@ -195,12 +195,16 @@ class Repository extends EventEmitter {
           e.code = ErrorCodes.StaleLock;
           e.lockFile = lock.file;
           const minutes = Math.round(lock.age / 60000);
-          e.message = `${lock.file} is ${minutes >= 120 ? `${Math.round(minutes / 60)} hours` : `${minutes} minutes`} old: a git process that stopped (crashed or was killed) left it behind, and nothing will remove it. If no git command is running in this repository, delete that file and try again.`;
+          const age = minutes >= 48 * 60 ? `${Math.round(minutes / 1440)} days` : minutes >= 120 ? `${Math.round(minutes / 60)} hours` : `${minutes} minutes`;
+          e.message = `${lock.file} is ${age} old: probably left behind by a git process that stopped (crashed or was killed). If no git command is running in this repository (a terminal's "git commit" waiting for its editor holds it too), delete that file and try again.`;
           throw e;
         }
         if (waited >= limit || (opts.signal && opts.signal.aborted)) throw e;
         // The status bar's "git …" item (after 2 s) says what it waits for.
-        if (this.running) this.running.waitingFor = 'another git process (index.lock)';
+        if (this.running && !this.running.waitingFor) {
+          this.running.waitingFor = 'index.lock';
+          this.emit('busyWaiting', this.running);
+        }
         const ms = Math.min(1000, 100 * 2 ** attempt, limit - waited);
         waited += ms;
         await delay(ms, opts.signal);
@@ -292,8 +296,11 @@ class Repository extends EventEmitter {
     }
     // Nested repositories may have come or gone: look again at the next contains().
     this.boundaryCache = undefined;
-    // Superseded: do not publish, but the caller still gets what it just read (never older).
-    if (seq !== this.refreshSeq) return state;
+    // Older than what is shown already: not published, but the caller still gets what it just
+    // read. (Newer than that, it is: when statuses overlap — one stuck, or each slower than
+    // changes come — a later one finishing first must not keep every earlier one from showing.)
+    if (seq < (this.publishedSeq || 0)) return state;
+    this.publishedSeq = seq;
     this.state = state;
     this.ignored = ignored;
     if (!operation && (this.rebaseTempDirs.size || !this.sweptRebaseDirs)) {
@@ -1462,10 +1469,13 @@ class Repository extends EventEmitter {
    * OS argument limit (E2BIG) and is quadratic in git for many pathspecs.
    */
   runWithPaths(args, paths, opts = {}) {
-    if (tooLongForCommandLine(paths)) {
-      return this.run([...args, '--pathspec-from-file=-', '--pathspec-file-nul'], { ...opts, input: paths.map(lit).join('\0') + '\0' });
+    // opts.excludes: ready pathspecs (":(exclude,literal)dir") that go with the literal paths.
+    const { excludes = [], ...rest } = opts;
+    const specs = [...paths.map(lit), ...excludes];
+    if (tooLongForCommandLine(specs)) {
+      return this.run([...args, '--pathspec-from-file=-', '--pathspec-file-nul'], { ...rest, input: specs.join('\0') + '\0' });
     }
-    return this.run([...args, '--', ...paths.map(lit)], opts);
+    return this.run([...args, '--', ...specs], rest);
   }
 
   /** runWithPaths() for use inside locked(): runs directly instead of queueing. */
@@ -1485,6 +1495,10 @@ class Repository extends EventEmitter {
     const out = [];
     /** Picked folders that turned out to be repositories of their own, with nothing else to add. */
     const skipped = [];
+    /** Folders added as one pathspec, and the repositories in them left out. */
+    const folders = [];
+    const excludes = [];
+    let gitlinksBefore;
     for (const p of paths) {
       const abs = path.join(this.root, ...p.replace(/\/$/, '').split('/'));
       let dir = false;
@@ -1501,27 +1515,66 @@ class Repository extends EventEmitter {
       }
       if (!dir || holdsRepository(abs) === false) {
         out.push(p);
+        if (dir) folders.push(p); // (a repository created there before git add runs: see below)
         continue;
       }
       const { stdout } = await this.exec(['status', '--porcelain=v2', '-z', '--untracked-files=all', '--', lit(p)], { env: { GIT_OPTIONAL_LOCKS: '0' } });
-      const before = out.length;
       const inside = [];
+      const changes = [];
       for (const e of P.parseStatus(stdout).entries) {
         if (e.kind === 'ignored') continue;
-        if (e.path.endsWith('/') && fs.existsSync(path.join(this.root, e.path, '.git'))) {
-          inside.push(e.path);
-          continue;
-        }
-        out.push(e.path);
-        if (e.origPath) out.push(e.origPath);
+        if (e.path.endsWith('/') && fs.existsSync(path.join(this.root, e.path, '.git'))) inside.push(e.path);
+        else changes.push(e);
       }
       // Only repositories in it: nothing of this folder can be staged, and that is said.
-      if (out.length === before && inside.length) skipped.push({ path: p, nested: inside[0], all: inside });
+      if (!changes.length && inside.length) skipped.push({ path: p, nested: inside[0], all: inside });
+      else if (changes.length > FOLDER_AS_ONE) {
+        // Thousands of files (agents' copies): the folder as one pathspec, its repositories
+        // excluded. git matches each literal path against every other, so 100,000 of them
+        // take minutes; the folder takes a second.
+        out.push(p);
+        folders.push(p);
+        excludes.push(...inside.map((n) => `:(exclude,literal)${n.replace(/\/$/, '')}`));
+      } else {
+        for (const e of changes) {
+          out.push(e.path);
+          if (e.origPath) out.push(e.origPath);
+        }
+      }
     }
+    if (folders.length) gitlinksBefore = await this.gitlinksIn(folders); // submodules already there
     // An empty list must never become "git add -A" (everything).
-    const result = out.length ? await this.runWithPaths(['add', '-A'], out) : undefined;
+    const result = out.length ? await this.runWithPaths(['add', '-A'], out, { excludes }) : undefined;
+    // A repository created in a folder added whole since it was looked at went in as a gitlink
+    // (git add takes one with a commit as a submodule): out again, and said.
+    if (folders.length) skipped.push(...(await this.unstageNewGitlinks(folders, gitlinksBefore)));
     await this.checkStaged(out, skipped);
     return result;
+  }
+
+  /**
+   * The untracked paths as git sums them up: a folder with nothing tracked in it is one "dir/"
+   * (repositories nested in this one left out). For staging thousands of new files at once.
+   */
+  async untrackedFolders() {
+    const { stdout } = await this.exec(['ls-files', '-z', '-o', '--exclude-standard', '--directory', '--no-empty-directory']);
+    return stdout.split('\0').filter((p) => p && !(p.endsWith('/') && isRepositoryMarker(path.join(this.absolute(p.slice(0, -1)), '.git'))));
+  }
+
+  /** Gitlinks (mode 160000) in the index under `folders`, as a Set of paths. */
+  async gitlinksIn(folders) {
+    const { stdout } = await this.exec(['ls-files', '-s', '-z', '--', ...folders.map(lit)]);
+    return new Set(stdout.split('\0').filter((r) => r.startsWith('160000 ')).map((r) => r.slice(r.indexOf('\t') + 1)));
+  }
+
+  /** Remove gitlinks `git add` just made under `folders` (not in `before`); returns them as skipped. */
+  async unstageNewGitlinks(folders, before) {
+    const now = await this.gitlinksIn(folders);
+    const added = [...now].filter((x) => !(before && before.has(x)));
+    if (!added.length) return [];
+    // -f: a gitlink just added differs from HEAD and the folder; --cached keeps the folder as is.
+    await this.runWithPaths(['rm', '--cached', '-q', '-f'], added);
+    return added.map((x) => ({ path: `${x}/`, nested: `${x}/` }));
   }
 
   /**
@@ -1532,14 +1585,7 @@ class Repository extends EventEmitter {
    * @param {string[]} paths what was added @param {{path:string, nested:string, all?:string[]}[]} [skipped]
    */
   async checkStaged(paths, skipped = []) {
-    const files = paths.filter((p) => {
-      if (p.endsWith('/')) return false;
-      try {
-        return !fs.lstatSync(this.absolute(p)).isDirectory();
-      } catch {
-        return false; // deleted: staged as a deletion, not looked for in the index
-      }
-    });
+    const files = paths.filter((p) => !p.endsWith('/'));
     let missing = [];
     if (files.length) {
       // ls-files has no --pathspec-from-file: with very many paths, list the whole index.
@@ -1547,8 +1593,17 @@ class Repository extends EventEmitter {
       const { stdout } = await this.exec(['ls-files', '-z', ...(many ? [] : ['--', ...files.map(lit)])]);
       const listed = stdout.split('\0');
       const inIndex = new Set(listed);
-      missing = files.filter((p) => !inIndex.has(p));
-      if (missing.length && ['true', 'yes', 'on', '1'].includes(String(await this.getConfig('core.ignorecase').catch(() => '') || '').toLowerCase())) {
+      // Only those not in the index are looked at on disk: deleted (staged as a deletion) or a
+      // folder (a symlink to one is a file to git) is not missing.
+      missing = files.filter((p) => {
+        if (inIndex.has(p)) return false;
+        try {
+          return !fs.lstatSync(this.absolute(p)).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+      if (missing.length && isTrue((await this.exec(['config', '--type=bool', '--get', 'core.ignorecase'], { allowFailure: true })).stdout)) {
         // Case-insensitive: git files a new "src/new.js" under the folder's casing in the index
         // ("Src/new.js") — staged all the same. (Listed in full: the pathspec is case-exact.)
         const all = many ? listed : (await this.exec(['ls-files', '-z'])).stdout.split('\0');
@@ -1557,24 +1612,28 @@ class Repository extends EventEmitter {
       }
     }
     if (!missing.length && !skipped.length) return;
-    const nestedOf = new Map(missing.map((p) => [p, this.nestedRepositoryOf(p)]));
-    for (const s of skipped) nestedOf.set(s.path, s.nested);
-    const err = new Error(notStagedMessage([...skipped.map((s) => s.path), ...missing], nestedOf));
-    err.code = 'NotStaged';
-    err.paths = [...skipped.map((s) => s.path), ...missing];
-    err.nested = [...new Set([...skipped.flatMap((s) => s.all || [s.nested]), ...[...nestedOf.values()].filter(Boolean)])];
-    throw err;
+    const memo = new Map();
+    const nestedOf = new Map(missing.map((p) => {
+      const n = this.nestedRepositoryOf(p, memo);
+      return [p, n ? [n] : []];
+    }));
+    for (const x of skipped) nestedOf.set(x.path, x.all || [x.nested]);
+    const all = [...skipped.map((x) => x.path), ...missing];
+    throw notStagedError(all, nestedOf);
   }
 
   /**
    * The repository nested in this one that holds `relPath` ("dir/"), looked up on disk now:
    * the nearest folder above it, below the root, with a .git of its own.
    */
-  nestedRepositoryOf(relPath) {
+  nestedRepositoryOf(relPath, memo = new Map()) {
     const parts = relPath.replace(/\/$/, '').split('/');
     for (let i = parts.length - 1; i > 0; i--) {
       const dir = parts.slice(0, i).join('/');
-      if (isRepositoryMarker(path.join(this.absolute(dir), '.git'))) return `${dir}/`;
+      // memo: folder -> whether it is a repository (many files share their folders).
+      let is = memo.get(dir);
+      if (is === undefined) memo.set(dir, (is = isRepositoryMarker(path.join(this.absolute(dir), '.git'))));
+      if (is) return `${dir}/`;
     }
     return undefined;
   }
@@ -3439,6 +3498,9 @@ function holdsRepository(dir, budget = { left: 5000 }) {
 // sign-in window during a background fetch.
 const QUIET_NETWORK_ENV = { COMMIT_CORNER_ASKPASS_QUIET: '1', GCM_INTERACTIVE: 'never' };
 
+/** A folder with more changed files than this is staged as one pathspec (see stage()). */
+const FOLDER_AS_ONE = 1000;
+
 /** Above this many paths, pass them on stdin instead of the command line. */
 const PATHS_ON_COMMAND_LINE = 200;
 
@@ -3454,48 +3516,91 @@ function tooLongForCommandLine(paths) {
 }
 
 /**
- * What a NotStaged error says: which files, which repositories nested in this one they are in
- * (when known: `nestedOf` maps a path to "dir/"), and what to do.
- * @param {string[]} missing @param {Map<string, string|undefined>} nestedOf
- */
-function notStagedMessage(missing, nestedOf) {
-  const quote = (x) => `"${x}"`;
-  const and = (list) => (list.length < 3 ? list.join(' and ') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`);
-  const inNested = missing.filter((p) => nestedOf.get(p));
-  const other = missing.filter((p) => !nestedOf.get(p));
-  const parts = [];
-  if (inNested.length) {
-    const one = inNested.length === 1;
-    const repos = [...new Set(inNested.map((p) => nestedOf.get(p)))];
-    const subject = one ? `${quote(inNested[0])} was` : `${inNested.length} files were`;
-    if (repos.length > 1) {
-      parts.push(`${subject} not staged: they are in ${and(repos.slice(0, 3).map(quote))}${repos.length > 3 ? ` (${repos.length} in all)` : ''}, separate Git repositories inside this one (each has its own .git), and git skips their files without a word. Stage them in those repositories.`);
-    } else {
-      // A picked file, the repository itself, or a folder ("dir/") that holds nothing else.
-      const where = !one ? `they are in ${quote(repos[0])},`
-        : repos[0] === inNested[0] ? 'it is'
-          : inNested[0].endsWith('/') ? `it holds only ${quote(repos[0])},` : `it is in ${quote(repos[0])},`;
-      parts.push(`${subject} not staged: ${where} a separate Git repository inside this one (it has its own .git), and git skips its files without a word. Stage ${one ? 'it' : 'them'} in that repository.`);
-    }
-  }
-  if (other.length) parts.push(`${other.length === 1 ? `${quote(other[0])} was` : `${other.length} files were`} not staged: git left ${other.length === 1 ? 'it' : 'them'} out without saying why.`);
-  return parts.join(' ');
-}
-
-/**
- * Whether `dotGit` makes its folder a repository for git (which then does not look inside):
- * a .git folder with a HEAD, or a .git file "gitdir: <dir>" naming a folder with a HEAD. An empty
- * .git folder or a link to a removed worktree does not (git lists and stages those files).
+ * Whether `dotGit` makes its folder a repository for git (which then does not look inside): a .git
+ * folder that is a git directory, or a small .git file starting "gitdir: <dir>" naming one. An
+ * empty or half-copied .git folder, or a link to a removed worktree, does not (git lists and
+ * stages those files). Never reads anything but a small regular file: a FIFO, a device or a huge
+ * file named .git (anyone can make one in the working tree) must not block the extension host.
  */
 function isRepositoryMarker(dotGit) {
   try {
     const st = fs.statSync(dotGit);
-    if (st.isDirectory()) return fs.existsSync(path.join(dotGit, 'HEAD'));
-    const m = /^gitdir: *(.+?)\s*$/m.exec(fs.readFileSync(dotGit, 'utf8').slice(0, 4096));
-    return !!m && fs.existsSync(path.join(path.resolve(path.dirname(dotGit), m[1]), 'HEAD'));
+    if (st.isDirectory()) return isGitDirectory(dotGit);
+    if (!st.isFile() || st.size > 4096) return false;
+    const m = /^gitdir: *([^\r\n]+?)\s*(\r?\n|$)/.exec(fs.readFileSync(dotGit, 'utf8'));
+    // Not a network path (\\host\share, //host): looking there could hang or hand out credentials.
+    if (!m || /^(\\\\|\/\/)/.test(m[1])) return false;
+    return isGitDirectory(path.resolve(path.dirname(dotGit), m[1]));
   } catch {
     return false;
   }
+}
+
+/** git's own test, roughly: HEAD, and objects + refs here or through commondir (a worktree's). */
+function isGitDirectory(dir) {
+  const has = (name) => fs.existsSync(path.join(dir, name));
+  return has('HEAD') && ((has('objects') && has('refs')) || has('commondir'));
+}
+
+/**
+ * What a NotStaged error says: which files, which repositories nested in this one they are in
+ * (`nestedOf` maps a path to its repositories, "dir/"), and what to do. `commit`: for Commit
+ * Selected, which commits nothing then.
+ * @param {string[]} missing @param {Map<string, string[]|undefined>} nestedOf @param {{commit?: boolean}} [o]
+ */
+function notStagedMessage(missing, nestedOf, o = {}) {
+  const quote = (x) => `"${x}"`;
+  const names = (list) => {
+    const shown = list.slice(0, 3).map(quote);
+    if (list.length > 3) return `${shown.join(', ')} and ${list.length - 3} more`;
+    return shown.length < 3 ? shown.join(' and ') : `${shown.slice(0, -1).join(', ')} and ${shown[2]}`;
+  };
+  const count = (list) => `${list.length} ${list.some((p) => p.endsWith('/')) ? 'items' : 'files'}`;
+  const inNested = missing.filter((p) => (nestedOf.get(p) || []).length);
+  const other = missing.filter((p) => !(nestedOf.get(p) || []).length);
+  const parts = [];
+  if (inNested.length) {
+    const one = inNested.length === 1;
+    const repos = [...new Set(inNested.flatMap((p) => nestedOf.get(p)))];
+    const several = repos.length > 1;
+    const subject = one ? quote(inNested[0]) : count(inNested);
+    const p0 = inNested[0];
+    // A picked file, the repository itself, or a folder ("dir/") that holds nothing else.
+    const where = !one ? `they are in ${names(repos)},`
+      : repos[0] === p0 ? 'it is'
+        : p0.endsWith('/') ? `it holds only ${names(repos)},`
+          : `it is in ${quote(repos[0])},`;
+    const what = several ? 'separate Git repositories inside this one (each has its own .git), and git skips their files without a word'
+      : 'a separate Git repository inside this one (it has its own .git), and git skips its files without a word';
+    const todo = o.commit ? `Commit ${!one ? 'them' : p0.endsWith('/') ? 'its files' : 'it'} there, or leave ${one ? 'it' : 'them'} out of the selection.`
+      : one && p0.endsWith('/') ? `Stage its files ${several ? 'in those repositories' : 'there'}.`
+        : `Stage ${one ? 'it' : 'them'} in ${several ? 'those repositories' : 'that repository'}.`;
+    if (o.commit) {
+      // "Nothing committed: "x" is in "c1/", a separate …" (no repeated "not committed").
+      const relation = !one ? `are in ${names(repos)},` : where.replace(/^it /, '').replace(/^is$/, 'is');
+      parts.push(`Nothing committed: ${subject} ${relation} ${what}. ${todo}`);
+    } else parts.push(`${subject} ${one ? 'was' : 'were'} not staged: ${where} ${what}. ${todo}`);
+  }
+  if (other.length) parts.push(`${other.length === 1 ? quote(other[0]) : count(other)} ${other.length === 1 ? 'was' : 'were'} not staged: git left ${other.length === 1 ? 'it' : 'them'} out without saying why.`);
+  return parts.join(' ');
+}
+
+/** git's notion of a true config value ("true", "yes", "on", "1", or a bare key). */
+function isTrue(value) {
+  return ['true', 'yes', 'on', '1'].includes(String(value === undefined || value === null ? '' : value).trim().toLowerCase());
+}
+
+/**
+ * The NotStaged error: its message, the paths left out (`paths`), the repositories they are in
+ * (`nested`), and `nestedOf` for wording it differently (`notStagedMessage`).
+ */
+function notStagedError(paths, nestedOf) {
+  const err = new Error(notStagedMessage(paths, nestedOf));
+  err.code = 'NotStaged';
+  err.paths = paths;
+  err.nested = [...new Set([...nestedOf.values()].flat())];
+  err.nestedOf = nestedOf;
+  return err;
 }
 
 /** Resolves after `ms`, or as soon as `signal` aborts. */
@@ -3539,4 +3644,4 @@ function shellArg(s) {
   return `'${String(s).replace(/'/g, `'\\''`)}'`;
 }
 
-module.exports = { checkRevs, checkRemotes, Repository, INDEX, WORKTREE, EMPTY_TREE, PR_REF_PREFIX, parseRebaseConfig, safeRelPath, isGitDirName };
+module.exports = { checkRevs, checkRemotes, Repository, INDEX, WORKTREE, EMPTY_TREE, PR_REF_PREFIX, parseRebaseConfig, safeRelPath, isGitDirName, notStagedMessage };

@@ -178,7 +178,9 @@ class ScmProvider {
     const excludable = folder && !(await repo.tracksFilesIn(folder.dir));
     const exclude = excludable && `Exclude "${folder.dir}" Locally`;
     const message = folder
-      ? `${repo.name} has ${n(total)} changed files, ${n(folder.count)} of them new files in "${folder.dir}"; Source Control shows the first ${n(limit)}. ${excludable ? 'Exclude that folder (in this clone only), add it to .gitignore' : 'Add that folder to .gitignore'}, or raise "commitCorner.statusLimit".`
+      ? excludable
+        ? `${repo.name} has ${n(total)} changed files, ${n(folder.count)} of them new files in "${folder.dir}"; Source Control shows the first ${n(limit)}. Exclude that folder (in this clone only), add it to .gitignore, or raise "commitCorner.statusLimit".`
+        : `${repo.name} has ${n(total)} changed files, ${n(folder.count)} of them new files in "${folder.dir}", where git also tracks files; Source Control shows the first ${n(limit)}. Ignore the generated ones in .gitignore, or raise "commitCorner.statusLimit".`
       : `${repo.name} has ${n(total)} changed files; Source Control shows the first ${n(limit)}. Add generated folders to .gitignore, or raise "commitCorner.statusLimit".`;
     const choice = await notify.warn(message, ...(exclude ? [exclude] : []), 'Open Settings');
     if (choice === 'Open Settings') {

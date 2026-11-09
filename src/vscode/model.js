@@ -402,7 +402,8 @@ class RepositoryManager {
         // A .git coming or going below the root: a repository nested here appeared (an agent's
         // copy got its .git after its files) or went. Its files are then one row, or files again.
         // (Created or deleted only: a nested .git folder "changes" whenever its repository works.)
-        if (!changed && repo.relative(path.dirname(uri.fsPath))) refresh();
+        // Not inside an ignored folder or another nested repository: nothing shown there.
+        if (!changed && repo.relative(path.dirname(uri.fsPath)) && !outsideStatus(repo, path.dirname(uri.fsPath))) refresh();
         return;
       }
       if (outsideStatus(repo, uri.fsPath)) return;
@@ -499,14 +500,24 @@ class RepositoryManager {
     if (!repo || this.repos.get(repo.root) !== repo) return Promise.resolve();
     let q = this.refreshQueues.get(repo.root);
     if (!q) this.refreshQueues.set(repo.root, (q = { running: undefined, started: 0, next: undefined }));
-    if (q.next) return q.next;
     // A status that hangs (a stuck network drive, a filter waiting for input) must not hold every
-    // later refresh: after a minute, one starts beside it (the newest result wins either way).
-    if (q.running && Date.now() - q.started < STUCK_REFRESH_MS) {
-      q.next = q.running.catch(() => {}).then(() => {
-        q.next = undefined;
-        return this.refresh(repo);
-      });
+    // later refresh: one running for a minute no longer counts, and the one queued behind it
+    // starts then at the latest (the newest result wins either way).
+    const stuckMs = this.stuckRefreshMs || STUCK_REFRESH_MS; // (shorter in tests)
+    const stuck = q.running && Date.now() - q.started >= stuckMs;
+    if (q.running && !stuck) {
+      if (!q.next) {
+        let timer;
+        const free = new Promise((resolve) => {
+          timer = setTimeout(resolve, q.started + stuckMs - Date.now());
+          if (timer.unref) timer.unref();
+        });
+        q.next = Promise.race([q.running.catch(() => {}), free]).then(() => {
+          clearTimeout(timer);
+          q.next = undefined;
+          return this.refresh(repo);
+        });
+      }
       return q.next;
     }
     const running = this.refreshOnce(repo).finally(() => {
@@ -528,9 +539,11 @@ class RepositoryManager {
     // Ref tips once per refresh, shared by every view (graph, branches, compare, file provider).
     const [, tips] = await Promise.all([repo.refreshState(), repo.getRefTips().catch(() => '')]);
     repo.refTips = tips;
-    this.lastRefreshMs.set(repo.root, Date.now() - started);
     this._onDidChangeState.fire(repo);
     this.updateEditorContext();
+    // What a refresh costs includes the views redrawing (synchronous listeners): the debounce
+    // backs off by all of it.
+    this.lastRefreshMs.set(repo.root, Date.now() - started);
   }
 
   /** Context keys for editor-title buttons: is the active file changed, is it the index side of a diff? */

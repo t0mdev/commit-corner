@@ -1841,7 +1841,7 @@ test('several nested repositories, or files git skipped for no known reason, are
   assert.equal(err.message, '3 files were not staged: they are in "a/" and "b/", separate Git repositories inside this one (each has its own .git), and git skips their files without a word. Stage them in those repositories.');
   assert.deepEqual(err.nested, ['a/', 'b/']);
   err = await rejection(repo.checkStaged([], [nested('a/x'), nested('b/y'), nested('c/y'), nested('d/y')]));
-  assert.match(err.message, /they are in "a\/", "b\/" and "c\/" \(4 in all\)/);
+  assert.match(err.message, /they are in "a\/", "b\/", "c\/" and 1 more, separate Git repositories/);
   // A file not in the index after git add, though in no nested repository (the check itself).
   writeIn(repo, 'plain.txt');
   err = await rejection(repo.checkStaged(['plain.txt']));
@@ -1924,7 +1924,7 @@ test('a write waits for a lock another git process releases within seconds, give
   err = await rejection(repo.stage(['c.txt']));
   assert.ok(Date.now() - started < 3000, `failed after ${Date.now() - started} ms`);
   assert.equal(err.code, 'StaleLock');
-  assert.match(err.message, /index\.lock is 60 minutes old: a git process that stopped \(crashed or was killed\) left it behind/);
+  assert.match(err.message, /index\.lock is 60 minutes old: probably left behind by a git process that stopped \(crashed or was killed\)\. If no git command is running/);
 });
 
 test('only git\'s own "Unable to create … .lock" line counts as a held lock (not a path listed in other output)', () => {
@@ -2104,4 +2104,142 @@ test('Activity and Worktrees pages closed while they load post nothing (no "Webv
     await page.send(); // a debounced send after closing: nothing
     assert.ok(panel.posted.every((m) => m.type !== 'data'), `${Page.name}: nothing posted after closing`);
   }
+});
+
+test('a refresh stuck for the time limit no longer holds the ones asked for meanwhile, however many', async (t) => {
+  const h = refreshHarness(t);
+  h.manager.stuckRefreshMs = 200;
+  h.manager.refresh(h.repo); // hangs: never released
+  const asked = [];
+  for (let k = 0; k < 3; k++) {
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    asked.push(h.manager.refresh(h.repo)); // agents keep writing
+  }
+  assert.equal(h.calls.length, 1, 'within the limit: queued behind it');
+  await until(() => h.calls.length === 2, 'the queued refresh started once the first counts as stuck', 2000);
+  await h.release(); // (the stuck one)
+  await h.release(); // the queued one finishes
+  await Promise.all(asked);
+});
+
+/** Poll until `fn` returns something truthy. */
+async function until(fn, what, ms = 5000) {
+  const end = Date.now() + ms;
+  for (;;) {
+    if (await fn()) return;
+    if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+test('overlapping statuses: an older one finishing first is shown, one finishing after a newer is not', async (t) => {
+  const { r, repo } = await based(t);
+  // Hold each `git status` until the test lets it go, in any order.
+  const held = [];
+  const exec = repo.exec.bind(repo);
+  repo.exec = (args, opts) => (args[0] === 'status'
+    ? new Promise((resolve) => held.push(() => resolve(exec(args, opts))))
+    : exec(args, opts));
+  let published = 0;
+  repo.on('didChangeState', () => published++);
+  r.write('one.txt', '1\n');
+  const older = repo.refreshState();
+  await until(() => held.length === 1, 'the first status');
+  r.write('two.txt', '2\n');
+  const newer = repo.refreshState();
+  await until(() => held.length === 2, 'the second status');
+  held[0]();
+  await older;
+  assert.equal(published, 1, 'the older one is shown when nothing newer is (a stuck newer would hide it forever)');
+  held[1]();
+  await newer;
+  assert.equal(published, 2);
+  assert.ok(repo.state.untracked.some((e) => e.path === 'two.txt'));
+  // The other order: the newer one finishes first; the older, later, is not shown over it.
+  r.write('three.txt', '3\n');
+  const a = repo.refreshState();
+  await until(() => held.length === 3, 'status a');
+  const b = repo.refreshState();
+  await until(() => held.length === 4, 'status b');
+  held[3]();
+  await b;
+  held[2]();
+  await a;
+  assert.equal(published, 3, 'the older result, finishing last, is not published');
+});
+
+test('what counts as a repository nested in the working tree: git\'s rule, and nothing that could block', async (t) => {
+  const { r, repo } = await based(t);
+  // A .git folder with only HEAD (an agent's cp -r halfway): git lists and stages its files.
+  fs.mkdirSync(path.join(r.dir, 'half', '.git'), { recursive: true });
+  fs.writeFileSync(path.join(r.dir, 'half', '.git', 'HEAD'), 'ref: refs/heads/main\n');
+  assert.equal(repo.nestedRepositoryOf('half/a.txt'), undefined);
+  // "gitdir:" not on the first line: not a gitfile to git.
+  r.git('init', '-q', path.join(r.dir, 'real'));
+  r.write('late/.git', `# note\ngitdir: ${path.join(r.dir, 'real', '.git')}\n`);
+  assert.equal(repo.nestedRepositoryOf('late/a.txt'), undefined);
+  r.write('good/.git', `gitdir: ${path.join(r.dir, 'real', '.git')}\r\n`);
+  assert.equal(repo.nestedRepositoryOf('good/a.txt'), 'good/', 'a CRLF gitfile naming a repository');
+  // A huge "gitfile" is not read.
+  r.write('huge/.git', `gitdir: ${path.join(r.dir, 'real', '.git')}\n${'x'.repeat(100000)}`);
+  assert.equal(repo.nestedRepositoryOf('huge/a.txt'), undefined);
+  if (process.platform !== 'win32') {
+    // A FIFO or a device named .git: answered at once, never read.
+    fs.mkdirSync(path.join(r.dir, 'fifo'));
+    execFileSync('mkfifo', [path.join(r.dir, 'fifo', '.git')]);
+    fs.mkdirSync(path.join(r.dir, 'dev'));
+    fs.symlinkSync('/dev/zero', path.join(r.dir, 'dev', '.git'));
+    const started = Date.now();
+    assert.equal(repo.nestedRepositoryOf('fifo/a.txt'), undefined);
+    assert.equal(repo.nestedRepositoryOf('dev/a.txt'), undefined);
+    assert.ok(Date.now() - started < 1000);
+  }
+});
+
+test('thousands of new files in a folder are staged as the folder, its nested repositories left out', async (t) => {
+  const { r, repo } = await based(t);
+  repo.untrackedMode = 'normal';
+  for (let k = 0; k < 1500; k++) r.write(`.local-work/copy/f${k}.txt`, `${k}\n`);
+  r.write('.local-work/c1/x.txt', 'x\n');
+  r.git('init', '-q', path.join(r.dir, '.local-work', 'c1'));
+  r.write('small/a.txt', 'a\n');
+  await repo.refreshState();
+  assert.deepEqual(await repo.untrackedFolders(), ['.local-work/', 'small/'], 'git\'s summary by folder');
+  const args = [];
+  const run = repo.run.bind(repo);
+  repo.run = (a, o) => {
+    args.push(a);
+    return run(a, o);
+  };
+  await repo.stage(['.local-work/', 'small/']);
+  const add = args.find((a) => a[0] === 'add');
+  assert.ok(add.length < 20, `one pathspec per folder, not 1,500 (${add.length} arguments)`);
+  assert.ok(add.includes(':(exclude,literal).local-work/c1'), add.join(' '));
+  const staged = r.git('diff', '--cached', '--name-only').split('\n');
+  assert.equal(staged.length, 1501);
+  assert.ok(!staged.some((p) => p.startsWith('.local-work/c1')));
+  assert.doesNotMatch(r.git('ls-files', '-s'), /^160000/m);
+});
+
+test('a repository created in a big folder between its status and git add is taken out again and reported', async (t) => {
+  const { r, repo } = await based(t);
+  for (let k = 0; k < 1200; k++) r.write(`work/f${k}.txt`, `${k}\n`);
+  r.write('work/late/x.txt', 'x\n');
+  await repo.refreshState();
+  // The repository appears (with a commit) the moment git add starts.
+  const exec = repo.exec.bind(repo);
+  repo.exec = async (a, o) => {
+    if (a[0] === 'add') {
+      const late = path.join(r.dir, 'work', 'late');
+      execFileSync('git', ['-C', late, 'init', '-q']);
+      execFileSync('git', ['-C', late, '-c', 'user.name=T', '-c', 'user.email=t@x', 'commit', '-q', '--allow-empty', '-m', 'x']);
+    }
+    return exec(a, o);
+  };
+  const err = await rejection(repo.stage(['work/']));
+  assert.equal(err.code, 'NotStaged');
+  assert.deepEqual(err.nested, ['work/late/']);
+  assert.doesNotMatch(r.git('ls-files', '-s'), /^160000/m, 'no gitlink left in the index');
+  assert.equal(r.git('diff', '--cached', '--name-only').split('\n').length, 1200);
+  assert.match(err.message, /^"work\/late\/" was not staged: it is a separate Git repository/);
 });

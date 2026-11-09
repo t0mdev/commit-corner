@@ -226,8 +226,9 @@ new tags (open them in the graph).
 - A status limit (`commitCorner.statusLimit`, default 10,000) keeps Source
   Control usable when a build folder is missing from `.gitignore`; refreshes
   back off automatically when `git status` is slow. When one folder floods the
-  list (an agent's copies of the repository), the warning names it and can
-  exclude it in your clone only (`.git/info/exclude`, nothing to commit).
+  list (agents' copies of the repository), the warning names it and, when git
+  tracks no files in it, can exclude it in your clone only
+  (`.git/info/exclude`, nothing to commit).
 - A repository inside yours (an agent's clone or worktree, say under
   `.local-work/`) is a separate repository: its files are not listed, staged or
   stashed here. git silently skips such a file when asked to stage it; Commit

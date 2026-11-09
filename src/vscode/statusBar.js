@@ -47,19 +47,31 @@ class StatusBar {
     repo.on('busy', (running) => {
       clearTimeout(this.busyTimers.get(repo.root));
       if (!running) {
+        this.busyShown = undefined;
         this.busy.hide();
         return;
       }
       this.busyTimers.set(repo.root, setTimeout(() => {
         if (repo.running !== running) return;
-        // Waiting for a lock (an agent's commit running its hooks) says so.
-        const waiting = running.waitingFor ? `: waiting for ${running.waitingFor}` : '';
-        this.busy.text = `$(sync~spin) git ${running.args[0]}${running.waitingFor ? ' (waiting for index.lock)' : ''}…`;
-        this.busy.tooltip = `Waiting for: git ${running.args.join(' ')}${waiting}\nClick to cancel it.`;
-        this.busy.command = { command: 'commitCorner.cancelGit', title: 'Cancel', arguments: [{ repoRoot: repo.root }] };
-        this.busy.show();
+        this.showBusy(repo, running);
       }, 2000));
     });
+    // A lock wait that starts once the item shows: its text says so from then on.
+    repo.on('busyWaiting', (running) => {
+      if (this.busyShown === running) this.showBusy(repo, running);
+    });
+  }
+
+  /** The "git …" item for what runs in `repo`; waiting for a lock (an agent's commit running its hooks) says so. */
+  showBusy(repo, running) {
+    const cmd = `git ${running.args.join(' ')}`;
+    this.busy.text = `$(sync~spin) git ${running.args[0]}${running.waitingFor ? ' (waiting for index.lock)' : ''}…`;
+    this.busy.tooltip = running.waitingFor
+      ? `${cmd} is waiting for another git process to release index.lock (up to 5 seconds).\nClick to cancel it.`
+      : `Waiting for: ${cmd}\nClick to cancel it.`;
+    this.busy.command = { command: 'commitCorner.cancelGit', title: 'Cancel', arguments: [{ repoRoot: repo.root }] };
+    this.busyShown = running;
+    this.busy.show();
   }
 
   visible() {

@@ -119,7 +119,7 @@ const FRIENDLY = {
   [ErrorCodes.PushRejected]: 'Push was rejected: the remote has commits you do not have. Pull first, or force push with lease.',
   [ErrorCodes.RemoteRejected]: 'The remote refused the push (for example branch protection or a server-side hook); pulling will not help.',
   [ErrorCodes.AuthenticationFailed]: 'Authentication failed. Check the credentials you entered, or configure a credential helper / SSH key for this remote.',
-  [ErrorCodes.IndexLocked]: 'Another git process is running (index.lock exists). If none is running, delete .git/index.lock.',
+  [ErrorCodes.IndexLocked]: 'Another git process is using the repository (index.lock exists), for example an agent\'s commit running its hooks. Try again once it has finished.',
   [ErrorCodes.NothingToCommit]: 'Nothing to commit.',
   [ErrorCodes.NoUserConfigured]: 'Git does not know who you are. Set user.name and user.email (git config --global).',
   [ErrorCodes.BranchNotFullyMerged]: 'The branch is not fully merged.',

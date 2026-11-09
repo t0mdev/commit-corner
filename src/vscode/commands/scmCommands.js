@@ -3,7 +3,7 @@
 const vscode = require('vscode');
 const notify = require('../notify');
 const fs = require('fs');
-const { INDEX, WORKTREE, Repository } = require('../../git/repository');
+const { INDEX, WORKTREE, Repository, notStagedMessage } = require('../../git/repository');
 const { ErrorCodes, GitError } = require('../../git/exec');
 const { openDiff, openAtRevision, uriAt } = require('../diffs');
 const { toGitUri, SCHEME, fromGitUri } = require('../uri');
@@ -101,9 +101,9 @@ function reportNotStaged(manager, repo, e) {
     if (choice !== open) return;
     let dir = e.nested[0];
     if (e.nested.length > 1) {
-      const pick = await vscode.window.showQuickPick(e.nested.map((d) => ({ label: d })), { placeHolder: 'Open which repository?' });
+      const pick = await vscode.window.showQuickPick(e.nested.map((d) => ({ label: escapeIcons(d), dir: d })), { placeHolder: 'Open which repository?' });
       if (!pick) return;
-      dir = pick.label;
+      dir = pick.dir;
     }
     await openNestedRepository(manager, repo, dir);
   }).then(undefined, (err) => showError(err, 'Open Repository'));
@@ -133,6 +133,16 @@ async function openNestedRepository(manager, repo, dir) {
   const nested = await manager.openRepository(real);
   if (!nested || nested === repo) {
     notify.warn(`"${dir}" is not a repository (any more).`);
+    return;
+  }
+  // Swapped for a link elsewhere between the check and the open: not ours to show.
+  let opened;
+  try {
+    opened = require('path').relative(root, fs.realpathSync(nested.root));
+  } catch { /* gone */ }
+  if (!opened || opened.startsWith('..') || require('path').isAbsolute(opened)) {
+    manager.closeRepository(nested);
+    notify.warn(`"${dir}" no longer lies inside ${repo.name}; not opened.`);
     return;
   }
   manager.setActive(nested);
@@ -249,7 +259,12 @@ function register(ctx) {
     const repo = await manager.pick(groupRepo(manager, arg));
     if (!repo) return;
     // Whole groups: git's own selectors, not one pathspec per file (fast, and never "everything" by accident).
-    if (arg && arg.id === 'untracked') await stageReporting(manager, repo, ((repo.state && repo.state.untracked) || []).map((e) => e.path));
+    if (arg && arg.id === 'untracked') {
+      // Thousands of new files (agents' copies): git's summary by folder, staged folder by folder.
+      const listed = (repo.state && repo.state.untracked) || [];
+      const paths = listed.length > 1000 && repo.untrackedMode !== 'no' ? await repo.untrackedFolders() : listed.map((e) => e.path);
+      await stageReporting(manager, repo, paths);
+    }
     else if (arg && arg.id === 'unstaged') await repo.stageTracked();
     else if (arg && arg.id === 'merge') await vscode.commands.executeCommand('commitCorner.stage', arg);
     else await repo.stageAll();
@@ -391,20 +406,17 @@ function register(ctx) {
     if (!message) return;
     const untracked = resources.filter((r) => r.group === 'untracked').map((r) => r.path);
     if (untracked.length) {
-      // A file in a repository nested in this one cannot be committed here: say so before
-      // anything is staged (git would skip it without a word and the commit would fail).
-      const nestedHere = untracked.filter((p) => repo.nestedRepositoryOf(p));
-      if (nestedHere.length) {
-        try {
-          await repo.checkStaged([], nestedHere.map((p) => ({ path: p, nested: repo.nestedRepositoryOf(p) })));
-        } catch (e) {
-          if (e.code !== 'NotStaged') throw e;
-          e.message = `Nothing committed. ${e.message}`;
-          reportNotStaged(manager, repo, e);
-          return;
-        }
+      try {
+        await repo.stage(untracked); // --only needs git to know the files
+      } catch (e) {
+        if (!e || e.code !== 'NotStaged') throw e;
+        // A file of a repository nested in this one cannot be committed here: commit nothing,
+        // and leave the index as it was (the others were untracked).
+        await repo.unstage(untracked).catch((err) => log().warn(`Commit Selected: unstaging again failed: ${err.message}`));
+        e.message = notStagedMessage(e.paths, e.nestedOf, { commit: true });
+        reportNotStaged(manager, repo, e);
+        return;
       }
-      await repo.stage(untracked); // --only needs git to know the files
     }
     // From "Staged Changes": commit exactly what is staged for these files (line staging must
     // be respected). Otherwise (Changes/Untracked): their working-tree content, like `commit --only`.
