@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.7.0
 
 - **Staging a file that belongs to another repository inside yours now says so.** git silently skips such a file, for example in an agent's copy under `.local-work/` that got its own `.git` after its files were listed, so `+` seemed to do nothing. Commit Corner now warns which files were left out and offers *Open Repository*, which shows that repository's Source Control. The other files you picked are still staged. *Commit Selected* with such a file commits nothing, leaves the index as it was, and says why.
 - A repository appearing inside yours (an agent's `git clone` or `git init`) is noticed right away: its files leave the list, and come back if its `.git` is removed.
