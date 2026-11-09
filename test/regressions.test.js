@@ -2311,8 +2311,16 @@ test('hundreds of folder rows: the gitlink check lists the index once instead of
   await repo.refreshState();
   await repo.stage(rows);
   assert.equal(r.git('diff', '--cached', '--name-only').split('\n').length, 251);
+  // The check itself: no folder list on the command line (Windows allows 32 KB in all).
+  const calls = [];
+  const exec = repo.exec.bind(repo);
+  repo.exec = (a, o) => {
+    if (a[0] === 'ls-files') calls.push(a);
+    return exec(a, o);
+  };
   const links = await repo.gitlinksIn(rows);
   assert.equal(links.size, 0);
+  assert.ok(calls.length && calls.every((a) => !a.includes('--')), `the whole index, once: ${JSON.stringify(calls.map((a) => a.length))}`);
 });
 
 test('unstageNew() takes fresh entries out again and leaves a staged deletion of the same path staged', async (t) => {
@@ -2463,4 +2471,20 @@ test('Open Repository works when git and node name the repository root different
   fs.symlinkSync(outside, path.join(r.dir, 'link'), 'dir');
   await openNestedRepository(manager, repo, 'link/');
   assert.ok(!manager.repositories.some((x) => x.root === fs.realpathSync(outside)), 'a link to a repository elsewhere is not opened');
+});
+
+test('a .git swapped for a FIFO between the check and the read never blocks', { skip: process.platform === 'win32' && 'no FIFOs on Windows' }, async (t) => {
+  const { r, repo } = await based(t);
+  fs.mkdirSync(path.join(r.dir, 'swapped'));
+  const dotGit = path.join(r.dir, 'swapped', '.git');
+  execFileSync('mkfifo', [dotGit]);
+  // What the check sees: a small regular file (it was one a moment ago).
+  const statSync = fs.statSync;
+  fs.statSync = (p, ...rest) => (path.resolve(String(p)) === dotGit
+    ? { isDirectory: () => false, isFile: () => true, size: 20 }
+    : statSync(p, ...rest));
+  t.after(() => (fs.statSync = statSync));
+  const started = Date.now();
+  assert.equal(repo.nestedRepositoryOf('swapped/a.txt'), undefined);
+  assert.ok(Date.now() - started < 1000, 'answered at once');
 });
