@@ -52,8 +52,10 @@ class StatusBar {
       }
       this.busyTimers.set(repo.root, setTimeout(() => {
         if (repo.running !== running) return;
-        this.busy.text = `$(sync~spin) git ${running.args[0]}…`;
-        this.busy.tooltip = `Waiting for: git ${running.args.join(' ')}\nClick to cancel it.`;
+        // Waiting for a lock (an agent's commit running its hooks) says so.
+        const waiting = running.waitingFor ? `: waiting for ${running.waitingFor}` : '';
+        this.busy.text = `$(sync~spin) git ${running.args[0]}${running.waitingFor ? ' (waiting for index.lock)' : ''}…`;
+        this.busy.tooltip = `Waiting for: git ${running.args.join(' ')}${waiting}\nClick to cancel it.`;
         this.busy.command = { command: 'commitCorner.cancelGit', title: 'Cancel', arguments: [{ repoRoot: repo.root }] };
         this.busy.show();
       }, 2000));

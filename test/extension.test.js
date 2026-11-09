@@ -1185,26 +1185,78 @@ async function until(fn, what, ms = 5000) {
   }
 }
 
-test('a file git leaves out when staging (in a repository nested since it was listed) is a warning with a way there', async () => {
-  const main = repo();
-  const nestedRoot = path.join(r.dir, '.local-work', 'c1');
-  r.write('.local-work/c1/new.txt', 'n\n');
-  await api.manager.refresh(main);
-  assert.ok(main.state.untracked.some((e) => e.path === '.local-work/c1/new.txt'), 'listed while it had no .git');
-  r.git('init', '-q', nestedRoot);
-  const before = mock.ui.messages.length;
-  mock.ui.answers.push('Open That Repository');
-  await run('commitCorner.stage', { repoRoot: main.root, path: '.local-work/c1/new.txt', group: 'untracked' });
-  const said = mock.ui.messages.slice(before);
-  assert.ok(said.some((m) => m.level === 'warning' && /"\.local-work\/c1\/new\.txt" was not staged: inside "\.local-work\/c1\/", a repository of its own/.test(m.msg)), JSON.stringify(said));
-  assert.ok(!said.some((m) => m.level === 'error'), 'a warning, not a failure');
-  assert.equal(r.git('diff', '--cached', '--name-only'), '');
-  const nested = await until(() => api.manager.repositories.find((x) => x.root === nestedRoot), 'the nested repository opened');
-  assert.equal(api.manager.active, nested, 'and shown');
-  api.manager.closeRepository(nested);
+/** Messages shown since `from` (an index into mock.ui.messages). */
+const shownSince = (from) => mock.ui.messages.slice(from);
+
+/** Undo what an agent-copies test left: open nested repositories, .local-work, the active one. */
+async function cleanAgentCopies(main) {
+  for (const x of api.manager.repositories) if (x !== main) api.manager.closeRepository(x);
   api.manager.setActive(main);
   fs.rmSync(path.join(r.dir, '.local-work'), { recursive: true, force: true });
   await api.manager.refresh(main);
+}
+
+test('a file git leaves out when staging (in a repository nested since it was listed) is a warning that opens that repository', async () => {
+  const main = repo();
+  const nestedRoot = path.join(r.dir, '.local-work', 'c1');
+  try {
+    r.write('.local-work/c1/new.txt', 'n\n');
+    await api.manager.refresh(main);
+    assert.ok(main.state.untracked.some((e) => e.path === '.local-work/c1/new.txt'), 'listed while it had no .git');
+    r.git('init', '-q', nestedRoot);
+    const from = mock.ui.messages.length;
+    mock.ui.answers.push('Open Repository');
+    await run('commitCorner.stage', { repoRoot: main.root, path: '.local-work/c1/new.txt', group: 'untracked' });
+    const said = shownSince(from);
+    assert.ok(said.some((m) => m.level === 'warning' && /^"\.local-work\/c1\/new\.txt" was not staged: it is in "\.local-work\/c1\/", a separate Git repository/.test(m.msg)), JSON.stringify(said));
+    assert.ok(!said.some((m) => m.level === 'error'), 'a warning, not a failure');
+    assert.equal(r.git('diff', '--cached', '--name-only'), '');
+    const nested = await until(() => api.manager.repositories.find((x) => x.root === nestedRoot), 'the nested repository opened');
+    assert.equal(api.manager.active, nested, 'and shown');
+    await until(() => mock.executed.some((c) => c.id === 'workbench.view.scm'), 'Source Control shown');
+  } finally {
+    await cleanAgentCopies(main);
+  }
+});
+
+test('with files in several nested repositories, Open Repository asks which', async () => {
+  const main = repo();
+  try {
+    r.write('.local-work/c1/x.txt', 'x\n');
+    r.write('.local-work/c2/y.txt', 'y\n');
+    await api.manager.refresh(main);
+    r.git('init', '-q', path.join(r.dir, '.local-work', 'c1'));
+    r.git('init', '-q', path.join(r.dir, '.local-work', 'c2'));
+    const from = mock.ui.messages.length;
+    mock.ui.answers.push('Open Repository', '.local-work/c2/');
+    await run('commitCorner.stage', [{ repoRoot: main.root, path: '.local-work/c1/x.txt' }, { repoRoot: main.root, path: '.local-work/c2/y.txt' }]);
+    assert.ok(shownSince(from).some((m) => /^2 files were not staged: they are in "\.local-work\/c1\/" and "\.local-work\/c2\/", separate Git repositories/.test(m.msg)));
+    await until(() => api.manager.active && api.manager.active.root === path.join(r.dir, '.local-work', 'c2'), 'the picked one opened');
+  } finally {
+    await cleanAgentCopies(main);
+  }
+});
+
+test('Commit Selected with a file of a nested repository commits nothing and stages nothing', async () => {
+  const main = repo();
+  const head = r.git('rev-parse', 'HEAD');
+  try {
+    r.write('.local-work/c1/x.txt', 'x\n');
+    r.write('mine-selected.txt', 'm\n');
+    await api.manager.refresh(main);
+    r.git('init', '-q', path.join(r.dir, '.local-work', 'c1'));
+    mock.sourceControls[0].inputBox.value = 'both';
+    const from = mock.ui.messages.length;
+    await run('commitCorner.commitSelected', { repoRoot: main.root, path: '.local-work/c1/x.txt', group: 'untracked' }, { repoRoot: main.root, path: 'mine-selected.txt', group: 'untracked' });
+    const said = shownSince(from);
+    assert.ok(said.some((m) => m.level === 'warning' && /^Nothing committed\. "\.local-work\/c1\/x\.txt" was not staged: it is in "\.local-work\/c1\/"/.test(m.msg)), JSON.stringify(said));
+    assert.equal(r.git('rev-parse', 'HEAD'), head, 'no commit');
+    assert.equal(r.git('diff', '--cached', '--name-only'), '', 'and nothing staged on the way');
+  } finally {
+    mock.sourceControls[0].inputBox.value = '';
+    fs.rmSync(path.join(r.dir, 'mine-selected.txt'), { force: true });
+    await cleanAgentCopies(main);
+  }
 });
 
 test('over the status limit, the folder that floods the list is named and can be excluded in this clone only', async () => {
@@ -1214,60 +1266,107 @@ test('over the status limit, the folder that floods the list is named and can be
   mock.configValues.set('statusLimit', 5);
   for (let i = 0; i < 8; i++) r.write(`.local-work/copy/f${i}.txt`, `${i}\n`);
   r.write('lone-new.txt', 'x\n');
-  const said = mock.ui.messages.length;
-  mock.ui.answers.push('Exclude ".local-work/" Locally');
+  const from = mock.ui.messages.length;
+  mock.ui.answers.push('Exclude ".local-work/copy/" Locally');
   try {
     await api.manager.refresh(main);
-    const warning = mock.ui.messages.slice(said).find((m) => m.level === 'warning');
-    assert.match(warning && warning.msg, /9 changed files, 8 of them new files in "\.local-work\/"; Source Control shows the first 5/);
-    await until(() => fs.existsSync(exclude) && fs.readFileSync(exclude, 'utf8').split('\n').includes('/.local-work/'), 'the folder excluded');
+    const warning = await until(() => shownSince(from).find((m) => m.level === 'warning'), 'the warning');
+    assert.equal(warning.msg, `${main.name} has 9 changed files, 8 of them new files in ".local-work/copy/"; Source Control shows the first 5. Exclude that folder (in this clone only), add it to .gitignore, or raise "commitCorner.statusLimit".`);
+    await until(() => fs.existsSync(exclude) && fs.readFileSync(exclude, 'utf8').split('\n').includes('/.local-work/copy/'), 'the folder excluded');
     await until(() => main.state.untracked.length === 1, 'the refresh after excluding');
     assert.deepEqual(main.state.untracked.map((e) => e.path), ['lone-new.txt']);
+    assert.ok(shownSince(from).some((m) => m.level === 'info' && /"\.local-work\/copy\/" is now ignored in this clone/.test(m.msg)));
     assert.equal(fs.existsSync(path.join(r.dir, '.gitignore')) && /local-work/.test(fs.readFileSync(path.join(r.dir, '.gitignore'), 'utf8')), false, '.gitignore untouched');
   } finally {
     mock.configValues.delete('statusLimit');
     if (before === undefined) fs.rmSync(exclude, { force: true });
     else fs.writeFileSync(exclude, before);
-    fs.rmSync(path.join(r.dir, '.local-work'), { recursive: true, force: true });
     fs.rmSync(path.join(r.dir, 'lone-new.txt'), { force: true });
-    await api.manager.refresh(main);
+    await cleanAgentCopies(main);
   }
-  // Spread over several folders: none is named.
-  const { floodingFolder } = require('../src/vscode/scm');
-  assert.equal(floodingFolder([{ path: 'a/1' }, { path: 'b/1' }, { path: 'c/1' }], 3), undefined);
-  assert.deepEqual(floodingFolder([{ path: 'a/1' }, { path: 'a/2' }, { path: 'top.txt' }], 3), { dir: 'a/', count: 2 });
 });
 
-test('a .git appearing or going below the root refreshes the repository; one that only changes does not', async () => {
+test('over the status limit, a flooding folder that also holds tracked files is named but not offered for excluding', async () => {
+  const main = repo();
+  mock.configValues.set('statusLimit', 5);
+  r.commit('tracked in gen', { 'gen/kept.txt': 'k\n' });
+  for (let i = 0; i < 8; i++) r.write(`gen/out/f${i}.txt`, `${i}\n`);
+  const from = mock.ui.messages.length;
+  try {
+    await api.manager.refresh(main);
+    const warning = await until(() => shownSince(from).find((m) => m.level === 'warning'), 'the warning');
+    assert.match(warning.msg, /8 of them new files in "gen\/out\/"/);
+    // gen/out/ holds no tracked file: it may be excluded. Its parent with kept.txt is never offered.
+    assert.match(warning.msg, /Exclude that folder/);
+  } finally {
+    mock.configValues.delete('statusLimit');
+    fs.rmSync(path.join(r.dir, 'gen', 'out'), { recursive: true, force: true });
+    await api.manager.refresh(main);
+  }
+  mock.configValues.set('statusLimit', 5);
+  for (let i = 0; i < 8; i++) r.write(`gen/f${i}.txt`, `${i}\n`);
+  const from2 = mock.ui.messages.length;
+  try {
+    await api.manager.refresh(main);
+    const warning = await until(() => shownSince(from2).find((m) => m.level === 'warning'), 'the warning');
+    assert.match(warning.msg, /8 of them new files in "gen\/"; Source Control shows the first 5\. Add that folder to \.gitignore, or raise/);
+  } finally {
+    mock.configValues.delete('statusLimit');
+    for (let i = 0; i < 8; i++) fs.rmSync(path.join(r.dir, 'gen', `f${i}.txt`), { force: true });
+    await api.manager.refresh(main);
+  }
+});
+
+test('floodingFolder() names the deepest folder holding nearly all new files, when they are at least half of all changes', () => {
+  const { floodingFolder } = require('../src/vscode/scm');
+  const u = (list) => list.map((p) => ({ path: p }));
+  const gen = Array.from({ length: 95 }, (_, k) => `src/gen/f${k}`);
+  assert.deepEqual(floodingFolder(u([...gen, 'src/a', 'src/b', 'x/y', 'top']), 99), { dir: 'src/gen/', count: 95 });
+  assert.deepEqual(floodingFolder(u(['.local-work/c0/a', '.local-work/c1/a', '.local-work/c2/a']), 3), { dir: '.local-work/', count: 3 }, 'spread over copies: their common folder');
+  assert.equal(floodingFolder(u(['a/1', 'b/1', 'c/1']), 3), undefined, 'spread over several folders');
+  assert.deepEqual(floodingFolder(u(['a/1', 'b/2']), 2), { dir: 'a/', count: 1 }, 'exactly half is enough');
+  assert.equal(floodingFolder(u(['t1', 't2', 't3']), 3), undefined, 'top-level files only');
+  assert.equal(floodingFolder(u(['a/1', 'a/2']), 5), undefined, 'most changes are to tracked files');
+});
+
+test('a .git appearing or going below the root refreshes the repository; the root\'s own, or one that only changes, does not', async () => {
   const main = repo();
   const nestedRoot = path.join(r.dir, '.local-work', 'c3');
+  const watcher = mock.fileWatchers.find((w) => w.pattern && w.pattern.base && w.pattern.base.fsPath === main.root);
+  assert.ok(watcher, 'the repository\'s working tree watcher');
   r.write('.local-work/c3/a.txt', 'a\n');
   await api.manager.refresh(main);
   assert.ok(main.state.untracked.some((e) => e.path === '.local-work/c3/a.txt'));
-  const watcher = mock.fileWatchers.find((w) => w.pattern && w.pattern.base && w.pattern.base.fsPath === main.root);
-  assert.ok(watcher, 'the repository\'s working tree watcher');
+  // Nothing pending from earlier tests: only refreshes these events cause are counted.
+  api.manager.refreshers.get(main.root).cancel();
+  await api.manager.refresh(main);
   let refreshes = 0;
-  const original = main.refreshState.bind(main);
+  const original = main.refreshState;
   main.refreshState = (...a) => {
     refreshes++;
-    return original(...a);
+    return original.apply(main, a);
   };
   try {
     r.git('init', '-q', nestedRoot);
     const dotGit = mock.vscode.Uri.file(path.join(nestedRoot, '.git'));
-    // Its repository at work: the folder changes, files inside it come and go.
+    // Its repository at work: the folder changes, files inside it come and go; the root's own .git.
     watcher.change.fire(dotGit);
     watcher.create.fire(mock.vscode.Uri.file(path.join(nestedRoot, '.git', 'index.lock')));
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    watcher.create.fire(mock.vscode.Uri.file(path.join(main.root, '.git')));
+    // Longer than any debounce a refresh would wait for (it follows the last status's cost).
+    await new Promise((resolve) => setTimeout(resolve, Math.max(250, 3 * (api.manager.lastRefreshMs.get(main.root) || 0)) + 300));
     assert.equal(refreshes, 0, 'nothing in this repository changed');
     // Created: an agent's copy got its .git after its files.
     watcher.create.fire(dotGit);
     await until(() => main.state.nested.includes('.local-work/c3/'), 'the copy seen as a repository');
     assert.ok(!main.state.untracked.some((e) => e.path.startsWith('.local-work/c3/')), 'its files are no longer this repository\'s');
+    // Gone again: its files are this repository's untracked files once more.
+    fs.rmSync(path.join(nestedRoot, '.git'), { recursive: true, force: true });
+    watcher.delete.fire(dotGit);
+    await until(() => main.state.untracked.some((e) => e.path === '.local-work/c3/a.txt'), 'the copy\'s files listed again');
   } finally {
     main.refreshState = original;
-    fs.rmSync(path.join(r.dir, '.local-work'), { recursive: true, force: true });
-    await api.manager.refresh(main);
+    await cleanAgentCopies(main);
   }
 });
 

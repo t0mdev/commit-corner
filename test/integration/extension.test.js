@@ -299,25 +299,42 @@ suite('Commit Corner in VS Code', () => {
     assert.strictEqual(git('show', ':b.txt'), 'b\nedited in the index');
     assert.strictEqual(fs.readFileSync(path.join(root(), 'b.txt'), 'utf8'), 'b\nworking tree\n');
   });
-  test('agents\' copies inside the repository: a copy that gets its .git is seen without a refresh; staging keeps up under 12,000 new files that keep changing', async function () {
-    this.timeout(120000);
+  test('an agent\'s copy that gets its .git after its files is seen by the file watcher alone; staging one of its files warns', async () => {
     const repo = api.manager.repositories[0];
     const work = path.join(root(), '.local-work');
     const copy = path.join(work, 'c1');
-    let writer;
+    const warnings = [];
+    const original = vscode.window.showWarningMessage;
     try {
-      // A copy whose files arrive before its .git (cp -r in directory order).
+      // Files first, .git last (cp -r in directory order).
       fs.mkdirSync(path.join(copy, 'src'), { recursive: true });
       fs.writeFileSync(path.join(copy, 'src', 'a.txt'), 'a\n');
       await until(() => repo.state.untracked.some((e) => e.path === '.local-work/c1/src/a.txt'), 'the copy\'s file listed');
       execFileSync('git', ['init', '-q', copy]);
       await until(() => repo.state.nested.includes('.local-work/c1/'), 'the copy seen as a repository of its own (file watcher only)');
       assert.ok(!repo.state.untracked.some((e) => e.path.startsWith('.local-work/c1/')));
-      // Staging one of its files anyway (a view that had not caught up): a warning, nothing staged.
+      // "+" on one of its files from a list that had not caught up: a warning, nothing staged.
+      vscode.window.showWarningMessage = (msg) => {
+        warnings.push(msg);
+        return Promise.resolve(undefined);
+      };
       await vscode.commands.executeCommand('commitCorner.stage', { repoRoot: repo.root, path: '.local-work/c1/src/a.txt', group: 'untracked' });
       assert.strictEqual(git('ls-files', '--', '.local-work'), '');
+      assert.ok(warnings.some((m) => /^"\.local-work\/c1\/src\/a\.txt" was not staged: it is in "\.local-work\/c1\/"/.test(m)), JSON.stringify(warnings));
+    } finally {
+      vscode.window.showWarningMessage = original;
+      fs.rmSync(work, { recursive: true, force: true });
+      await api.manager.refresh(repo);
+    }
+  });
 
-      // Copies without a .git: thousands of new files, still being written while you stage.
+  // A stress run, not for every test run: CC_STRESS=1 npm run test:vscode -- --label minimum
+  (process.env.CC_STRESS ? test : test.skip)('12,000 new files that keep changing: a stage still shows within seconds', async function () {
+    this.timeout(120000);
+    const repo = api.manager.repositories[0];
+    const work = path.join(root(), '.local-work');
+    let writer;
+    try {
       for (let d = 0; d < 12; d++) {
         const dir = path.join(work, `copy${d}`);
         fs.mkdirSync(dir, { recursive: true });
@@ -335,11 +352,9 @@ suite('Commit Corner in VS Code', () => {
       await until(() => repo.state.untracked.some((e) => e.path === 'mine-to-stage.txt'), 'my new file listed', 30000);
       started = Date.now();
       await vscode.commands.executeCommand('commitCorner.stage', { repoRoot: repo.root, path: 'mine-to-stage.txt', group: 'untracked' });
-      await until(() => repo.state.staged.some((e) => e.path === 'mine-to-stage.txt'), 'my file shown as staged while files keep changing', 30000);
+      await until(() => repo.state.staged.some((e) => e.path === 'mine-to-stage.txt'), 'my file shown as staged while files keep changing', 10000);
       const staged = Date.now() - started;
-      const provider = api.scm.get(repo);
-      const shown = provider.untracked.resourceStates.length;
-      assert.ok(shown <= 10000, `Source Control lists at most the status limit (${shown})`);
+      assert.ok(api.scm.get(repo).untracked.resourceStates.length <= 10000, 'Source Control lists at most the status limit');
       console.log(`      12,000 new files: listed in ${listed} ms; a stage shown in ${staged} ms while files kept changing`);
     } finally {
       clearInterval(writer);

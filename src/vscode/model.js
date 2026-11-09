@@ -25,6 +25,9 @@ function refreshDelay(now, pendingSince, cost) {
   return Math.max(0, Math.min(delay, pendingSince + maxWait - now));
 }
 
+/** A refresh running this long is taken as stuck: the next one does not wait for it. */
+const STUCK_REFRESH_MS = 60000;
+
 class RepositoryManager {
   constructor() {
     /** @type {Map<string, Repository>} */
@@ -492,11 +495,14 @@ class RepositoryManager {
    * the next, so none would ever be shown, and they would pile up git processes.
    */
   refresh(repo) {
-    if (!repo || !this.repos.has(repo.root)) return Promise.resolve();
+    // Only the repository open under that root (not one closed meanwhile and opened again).
+    if (!repo || this.repos.get(repo.root) !== repo) return Promise.resolve();
     let q = this.refreshQueues.get(repo.root);
-    if (!q) this.refreshQueues.set(repo.root, (q = { running: undefined, next: undefined }));
+    if (!q) this.refreshQueues.set(repo.root, (q = { running: undefined, started: 0, next: undefined }));
     if (q.next) return q.next;
-    if (q.running) {
+    // A status that hangs (a stuck network drive, a filter waiting for input) must not hold every
+    // later refresh: after a minute, one starts beside it (the newest result wins either way).
+    if (q.running && Date.now() - q.started < STUCK_REFRESH_MS) {
       q.next = q.running.catch(() => {}).then(() => {
         q.next = undefined;
         return this.refresh(repo);
@@ -507,11 +513,12 @@ class RepositoryManager {
       if (q.running === running) q.running = undefined;
     });
     q.running = running;
+    q.started = Date.now();
     return running;
   }
 
   async refreshOnce(repo) {
-    if (!this.repos.has(repo.root)) return;
+    if (this.repos.get(repo.root) !== repo) return;
     if (!fs.existsSync(repo.gitDir)) {
       this.closeRepository(repo);
       return;

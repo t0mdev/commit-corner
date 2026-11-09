@@ -2,11 +2,11 @@
 
 ## Unreleased
 
-- **Staging a file inside a repository nested in yours now says so.** git skips such a file without a word (an agent's copy under `.local-work/` that got its own `.git` after its files were listed), so `+` seemed to do nothing. Commit Corner now warns which files were left out and offers *Open That Repository*. The other files you picked are still staged.
-- A repository appearing inside yours (an agent's `git clone` or `git init`) or going away is noticed right away: its files leave the list, or come back as files.
-- **Status limit**: when one folder floods Source Control (agents' copies of the repository, a build output), the warning names it and offers *Exclude "folder/" Locally*. This writes it to `.git/info/exclude`: ignored in your clone only, with nothing to commit.
-- Refreshes no longer overlap. A refresh asked for while one is running waits for it, and any number of such requests share that one follow-up, so a slow `git status` with agents writing all the time no longer starts git after git or leaves the views stale.
-- Staging, committing and other writes wait up to 5 seconds while another git process holds `index.lock`, for example an agent's commit whose hooks are running (before, about 1 second). A lock left over from a crash, over 10 minutes old, fails right away with the usual hint.
+- **Staging a file that belongs to another repository inside yours now says so.** git silently skips such a file, for example in an agent's copy under `.local-work/` that got its own `.git` after its files were listed, so `+` seemed to do nothing. Commit Corner now warns which files were left out and offers *Open Repository*, which shows that repository's Source Control. The other files you picked are still staged. *Commit Selected* with such a file commits and stages nothing, and says why.
+- A repository appearing inside yours (an agent's `git clone` or `git init`) is noticed right away: its files leave the list, and come back if its `.git` is removed.
+- **Status limit**: when one folder floods Source Control (agents' copies of the repository, a build output), the warning names it, for example `src/generated/` rather than `src/`. If git tracks no files in it, it also offers *Exclude "folder/" Locally*. That writes the folder to `.git/info/exclude`, so it is ignored in your clone only and there is nothing to commit. Counts show thousands separators.
+- Refreshes no longer pile up while agents keep writing: Source Control stays current even when `git status` is slow.
+- Staging, committing and other writes wait up to 5 seconds while another git process holds `index.lock`, for example an agent's commit running its hooks (before, about 1 second). The status bar's *git …* item says it is waiting for index.lock and can cancel it. A lock over 10 minutes old fails right away, saying it was left behind by a git process that crashed and which file to delete.
 - Fixed: closing the Repository Activity or Worktrees page while it was loading could log "Webview is disposed" errors.
 
 ## 1.6.0

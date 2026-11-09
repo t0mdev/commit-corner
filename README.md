@@ -229,9 +229,9 @@ new tags (open them in the graph).
   list (an agent's copies of the repository), the warning names it and can
   exclude it in your clone only (`.git/info/exclude`, nothing to commit).
 - A repository inside yours (an agent's clone or worktree, say under
-  `.local-work/`) is its own: its files are not listed, staged or stashed here.
-  git silently skips such a file when asked to stage it; Commit Corner says
-  so and offers to open that repository.
+  `.local-work/`) is a separate repository: its files are not listed, staged or
+  stashed here. git silently skips such a file when asked to stage it; Commit
+  Corner says so and offers to open that repository.
 - Conflicts: accept ours/theirs (including modify/delete conflicts), open VS
   Code's 3-way merge editor, compare ours ↔ theirs; saving a conflicted file
   without markers offers to mark it resolved (the merge editor's "Complete

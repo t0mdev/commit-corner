@@ -120,28 +120,7 @@ class ScmProvider {
     if (budget < 0 || (limit > 0 && total > limit)) {
       if (!this.warnedLimit) {
         this.warnedLimit = true;
-        // Usually one folder floods the list (agents' copies of the repository, a build output):
-        // name it, and offer to exclude it in this clone only (.git/info/exclude, never committed).
-        const folder = floodingFolder(state.untracked, total);
-        const exclude = folder && `Exclude "${folder.dir}" Locally`;
-        notify.warn(
-          folder
-            ? `${this.repo.name} has ${total} changed files, ${folder.count} of them new files in "${folder.dir}"; Source Control shows the first ${limit}. Exclude that folder (here only, in .git/info/exclude), add it to .gitignore, or raise "commitCorner.statusLimit".`
-            : `${this.repo.name} has ${total} changed files; Source Control shows the first ${limit}. Add generated folders to .gitignore, or raise "commitCorner.statusLimit".`,
-          ...(exclude ? [exclude] : []),
-          'Open Settings',
-        ).then(async (c) => {
-          if (c === 'Open Settings') vscode.commands.executeCommand('workbench.action.openSettings', 'commitCorner.statusLimit');
-          else if (c && c === exclude) {
-            try {
-              await repo.excludeLocally(`${require('../git/repository').Repository.ignorePattern(folder.dir.slice(0, -1))}/`);
-              notify.info(`"${folder.dir}" is now ignored in this clone (.git/info/exclude; not committed). Remove its line there to see it again.`);
-              repo.emit('didRun', ['exclude']);
-            } catch (e) {
-              notify.error(`Could not exclude "${folder.dir}": ${e.message}`);
-            }
-          }
-        }, () => {});
+        this.warnLimit(state, total, limit).catch((e) => log().warn(`Status limit warning: ${e.message}`));
       }
     } else this.warnedLimit = false;
     this.sc.count = autoSetting('countBadge') ? total : 0;
@@ -185,6 +164,38 @@ class ScmProvider {
       this.lastPendingMessage = undefined;
       this.prefilled = undefined;
     }
+  }
+
+  /**
+   * Over the status limit. Usually one folder floods the list (agents' copies of the repository,
+   * a build output): name it, and offer to exclude it in this clone only (.git/info/exclude,
+   * never committed) — unless git tracks files in it, which would hide every new file there.
+   */
+  async warnLimit(state, total, limit) {
+    const repo = this.repo;
+    const n = (x) => x.toLocaleString('en-US');
+    const folder = floodingFolder(state.untracked, total);
+    const excludable = folder && !(await repo.tracksFilesIn(folder.dir));
+    const exclude = excludable && `Exclude "${folder.dir}" Locally`;
+    const message = folder
+      ? `${repo.name} has ${n(total)} changed files, ${n(folder.count)} of them new files in "${folder.dir}"; Source Control shows the first ${n(limit)}. ${excludable ? 'Exclude that folder (in this clone only), add it to .gitignore' : 'Add that folder to .gitignore'}, or raise "commitCorner.statusLimit".`
+      : `${repo.name} has ${n(total)} changed files; Source Control shows the first ${n(limit)}. Add generated folders to .gitignore, or raise "commitCorner.statusLimit".`;
+    const choice = await notify.warn(message, ...(exclude ? [exclude] : []), 'Open Settings');
+    if (choice === 'Open Settings') {
+      vscode.commands.executeCommand('workbench.action.openSettings', 'commitCorner.statusLimit');
+      return;
+    }
+    if (!choice || choice !== exclude) return;
+    try {
+      await repo.excludeLocally(`${require('../git/repository').Repository.ignorePattern(folder.dir.slice(0, -1))}/`);
+    } catch (e) {
+      notify.error(`Could not exclude "${folder.dir}": ${e.message}`);
+      return;
+    }
+    repo.emit('didRun', ['exclude']); // refresh: the folder's files leave the list
+    const open = 'Open .git/info/exclude';
+    const next = await notify.info(`"${folder.dir}" is now ignored in this clone (.git/info/exclude; nothing to commit). Remove its line there to see it again.`, open);
+    if (next === open) await vscode.window.showTextDocument(vscode.Uri.file(require('path').join(repo.commonDir, 'info', 'exclude')));
   }
 
   /** @returns {vscode.SourceControlResourceState & {entry:any, group:string, repoRoot:string}} */
@@ -238,23 +249,31 @@ class ScmProvider {
 }
 
 /**
- * The top-level folder holding most of the new files ({dir: "dir/", count}), when it holds at
- * least half of all changes; undefined when no single folder floods the list.
+ * The folder holding most of the new files ({dir: "a/b/", count}), when it holds at least half
+ * of all changes: the top-level one, then deeper while one subfolder still holds nearly all of
+ * them (9 in 10), so "src/generated/" is named rather than "src/". Undefined when no single
+ * folder floods the list.
  * @param {{path:string}[]} untracked @param {number} total
  */
 function floodingFolder(untracked, total) {
-  const counts = new Map();
-  for (const e of untracked) {
-    const slash = e.path.indexOf('/');
-    if (slash > 0) {
-      const top = e.path.slice(0, slash + 1);
-      counts.set(top, (counts.get(top) || 0) + 1);
+  let found;
+  let within = untracked;
+  for (let prefix = ''; ;) {
+    const counts = new Map();
+    for (const e of within) {
+      const slash = e.path.indexOf('/', prefix.length);
+      if (slash > prefix.length) {
+        const dir = e.path.slice(0, slash + 1);
+        counts.set(dir, (counts.get(dir) || 0) + 1);
+      }
     }
+    let best;
+    for (const [dir, count] of counts) if (!best || count > best.count) best = { dir, count };
+    if (!best || (found ? best.count * 10 < found.count * 9 : best.count * 2 < total)) return found;
+    found = best;
+    prefix = best.dir;
+    within = within.filter((e) => e.path.startsWith(prefix));
   }
-  let best;
-  for (const [dir, count] of counts) if (!best || count > best.count) best = { dir, count };
-  if (!best || best.count * 2 < total) return undefined;
-  return best;
 }
 
 /** Creates one ScmProvider per open repository and keeps them updated. */

@@ -60,6 +60,7 @@ const ErrorCodes = Object.freeze({
   RemoteRejected: 'RemoteRejected',
   AuthenticationFailed: 'AuthenticationFailed',
   IndexLocked: 'IndexLocked',
+  StaleLock: 'StaleLock',
   NothingToCommit: 'NothingToCommit',
   BranchNotFullyMerged: 'BranchNotFullyMerged',
   NoUserConfigured: 'NoUserConfigured',
@@ -75,7 +76,8 @@ const ErrorCodes = Object.freeze({
 
 const ERROR_PATTERNS = [
   [/not a git repository/i, ErrorCodes.NotARepository],
-  [/index\.lock': File exists|Unable to create .*\.lock/i, ErrorCodes.IndexLocked],
+  // git's own line only (a path listed in other output may contain the same words).
+  [/^(?:fatal|error): (?:.*: )?Unable to create '[^'\n]*\.lock': File exists/m, ErrorCodes.IndexLocked],
   [/CONFLICT \(|Automatic merge failed|could not apply|after resolving the conflicts|needs merge|you need to resolve your current index first|with conflicts\./i, ErrorCodes.Conflict],
   [/Your local changes to the following files would be overwritten|Please commit your changes or stash them/i, ErrorCodes.LocalChangesOverwritten],
   [/untracked working tree files would be (overwritten|removed)/i, ErrorCodes.UntrackedOverwritten],
