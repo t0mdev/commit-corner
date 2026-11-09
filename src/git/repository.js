@@ -1569,16 +1569,21 @@ class Repository extends EventEmitter {
     // An empty list must never become "git add -A" (everything).
     let result;
     if (out.length) {
-      try {
-        result = await this.runWithPaths(['add', '-A'], out, { excludes, after });
-      } catch (e) {
-        // A repository without a commit made in a folder added whole since it was looked at:
-        // git refuses everything ("does not have a commit checked out"). Without it, once more.
-        const m = e instanceof GitError && /^error: '([^'\n]+)' does not have a commit checked out/m.exec(e.stderr || '');
-        if (!m) throw e;
-        const dir = m[1].endsWith('/') ? m[1] : `${m[1]}/`;
-        skipped.push({ path: dir, nested: dir });
-        result = await this.runWithPaths(['add', '-A'], out, { excludes: [...excludes, `:(exclude,literal)${dir.slice(0, -1)}`], after });
+      // A repository without a commit made in a folder added whole since it was looked at: git
+      // refuses everything ("does not have a commit checked out"). Without it, once more — for
+      // each such repository (agents may make several at once), up to 20.
+      const more = [...excludes];
+      for (let attempt = 0; ; attempt++) {
+        try {
+          result = await this.runWithPaths(['add', '-A'], out, { excludes: more, after });
+          break;
+        } catch (e) {
+          const m = e instanceof GitError && /^error: '([^'\n]+)' does not have a commit checked out/m.exec(e.stderr || '');
+          if (!m || attempt >= 20) throw e;
+          const dir = m[1].endsWith('/') ? m[1] : `${m[1]}/`;
+          skipped.push({ path: dir, nested: dir });
+          more.push(`:(exclude,literal)${dir.slice(0, -1)}`);
+        }
       }
     }
     // A repository created in a folder added whole since it was looked at went in as a gitlink
@@ -3145,7 +3150,7 @@ class Repository extends EventEmitter {
           for (const e of st.entries) {
             if (e.kind === 'untracked') {
               // A repository nested there (an agent's worktree) is not an untracked file: as in refreshState.
-              if (!(e.path.endsWith('/') && fs.existsSync(path.join(w.path, e.path, '.git')))) changes.untracked++;
+              if (!(e.path.endsWith('/') && isRepositoryMarker(path.join(w.path, e.path, '.git')))) changes.untracked++;
             } else if (e.kind === 'unmerged') changes.conflicts++;
             else if (e.kind !== 'ignored') {
               if (e.x !== '.') changes.staged++;

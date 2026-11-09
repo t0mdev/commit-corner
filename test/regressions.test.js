@@ -2284,18 +2284,20 @@ test('a repository without a commit made in a big folder while git add starts: t
   for (let k = 0; k < 1200; k++) r.write(`work/f${k}.txt`, `${k}\n`);
   r.write('work/late/x.txt', 'x\n');
   await repo.refreshState();
+  r.write('work/later/y.txt', 'y\n');
   const exec = repo.exec.bind(repo);
   let made = false;
   repo.exec = async (a, o) => {
     if (a[0] === 'add' && !made) {
       made = true;
-      execFileSync('git', ['-C', path.join(r.dir, 'work', 'late'), 'init', '-q']); // no commit
+      // Two at once (agents work in parallel), neither with a commit.
+      for (const d of ['late', 'later']) execFileSync('git', ['-C', path.join(r.dir, 'work', d), 'init', '-q']);
     }
     return exec(a, o);
   };
   const err = await rejection(repo.stage(['work/']));
   assert.equal(err.code, 'NotStaged', err.message);
-  assert.deepEqual(err.nested, ['work/late/']);
+  assert.deepEqual(err.nested.sort(), ['work/late/', 'work/later/']);
   assert.equal(r.git('diff', '--cached', '--name-only').split('\n').length, 1200);
 });
 
