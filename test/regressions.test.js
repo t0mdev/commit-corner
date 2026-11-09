@@ -2436,10 +2436,13 @@ test('Open Repository works when git and node name the repository root different
   repo.root = path.join(path.dirname(r.dir), 'as-git-names-it', path.basename(r.dir));
   manager.repos.set(repo.root, repo);
   await openNestedRepository(manager, repo, 'c1/');
-  const opened = manager.repositories.find((x) => x.root === path.join(r.dir, 'c1'));
-  assert.ok(opened, 'the nested repository opened');
+  // (Windows: the root is written "c:\…" as VS Code does; the folder made here "C:\…".)
+  const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+  const opened = manager.repositories.find((x) => same(x.root, path.join(r.dir, 'c1')));
+  assert.ok(opened, `the nested repository opened (open: ${manager.repositories.map((x) => x.root).join(', ')})`);
   assert.equal(manager.active, opened);
   manager.repos.delete(repo.root);
+  if (process.platform === 'win32') return; // (symbolic links need privileges there)
   // And one outside both roots is refused, before git runs there.
   const outside = makeTempDir('cc-outside-');
   t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
