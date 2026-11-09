@@ -222,8 +222,12 @@ class RepositoryManager {
     return false;
   }
 
-  /** Open (or return the already open) repository containing `dir`. */
-  async openRepository(dir) {
+  /**
+   * Open (or return the already open) repository containing `dir`. `o.accept(repo)`: asked once
+   * git has named the repository's root, before anything runs there (no status, no watcher);
+   * false leaves it closed.
+   */
+  async openRepository(dir, o = {}) {
     const existing = this.getRepositoryForUri(dir);
     if (existing && (existing.root === dir || !fs.existsSync(path.join(dir, '.git')))) return existing;
     if (this.pending.has(dir)) return this.pending.get(dir);
@@ -263,6 +267,10 @@ class RepositoryManager {
       }
       this.notRepos.delete(dir);
       if (this.repos.has(repo.root)) return this.repos.get(repo.root);
+      if (o.accept && !o.accept(repo)) {
+        repo.dispose();
+        return undefined;
+      }
       if (!(await this.allowParentRepository(repo))) return undefined;
       this.repos.set(repo.root, repo);
       this.watch(repo);

@@ -140,19 +140,18 @@ async function openNestedRepository(manager, repo, dir) {
     notify.warn(`"${dir}" no longer lies inside ${repo.name}; not opened.`);
     return;
   }
-  const nested = await manager.openRepository(real);
-  if (!nested || nested === repo) {
-    notify.warn(`"${dir}" is not a repository (any more).`);
-    return;
-  }
-  // Swapped for a link elsewhere between the check and the open: not ours to show.
-  let opened;
-  try {
-    opened = fs.realpathSync(nested.root);
-  } catch { /* gone */ }
-  if (!opened || !inside(opened)) {
-    manager.closeRepository(nested);
-    notify.warn(`"${dir}" no longer lies inside ${repo.name}; not opened.`);
+  // Checked again on the root git names, before git runs there: swapped for a link elsewhere
+  // since the check above, it is not opened at all.
+  const rootInside = (r) => {
+    try {
+      return inside(fs.realpathSync(r.root));
+    } catch {
+      return false;
+    }
+  };
+  const nested = await manager.openRepository(real, { accept: rootInside });
+  if (!nested || nested === repo || !rootInside(nested)) {
+    notify.warn(nested && nested !== repo ? `"${dir}" no longer lies inside ${repo.name}; not opened.` : `"${dir}" is not a repository inside ${repo.name} (any more); not opened.`);
     return;
   }
   manager.setActive(nested);
@@ -414,7 +413,7 @@ function register(ctx) {
     if (provider && provider.template && message === provider.template.trim()) message = '';
     if (!message) message = ((await vscode.window.showInputBox({ title: `Commit ${paths.length} selected file${paths.length === 1 ? '' : 's'}`, prompt: 'Commit message', ignoreFocusOut: true })) || '').trim();
     if (!message) return;
-    const untracked = resources.filter((r) => r.group === 'untracked').map((r) => r.path);
+    const untracked = resources.filter((r) => r.repo === repo && r.group === 'untracked').map((r) => r.path);
     if (untracked.length) {
       try {
         await repo.stage(untracked); // --only needs git to know the files

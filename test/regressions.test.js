@@ -2364,3 +2364,33 @@ test('past the status limit, only content edits of listed untracked files skip t
   assert.equal(untrackedEditOverLimit(repo(many), '/repo/src/tracked.js'), false, 'a tracked file still refreshes');
   assert.equal(untrackedEditOverLimit(repo(many.slice(0, 10)), '/repo/.local-work/c/f5'), false, 'under the limit: dots and counts follow content');
 });
+
+test('not-staged messages for every mix: files in, folders that are, and folders that hold repositories', () => {
+  const { notStagedMessage } = require('../src/git/repository');
+  const m = (paths, map, o) => notStagedMessage(paths, new Map(Object.entries(map)), o);
+  assert.match(m(['w/', 'a/x'], { 'w/': ['w/c/'], 'a/x': ['a/'] }), /^2 items were not staged: they belong to "w\/c\/" and "a\/", separate Git repositories/);
+  assert.match(m(['copy/', 'b/'], { 'copy/': ['copy/'], 'b/': ['b/'] }), /they are "copy\/" and "b\/", separate .* Stage their files in those repositories\.$/);
+  assert.match(m(['w/', 'v/'], { 'w/': ['w/c/'], 'v/': ['v/d/'] }), /they hold only "w\/c\/" and "v\/d\/", .* Stage their files in those repositories\.$/);
+  assert.match(m(['c1/x', 'c1/y'], { 'c1/x': ['c1/'], 'c1/y': ['c1/'] }), /^2 files were not staged: they are in "c1\/", a separate Git repository .* Stage them in that repository\.$/);
+  assert.match(m(['a/x', 'p.txt'], { 'a/x': ['a/'] }, { commit: true }), /^Nothing committed: "a\/x" is in "a\/", .* out of the selection\. git also left out "p\.txt", without saying why\.$/);
+  assert.equal(m(['p.txt'], {}, { commit: true }), 'Nothing committed: git did not stage "p.txt" and did not say why.');
+});
+
+test('Open Repository: a repository whose root git names outside is never opened (no git status runs there)', async (t) => {
+  const { r } = await based(t);
+  const { RepositoryManager } = requireWithVscode('../src/vscode/model');
+  const manager = new RepositoryManager();
+  t.after(() => manager.dispose());
+  let refreshed = false;
+  const opened = await manager.openRepository(r.dir, {
+    accept: (repo) => {
+      repo.refreshState = () => {
+        refreshed = true;
+      };
+      return false;
+    },
+  });
+  assert.equal(opened, undefined);
+  assert.equal(manager.repositories.length, 0);
+  assert.equal(refreshed, false);
+});

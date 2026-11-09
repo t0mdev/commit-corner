@@ -3532,7 +3532,8 @@ function holdsRepository(dir, budget = { left: 5000 }) {
   }
   for (const d of list) {
     if (--budget.left < 0) return null;
-    if (d.name === '.git') return true;
+    // (".GIT" too: on a case-insensitive disk git finds it as well.)
+    if (d.name.toLowerCase() === '.git') return true;
     if (d.isDirectory() && !d.isSymbolicLink()) {
       const below = holdsRepository(path.join(dir, d.name), budget);
       if (below !== false) return below;
@@ -3622,19 +3623,25 @@ function notStagedMessage(missing, nestedOf, o = {}) {
     const several = repos.length > 1;
     const subject = one ? quote(inNested[0]) : count(inNested);
     const p0 = inNested[0];
-    // A picked file, the repository itself, or a folder ("dir/") that holds nothing else.
-    const where = !one ? `they are in ${names(repos)},`
+    // Each item is a file in a repository, the repository itself, or a folder ("dir/") that
+    // holds nothing else; several of one kind say so, a mix "belongs to" them.
+    const kind = (p) => ((nestedOf.get(p) || []).includes(p) ? 'is' : p.endsWith('/') ? 'holds' : 'in');
+    const kinds = new Set(inNested.map(kind));
+    const many = kinds.size > 1 ? 'belong to' : { is: 'are', holds: 'hold only', in: 'are in' }[[...kinds][0]];
+    const where = !one ? `they ${many} ${names(repos)},`
       : repos[0] === p0 ? 'it is'
         : p0.endsWith('/') ? `it holds only ${names(repos)},`
           : `it is in ${quote(repos[0])},`;
     const what = several ? 'separate Git repositories inside this one, and git skips their files without a word'
       : 'a separate Git repository inside this one, and git skips its files without a word';
-    const todo = o.commit ? `Commit ${!one ? 'them' : p0.endsWith('/') ? 'its files' : 'it'} ${several ? 'in those repositories' : 'there'}, or leave ${one ? 'it' : 'them'} out of the selection.`
-      : one && p0.endsWith('/') ? `Stage its files ${several ? 'in those repositories' : 'there'}.`
-        : `Stage ${one ? 'it' : 'them'} in ${several ? 'those repositories' : 'that repository'}.`;
+    // What to stage there: the file(s), or a folder's files.
+    const allFolders = inNested.every((p) => p.endsWith('/'));
+    const obj = one ? (allFolders ? 'its files' : 'it') : allFolders ? 'their files' : 'them';
+    const todo = o.commit ? `Commit ${obj} ${several ? 'in those repositories' : 'there'}, or leave ${one ? 'it' : 'them'} out of the selection.`
+      : `Stage ${obj} ${several ? 'in those repositories' : one && allFolders ? 'there' : 'in that repository'}.`;
     if (o.commit) {
       // "Nothing committed: "x" is in "c1/", a separate …" (no repeated "not committed").
-      const relation = !one ? `are in ${names(repos)},` : where.replace(/^it /, '').replace(/^is$/, 'is');
+      const relation = !one ? `${many} ${names(repos)},` : where.replace(/^it /, '');
       parts.push(`Nothing committed: ${subject} ${relation} ${what}. ${todo}`);
     } else parts.push(`${subject} ${one ? 'was' : 'were'} not staged: ${where} ${what}. ${todo}`);
   }
@@ -3642,8 +3649,9 @@ function notStagedMessage(missing, nestedOf, o = {}) {
     const subject = other.length === 1 ? quote(other[0]) : count(other);
     const it = other.length === 1 ? 'it' : 'them';
     // (After "Nothing committed: …" for the others, a sentence of its own.)
-    parts.push(o.commit && !inNested.length ? `Nothing committed: git did not stage ${subject} and did not say why.`
-      : `${subject} ${other.length === 1 ? 'was' : 'were'} not staged: git left ${it} out without saying why.`);
+    parts.push(!o.commit ? `${subject} ${other.length === 1 ? 'was' : 'were'} not staged: git left ${it} out without saying why.`
+      : inNested.length ? `git also left out ${subject}, without saying why.`
+        : `Nothing committed: git did not stage ${subject} and did not say why.`);
   }
   return parts.join(' ');
 }
